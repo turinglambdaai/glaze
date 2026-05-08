@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+        racket-version: ['8.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: ${{ matrix.racket-version }}
+
+      - name: Install Glaze packages
+        run: |
+          raco pkg install --no-docs --link ./glaze-lib
+          raco pkg install --no-docs --link ./glaze-cli
+          raco pkg install --no-docs --link ./glaze-doc
+          raco pkg install --no-docs --link ./glaze-test
+          raco pkg install --link ./glaze
+
+      - name: Run tests
+        run: raco test glaze-test/
+
+      - name: Check formatting
+        run: raco fmt --check glaze-lib/ glaze-cli/ glaze-test/
+        continue-on-error: true

@@ -1,0 +1,22 @@
+# Racket
+compiled/
+*.zo
+*.dep
+*.rkt.zo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (for frontend tooling)
+node_modules/
+dist/
+
+# Build output
+build/
