@@ -1,5 +1,7 @@
 # Glaze
 
+[![Language](https://img.shields.io/badge/language-Racket-red)] [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 [English](README.md) | [中文](README.zh-CN.md)
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket -- write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
