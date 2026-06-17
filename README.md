@@ -1,6 +1,6 @@
 # Glaze
 
-[![Language](https://img.shields.io/badge/language-Racket-red)] [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Language](https://img.shields.io/badge/language-Racket-red) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 [English](README.md) | [中文](README.zh-CN.md)
 
