@@ -1,9 +1,10 @@
 # Glaze
 
-![Language](https://img.shields.io/badge/language-Racket-red) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)  [![English](https://img.shields.io/badge/lang-English-blue)](README.md) [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
+Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
+![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket -- write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
+**English** · [中文](README.zh-CN.md)
 
 ## Why Glaze?
 
@@ -11,9 +12,9 @@ Racket's `racket/gui` works but is hard to style into a modern product-grade UI.
 
 You get:
 
-- **Racket for logic** -- the full power of Racket's macro system, contracts, pattern matching
-- **Web for UI** -- Tailwind, Svelte, React, or any web framework
-- **JSON API bridge** -- Racket macros auto-generate API endpoints
+- **Racket for logic** — the full power of Racket's macro system, contracts, pattern matching
+- **Web for UI** — Tailwind, Svelte, React, or any web framework
+- **JSON API bridge** — Racket macros auto-generate API endpoints
 
 ## Quick Start
 
@@ -119,10 +120,10 @@ Macro for defining JSON API endpoints.
 
 ## Roadmap
 
-- [x] **Phase 1** -- Local HTTP server + system browser
-- [ ] **Phase 2** -- Frontend asset bundling, system tray, app packaging
-- [ ] **Phase 3** -- Native WebView embedding (WebView2 / WKWebView / WebKitGTK)
+- [x] **Phase 1** — Local HTTP server + system browser
+- [ ] **Phase 2** — Frontend asset bundling, system tray, app packaging
+- [ ] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK)
 
 ## License
 
-[MIT](LICENSE)
+Released under the [MIT License](LICENSE).

@@ -1,8 +1,10 @@
 # Glaze
 
-[English](README.md) | [中文](README.zh-CN.md)
+用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
 
-用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) -- 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
+![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+[English](README.md) · **中文**
 
 ## 为什么选择 Glaze？
 
@@ -10,9 +12,9 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 
 你将获得：
 
-- **Racket 处理逻辑** -- 完整的宏系统、契约、模式匹配
-- **Web 构建界面** -- Tailwind、Svelte、React 或任意 Web 框架
-- **JSON API 桥接** -- Racket 宏自动生成 API 端点
+- **Racket 处理逻辑** —— 完整的宏系统、契约、模式匹配
+- **Web 构建界面** —— Tailwind、Svelte、React 或任意 Web 框架
+- **JSON API 桥接** —— Racket 宏自动生成 API 端点
 
 ## 快速开始
 
@@ -118,10 +120,10 @@ glaze/
 
 ## 路线图
 
-- [x] **Phase 1** -- 本地 HTTP 服务器 + 系统浏览器
-- [ ] **Phase 2** -- 前端资源打包、系统托盘、应用打包
-- [ ] **Phase 3** -- 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）
+- [x] **Phase 1** —— 本地 HTTP 服务器 + 系统浏览器
+- [ ] **Phase 2** —— 前端资源打包、系统托盘、应用打包
+- [ ] **Phase 3** —— 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）
 
 ## 许可证
 
-[MIT](LICENSE)
+基于 [MIT License](LICENSE) 开源。
