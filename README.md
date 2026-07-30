@@ -2,7 +2,7 @@
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
-![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -16,17 +16,37 @@ You get:
 - **Web for UI** — Tailwind, Svelte, React, or any web framework
 - **JSON API bridge** — Racket macros auto-generate API endpoints
 
+## Requirements
+
+| Dependency | Purpose |
+|------------|---------|
+| [Racket](https://racket-lang.org/) | 7.0 or later (includes `raco`) |
+
 ## Quick Start
 
-```bash
-# Install
-raco pkg install glaze
+### 1. Clone
 
-# Create a new project
+```bash
+git clone https://github.com/turinglambdaai/glaze.git
+cd glaze
+```
+
+### 2. Install
+
+```bash
+raco pkg install glaze
+```
+
+### 3. Create a new project
+
+```bash
 raco glaze init myapp
 cd myapp
+```
 
-# Run
+### 4. Run
+
+```bash
 racket main.rkt
 ```
 
@@ -126,4 +146,4 @@ Macro for defining JSON API endpoints.
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).
