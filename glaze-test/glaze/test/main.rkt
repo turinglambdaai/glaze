@@ -43,11 +43,12 @@
 ;; ---- end-to-end HTTP serving ----
 (define e2e-dir (make-temporary-file "glaze-e2e-~a" 'directory))
 (call-with-output-file (build-path e2e-dir "index.html")
-  (lambda (out) (display #"<!DOCTYPE html><html><body>hello glaze</body></html>" out))
-  #:exists 'replace)
+                       (lambda (out)
+                         (display #"<!DOCTYPE html><html><body>hello glaze</body></html>" out))
+                       #:exists 'replace)
 (call-with-output-file (build-path e2e-dir "app.js")
-  (lambda (out) (display #"console.log(1)" out))
-  #:exists 'replace)
+                       (lambda (out) (display #"console.log(1)" out))
+                       #:exists 'replace)
 
 ;; fixed port avoids the port-0 surface issue in the underlying web-server
 (define port 18923)
@@ -55,8 +56,7 @@
 (check-equal? served-port port "server returns requested port")
 
 (define (get path-str)
-  (define-values (status-line headers in)
-    (http-sendrecv "127.0.0.1" path-str #:port port #:ssl? #f))
+  (define-values (status-line headers in) (http-sendrecv "127.0.0.1" path-str #:port port #:ssl? #f))
   (define body (port->bytes in))
   (close-input-port in)
   (values (bytes->string/utf-8 status-line) headers body))
@@ -118,15 +118,17 @@
 ;; make-tray must always return a tray? handle, on every platform: native
 ;; backends on supported hosts, stub fallback elsewhere. The result must be
 ;; usable without raising.
-(define t (make-tray #:icon #f
-                     #:tooltip "Glaze Test"
-                     #:menu (list (make-menu-item "Quit" #:action (lambda () (void)))
-                                  (menu-separator)
-                                  (make-menu-item "Hi" #:action (lambda () (void))))))
+(define t
+  (make-tray #:icon #f
+             #:tooltip "Glaze Test"
+             #:menu (list (make-menu-item "Quit" #:action (lambda () (void)))
+                          (menu-separator)
+                          (make-menu-item "Hi" #:action (lambda () (void))))))
 (check-true (tray? t) "make-tray returns a tray?")
 (check-not-false (memq (tray-backend t) '(windows macos linux stub)) "valid backend tag")
 (check-not-exn (lambda () (tray-set-tooltip! t "updated")) "set-tooltip! does not raise")
-(check-not-exn (lambda () (tray-set-menu! t (list (make-menu-item "Only" #:action void)))) "set-menu! does not raise")
+(check-not-exn (lambda () (tray-set-menu! t (list (make-menu-item "Only" #:action void))))
+               "set-menu! does not raise")
 (check-not-exn (lambda () (tray-close t)) "close does not raise")
 
 ;; ---- Windows backend end-to-end (only on 'windows) ----
@@ -140,10 +142,23 @@
   (define mod-set-menu! (dynamic-require 'glaze/tray/tray-windows 'set-menu!))
   (define mod-close (dynamic-require 'glaze/tray/tray-windows 'close))
   (check-true (mod-supported?) "Windows backend reports supported")
-  (define wt (mod-make-tray #:icon #f
-                            #:tooltip "Direct backend test"
-                            #:menu (list (make-menu-item "Quit" #:action (lambda () (void))))))
+  (define wt
+    (mod-make-tray #:icon #f
+                   #:tooltip "Direct backend test"
+                   #:menu (list (make-menu-item "Quit" #:action (lambda () (void))))))
   (check-true (mod-win:tray? wt) "direct Windows backend returns win:tray?")
   (check-not-exn (lambda () (mod-set-tooltip! wt "x")))
   (check-not-exn (lambda () (mod-set-menu! wt '())))
   (check-not-exn (lambda () (mod-close wt)) "direct backend close does not raise"))
+
+;; ---- Build helper tests ----
+(require glaze/build)
+
+(check-equal? (procedure? build-app) #t "build-app is a procedure")
+(check-equal? (procedure? default-entry-template) #t)
+
+;; The generated entry module source should reference glaze and the entry file,
+;; and set the working directory to the executable's directory at runtime.
+(let ([src ((default-entry-template) "main.rkt")])
+  (check-true (string-contains? src "(require glaze)") "entry requires glaze")
+  (check-true (string-contains? src "find-system-path 'run-file") "entry redirects CWD"))
