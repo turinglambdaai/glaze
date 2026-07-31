@@ -18,15 +18,16 @@ Build desktop apps with Racket backend and web frontend.
 
 @defmodule[glaze/server]
 
-@defproc[(start-dev-server
-          [#:port port exact-nonnegative-integer? 0]
-          [#:public-dir public-dir string? "public"]
-          [#:api-routes api-routes list? '()])
-         (values exact-nonnegative-integer? any/c)]{
-Starts a local HTTP server. Returns the actual port and a server handle.
+@defproc[(start-server
+          [#:port port exact-nonnegative-integer? 8080]
+          [#:public-dir public-dir (or/c string? path?) "public"])
+         (values exact-nonnegative-integer? procedure?)]{
+Starts a local HTTP server on @racket[127.0.0.1] serving static files from
+@racket[public-dir]. Returns the requested port and a shutdown procedure.
+@racket[start-dev-server] is a backward-compatible alias.
 }
 
-@defproc[(stop-server [server any/c]) void?]{
+@defproc[(stop-server [shutdown-proc procedure?]) void?]{
 Stops the dev server.
 }
 
@@ -36,9 +37,63 @@ Stops the dev server.
 Opens the system browser to the given URL.
 }
 
+@section{System Tray}
+
+@defmodule[glaze/tray]
+
+Glaze provides a cross-platform system tray backed by pure Racket FFI
+(Windows @racket[Shell_NotifyIconW], macOS @racket[NSStatusItem], Linux
+@racket[libayatana-appindicator]). When a platform's native libraries are
+unavailable, the tray degrades to a no-op stub.
+
+@defproc[(make-tray
+          [#:icon icon (or/c #f path?)]
+          [#:tooltip tooltip string?]
+          [#:menu items (listof menu-item?)])
+         tray?]{
+Creates a system tray icon with the given tooltip and menu. Returns a tray
+handle. Never raises for environmental reasons — callers always get a usable
+(possibly inert) handle.
+}
+
+@defproc[(tray-set-tooltip! [t tray?] [tooltip string?]) void?]{}
+@defproc[(tray-set-icon! [t tray?] [icon path?]) void?]{}
+@defproc[(tray-set-menu! [t tray?] [items (listof menu-item?)]) void?]{}
+@defproc[(tray-close [t tray?]) void?]{}
+
+@defproc[(make-menu-item
+          [label string?]
+          [#:id id any/c label]
+          [#:action action (-> any) void]
+          [#:enabled? enabled? boolean? #t]
+          [#:checked? checked? boolean? #f])
+         menu-item?]{}
+@defproc[(menu-separator) menu-item?]{}
+
+@section{Packaging}
+
+@defmodule[glaze/build]
+
+@defproc[(build-app
+          [#:entry entry (or/c string? path?) "main.rkt"]
+          [#:name name (or/c #f string?) #f]
+          [#:icon icon (or/c #f path?) #f]
+          [#:out-dir out-dir (or/c string? path?) "dist"]
+          [#:embed-dlls? embed-dlls? boolean? #f]
+          [#:installer? installer? boolean? #f])
+         path?]{
+Builds a Glaze project into a distributable directory via @racket[raco exe]
++ @racket[raco distribute], bundling the project's @racket[public/] next to
+the executable. On macOS, post-processes the resulting @tt{.app} bundle's
+@tt{Info.plist}. When @racket[installer?] is true, also produces a platform
+installer (msi / dmg / AppImage), falling back to a zip / tar.gz when the
+native toolchain is absent.
+}
+
 @section{CLI Commands}
 
 @verbatim{
  raco glaze init <name>   Create a new project
  raco glaze dev           Start dev server
+ raco glaze build         Build a distributable (+ optional installer)
 }

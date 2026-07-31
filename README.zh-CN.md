@@ -57,8 +57,22 @@ racket main.rkt
 ```bash
 raco glaze init <name>   # 创建新的 Glaze 项目
 raco glaze dev           # 启动开发服务器并自动打开浏览器
+raco glaze build         # 构建可分发包（exe + 内置资源）
 raco glaze help          # 显示帮助
 ```
+
+### `build`
+
+把 Glaze 项目打包为平台分发产物（`raco exe` + `raco distribute`），前端资源随可执行文件一起分发。
+
+```bash
+raco glaze build --name myapp              # 产出 dist/myapp(.exe) + dist/lib + dist/public
+raco glaze build --name myapp --installer  # 额外产出 msi / dmg / AppImage（缺失工具链时回落为 zip/tar.gz）
+```
+
+选项：`--name`、`--icon <.ico/.icns>`、`--entry <path>`（默认 `main.rkt`）、`--out <dir>`（默认 `dist`）、`--embed-dlls`（Windows：单文件 exe）、`--installer`。
+
+> installer 步骤会探测本机的打包工具链（Windows 的 WiX / NSIS，macOS 的 `create-dmg` / `hdiutil`，Linux 的 `appimagetool` / `linuxdeploy`），**缺失时优雅降级**为 `.zip` / `.tar.gz` 并打印提示告知需要安装什么。
 
 ## 项目结构
 
@@ -138,10 +152,35 @@ glaze/
   (json-response (hasheq 'status "ok")))
 ```
 
+## 系统托盘
+
+Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜单栏，带右键（macOS 为左键）菜单。后端按平台选择——纯 Racket FFI，无需编译任何原生代码：
+
+- **Windows** — 通过 `ffi/unsafe` 调 `Shell_NotifyIconW`
+- **macOS** — 通过 `ffi/unsafe/objc` 调 `NSStatusItem` / `NSMenu`
+- **Linux** — 通过 `ffi/unsafe` 调 `libayatana-appindicator` + `libgtk-3`
+
+运行时若某平台的原生库不可用，托盘会静默降级为空操作，应用的其余部分照常运行。
+
+```racket
+(require glaze)
+
+(define t
+  (make-tray #:icon #f
+             #:tooltip "我的 Glaze 应用"
+             #:menu (list (make-menu-item "退出"
+                                          #:action (lambda () (exit 0))))))
+(tray-set-tooltip! t "运行中")
+;; ...稍后
+(tray-close t)
+```
+
+> **macOS 注意**：纯菜单栏应用（不显示 Dock 图标）需要构建为 `.app` bundle 并设置 `LSUIElement`——`raco glaze build` 会为你配置好。
+
 ## 路线图
 
 - [x] **Phase 1** — 本地 HTTP 服务器 + 系统浏览器
-- [ ] **Phase 2** — 前端资源打包、系统托盘、应用打包
+- [x] **Phase 2** — 前端资源打包、系统托盘、应用打包
 - [ ] **Phase 3** — 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）
 
 ## 许可证
