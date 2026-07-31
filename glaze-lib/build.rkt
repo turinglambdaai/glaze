@@ -31,7 +31,8 @@
                    #:name [name #f]
                    #:icon [icon #f]
                    #:out-dir [out-dir "dist"]
-                   #:embed-dlls? [embed-dlls? #f])
+                   #:embed-dlls? [embed-dlls? #f]
+                   #:installer? [installer? #f])
   (define entry-path
     (if (path? entry)
         entry
@@ -111,7 +112,193 @@
   (when (eq? os 'macosx)
     (post-process-macos-bundle out-dir-path app-name icon-path))
 
+  ;; Optional installer step. Each platform helper probes for the required
+  ;; external tooling and warns (without failing the build) when it's absent;
+  ;; the CI matrix installs them.
+  (when installer?
+    (make-installer os out-dir-path app-name))
+
   (path->complete-path (build-path out-dir-path)))
+
+;; ---- Installer helpers ----
+;; Each tries the best-available native installer tool and degrades to a plain
+;; archive (.zip / .tar.gz) when the tool is missing, printing a warning so the
+;; caller knows an installer wasn't produced.
+(define (make-installer os out-dir app-name)
+  (case os
+    [(windows) (make-windows-installer out-dir app-name)]
+    [(macosx) (make-macos-installer out-dir app-name)]
+    [else (make-linux-installer out-dir app-name)]))
+
+;; Returns the first argv[0]-resolvable command among names, or #f.
+(define (find-tool . names)
+  (for/first ([n (in-list names)]
+              #:when (find-executable-path n #f))
+    n))
+
+(define (run . args)
+  (apply system* args))
+
+;; Windows: prefer WiX v4 (`wix`), then NSIS (`makensis`); else zip the dist.
+(define (make-windows-installer out-dir app-name)
+  (define dist (path->complete-path out-dir))
+  (cond
+    [(find-tool "wix.exe" "wix")
+     (define msi-path (build-path dist (string-append app-name ".msi")))
+     ;; WiX v4: `wix build -o out.msi <wxs>`; we generate a minimal wxs.
+     (define wxs-path (build-path dist (string-append app-name ".wxs")))
+     (call-with-output-file wxs-path
+                            (lambda (out) (display (windows-wxs app-name dist) out))
+                            #:exists 'replace)
+     (unless (run (find-executable-path "wix.exe" #f)
+                  "build"
+                  "-o"
+                  (path->string msi-path)
+                  (path->string wxs-path))
+       (fprintf (current-error-port) "[glaze] WiX build failed; see output above.\n"))]
+    [(find-tool "makensis")
+     (define nsis-path (build-path dist (string-append app-name ".nsi")))
+     (call-with-output-file nsis-path
+                            (lambda (out) (display (windows-nsis app-name dist) out))
+                            #:exists 'replace)
+     (unless (run (find-executable-path "makensis" #f) (path->string nsis-path))
+       (fprintf (current-error-port) "[glaze] NSIS build failed; see output above.\n"))]
+    [else
+     (display "[glaze] No Windows installer toolchain found (wix / makensis); " (current-error-port))
+     (displayln "producing a .zip instead. Install WiX Toolset or NSIS for a real installer."
+                (current-error-port))
+     (archive-directory dist app-name "zip")]))
+
+;; macOS: prefer create-dmg, then hdiutil; else zip the .app.
+(define (make-macos-installer out-dir app-name)
+  (define dist (path->complete-path out-dir))
+  (define bundle (build-path dist (string-append app-name ".app")))
+  (cond
+    [(find-tool "create-dmg")
+     (run (find-executable-path "create-dmg" #f)
+          "--volname"
+          app-name
+          (path->string (build-path dist (string-append app-name ".dmg")))
+          (path->string bundle))]
+    [(find-tool "hdiutil")
+     (define dmg-path (build-path dist (string-append app-name ".dmg")))
+     (run (find-executable-path "hdiutil" #f)
+          "create"
+          "-volname"
+          app-name
+          "-srcfolder"
+          (path->string bundle)
+          "-ov"
+          "-format"
+          "UDZO"
+          (path->string dmg-path))]
+    [else
+     (display "[glaze] No macOS dmg toolchain found (create-dmg / hdiutil); " (current-error-port))
+     (displayln "producing a .zip instead." (current-error-port))
+     (archive-directory dist app-name "zip")]))
+
+;; Linux: prefer appimagetool / linuxdeploy; else tar.gz.
+(define (make-linux-installer out-dir app-name)
+  (define dist (path->complete-path out-dir))
+  (cond
+    [(find-tool "appimagetool")
+     (define appdir (build-path dist "AppDir"))
+     (run (find-executable-path "appimagetool" #f)
+          (path->string appdir)
+          (path->string (build-path dist (string-append app-name ".AppImage"))))]
+    [(find-tool "linuxdeploy")
+     (putenv "OUTPUT" (path->string (build-path dist (string-append app-name ".AppImage"))))
+     (run (find-executable-path "linuxdeploy" #f)
+          "--appdir"
+          (path->string (build-path dist "AppDir"))
+          "--output"
+          "appimage")]
+    [else
+     (display "[glaze] No Linux AppImage toolchain found (appimagetool / linuxdeploy); "
+              (current-error-port))
+     (displayln "producing a .tar.gz instead." (current-error-port))
+     (archive-directory dist app-name "tar.gz")]))
+
+;; Minimal WiX v4 source referencing the dist directory contents.
+(define (windows-wxs app-name dist-dir)
+  (format #<<WXEOF
+<?xml version='1.0' encoding='windows-1252'?>
+<Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
+  <Package Name='~a' Manufacturer='glaze' Version='0.2.0'>
+    <MajorUpgrade DowngradeErrorMessage='A newer version is already installed.' />
+    <Directory Id='TARGETDIR' Name='SourceDir'>
+      <Directory Id='ProgramFilesFolder'>
+        <Directory Id='INSTALLDIR' Name='~a'>
+          <Component Id='App' Guid='*'>
+            <Files Include='~a\\**' />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id='Complete' Title='~a' Level='1'>
+      <ComponentRef Id='App' />
+    </Feature>
+  </Package>
+</Wix>
+WXEOF
+          app-name
+          app-name
+          (path->string dist-dir)
+          app-name))
+
+;; Minimal NSIS script.
+(define (windows-nsis app-name dist-dir)
+  (format #<<NSI
+Name "~a"
+OutFile "~a\\~a-setup.exe"
+InstallDir "$PROGRAMFILES\\~a"
+Page directory
+Page instfiles
+Section ""
+  SetOutPath "$INSTDIR"
+  File /r "~a\\*.*"
+  CreateShortcut "$DESKTOP\\~a.lnk" "$INSTDIR\\~a.exe"
+SectionEnd
+NSI
+          app-name
+          (path->string dist-dir)
+          app-name
+          app-name
+          (path->string dist-dir)
+          app-name
+          app-name))
+
+;; Produce a zip or tar.gz of dist contents as a portable fallback. Uses the
+;; host `tar` if present (handles both formats), else warns.
+(define (archive-directory dist-dir app-name fmt)
+  (define dist-abs (path->complete-path dist-dir))
+  (define parent (or (path-only dist-abs) dist-abs))
+  (define base (path->string (file-name-from-path dist-abs)))
+  (define archive-path (build-path parent (string-append base "." fmt)))
+  (cond
+    ;; .zip via PowerShell on Windows, else the `zip` CLI.
+    [(equal? fmt "zip")
+     (cond
+       [(and (eq? (system-type 'os) 'windows) (find-executable-path "powershell.exe" #f))
+        (run (find-executable-path "powershell.exe" #f)
+             "-NoProfile"
+             "-Command"
+             (format "Compress-Archive -Path '~a\\*' -DestinationPath '~a' -Force"
+                     (path->string dist-abs)
+                     (path->string archive-path)))]
+       [(find-executable-path "zip" #f)
+        (parameterize ([current-directory parent])
+          (run (find-executable-path "zip" #f) "-r" (path->string archive-path) base))]
+       [else (displayln "[glaze] No zip tool found; skipping archive." (current-error-port))])]
+    ;; .tar.gz via tar -czf.
+    [(and (equal? fmt "tar.gz") (find-executable-path "tar" #f))
+     (run (find-executable-path "tar" #f)
+          "-czf"
+          (path->string archive-path)
+          "-C"
+          (path->string parent)
+          base)]
+    [else (displayln "[glaze] No archive tool found; skipping." (current-error-port))]))
 
 ;; The generated entry module: requires glaze and the user's main (whose
 ;; server startup runs). At runtime it sets the working directory to the

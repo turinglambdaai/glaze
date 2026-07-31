@@ -73,27 +73,34 @@
              [icon #f]
              [entry "main.rkt"]
              [out "dist"]
-             [embed #f])
+             [embed #f]
+             [installer #f])
     (cond
-      [(null? args) (values name icon entry out embed)]
+      [(null? args) (values name icon entry out embed installer)]
       [(and (equal? (car args) "--name") (pair? (cdr args)))
-       (loop (cddr args) (cadr args) icon entry out embed)]
+       (loop (cddr args) (cadr args) icon entry out embed installer)]
       [(and (equal? (car args) "--icon") (pair? (cdr args)))
-       (loop (cddr args) name (cadr args) entry out embed)]
+       (loop (cddr args) name (cadr args) entry out embed installer)]
       [(and (equal? (car args) "--entry") (pair? (cdr args)))
-       (loop (cddr args) name icon (cadr args) out embed)]
+       (loop (cddr args) name icon (cadr args) out embed installer)]
       [(and (equal? (car args) "--out") (pair? (cdr args)))
-       (loop (cddr args) name icon entry (cadr args) embed)]
-      [(equal? (car args) "--embed-dlls") (loop (cdr args) name icon entry out #t)]
+       (loop (cddr args) name icon entry (cadr args) embed installer)]
+      [(equal? (car args) "--embed-dlls") (loop (cdr args) name icon entry out #t installer)]
+      [(equal? (car args) "--installer") (loop (cdr args) name icon entry out embed #t)]
       [else
        (printf "Warning: ignoring unknown build argument: ~a\n" (car args))
-       (loop (cdr args) name icon entry out embed)])))
+       (loop (cdr args) name icon entry out embed installer)])))
 
 (define (build-command rest)
-  (define-values (name icon entry out embed) (parse-build-opts rest))
+  (define-values (name icon entry out embed installer) (parse-build-opts rest))
   (printf "Building Glaze app (entry=~a, name=~a)...\n" entry (or name "<project dir>"))
   (define dist-path
-    (build-app #:entry entry #:name name #:icon icon #:out-dir out #:embed-dlls? embed))
+    (build-app #:entry entry
+               #:name name
+               #:icon icon
+               #:out-dir out
+               #:embed-dlls? embed
+               #:installer? installer))
   (printf "Done. Distribution in: ~a\n" dist-path))
 
 (define (print-help)
@@ -110,7 +117,9 @@
   (displayln "  --icon <path>      .ico (Windows) / .icns (macOS)")
   (displayln "  --entry <path>     entry file (default: main.rkt)")
   (displayln "  --out <dir>        output directory (default: dist)")
-  (displayln "  --embed-dlls       Windows: embed DLLs into a single .exe"))
+  (displayln "  --embed-dlls       Windows: embed DLLs into a single .exe")
+  (displayln "  --installer        Also build a platform installer (msi/dmg/AppImage);")
+  (displayln "                     falls back to zip/tar.gz when the toolchain is absent"))
 
 (define (write-file path content)
   (call-with-output-file path (lambda (out) (display content out)) #:exists 'replace))
