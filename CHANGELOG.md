@@ -5,6 +5,20 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - Unreleased
+
+### Added (Phase 3, in progress)
+- **Native WebView embedding** (`glaze/webview`): public `open-window` /
+  `open-webview` API with platform backend dispatch (windows/macos/linux/stub),
+  mirroring the tray design and falling back to the stub when native deps are
+  missing.
+- **Windows backend** (pure Racket FFI): the WebView2 async init chain through
+  controller delivery is verified working via hand-built COM CompletedHandler
+  vtables; ships `WebView2Loader.dll`. Completing `Navigate` is pending a COM
+  apartment/lifetime fix.
+- **macOS backend** (`ffi/unsafe/objc`): NSWindow + WKWebView skeleton.
+- **Linux backend** (`ffi/unsafe`): GtkWindow + WebKitGTK 4.1 skeleton.
+
 ## [0.2.0] - Unreleased
 
 ### Added

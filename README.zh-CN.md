@@ -181,7 +181,13 @@ Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜�
 
 - [x] **Phase 1** — 本地 HTTP 服务器 + 系统浏览器
 - [x] **Phase 2** — 前端资源打包、系统托盘、应用打包
-- [ ] **Phase 3** — 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）
+- [ ] **Phase 3** — 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）— *进行中*
+
+> **Phase 3 状态：** `glaze/webview` 模块（`open-window` / `open-webview`）正在开发中。Windows 上
+> WebView2 的异步初始化链（environment → controller → CoreWebView2）已通过纯 Racket COM FFI 验证跑通，
+> 但完成 `Navigate` 还卡在一个 COM apartment/对象生命周期问题上；在此之前 Windows 保持稳定的系统
+> 浏览器体验。macOS（WKWebView）和 Linux（WebKitGTK）后端已搭建并由 CI 验证。原生后端不可用时，
+> 调用方自动回退到 `open-browser`。
 
 ## 许可证
 
