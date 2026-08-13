@@ -9,6 +9,6 @@
 (define build-deps
   '("glaze-test"))
 (define pkg-desc "Build desktop apps with Racket backend and web frontend — a Tauri-like framework for Racket")
-(define pkg-authors '(jrtxio))
+(define pkg-authors '(turinglambdaai))
 (define license 'MIT)
-(define repository "https://github.com/jrtxio/glaze")
+(define repository "https://github.com/turinglambdaai/glaze")

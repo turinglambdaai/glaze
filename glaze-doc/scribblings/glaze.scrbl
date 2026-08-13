@@ -1,7 +1,7 @@
 #lang scribble/manual
 
 @title{Glaze}
-@author{jrtxio}
+@author{turinglambdaai}
 
 Build desktop apps with Racket backend and web frontend.
 

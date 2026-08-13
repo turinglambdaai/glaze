@@ -7,7 +7,7 @@
 (define build-deps
   '("rackunit-lib"))
 (define pkg-desc "CLI tools for Glaze — raco glaze commands")
-(define pkg-authors '(jrtxio))
+(define pkg-authors '(turinglambdaai))
 (define license 'MIT)
 (define raco-commands
   '(("glaze" glaze-cli/cli "create and serve Glaze apps" 100)))

@@ -9,6 +9,6 @@
   '("racket-doc"
     "scribble-lib"))
 (define pkg-desc "Documentation for Glaze")
-(define pkg-authors '(jrtxio))
+(define pkg-authors '(turinglambdaai))
 (define license 'MIT)
 (define scribblings '(("scribblings/glaze.scrbl" () (library))))

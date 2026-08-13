@@ -8,5 +8,5 @@
 (define build-deps
   '("rackunit-lib"))
 (define pkg-desc "Core library for Glaze — build desktop apps with Racket backend and web frontend")
-(define pkg-authors '(jrtxio))
+(define pkg-authors '(turinglambdaai))
 (define license 'MIT)

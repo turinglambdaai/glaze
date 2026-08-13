@@ -8,5 +8,5 @@
 (define build-deps
   '())
 (define pkg-desc "Tests for Glaze")
-(define pkg-authors '(jrtxio))
+(define pkg-authors '(turinglambdaai))
 (define license 'MIT)

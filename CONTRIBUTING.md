@@ -3,7 +3,7 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/jrtxio/glaze.git
+git clone https://github.com/turinglambdaai/glaze.git
 cd glaze
 raco pkg install --link ./glaze-lib ./glaze-cli ./glaze-doc ./glaze-test ./glaze
 ```
