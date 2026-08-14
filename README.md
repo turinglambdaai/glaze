@@ -57,8 +57,22 @@ Your browser opens to `http://127.0.0.1:8080` with a working page.
 ```bash
 raco glaze init <name>   # Create a new Glaze project
 raco glaze dev           # Start dev server with auto-open browser
+raco glaze build         # Build a distributable (exe + bundled assets)
 raco glaze help          # Show help
 ```
+
+### `build`
+
+Package a Glaze project into a platform distribution (`raco exe` + `raco distribute`) with the frontend assets bundled alongside the executable.
+
+```bash
+raco glaze build --name myapp              # produces dist/myapp(.exe) + dist/lib + dist/public
+raco glaze build --name myapp --installer  # also produce msi / dmg / AppImage (or zip/tar.gz fallback)
+```
+
+Options: `--name`, `--icon <.ico/.icns>`, `--entry <path>` (default `main.rkt`), `--out <dir>` (default `dist`), `--embed-dlls` (Windows: single-file exe), `--installer`.
+
+> The installer step probes for the native toolchain (WiX / NSIS on Windows, `create-dmg` / `hdiutil` on macOS, `appimagetool` / `linuxdeploy` on Linux) and **degrades gracefully** to a `.zip` / `.tar.gz` when it's absent, printing a warning naming what to install.
 
 ## Project Structure
 
@@ -138,11 +152,46 @@ Macro for defining JSON API endpoints.
   (json-response (hasheq 'status "ok")))
 ```
 
+## System Tray
+
+Glaze provides a cross-platform system tray so your app can live in the notification area / menu bar with a right-click (or left-click on macOS) menu. The backend is chosen by platform — pure Racket FFI, no native compilation required:
+
+- **Windows** — `Shell_NotifyIconW` via `ffi/unsafe`
+- **macOS** — `NSStatusItem` / `NSMenu` via `ffi/unsafe/objc`
+- **Linux** — `libayatana-appindicator` + `libgtk-3` via `ffi/unsafe`
+
+If a platform's native libraries aren't available at runtime, the tray silently degrades to a no-op so the rest of the app keeps working.
+
+```racket
+(require glaze)
+
+(define t
+  (make-tray #:icon #f
+             #:tooltip "My Glaze App"
+             #:menu (list (make-menu-item "Quit"
+                                          #:action (lambda () (exit 0))))))
+(tray-set-tooltip! t "running")
+;; ...later
+(tray-close t)
+```
+
+> **macOS note:** a pure menu-bar app (no Dock icon) requires building as an `.app` bundle with `LSUIElement` set — `raco glaze build` configures this for you.
+
 ## Roadmap
 
 - [x] **Phase 1** — Local HTTP server + system browser
-- [ ] **Phase 2** — Frontend asset bundling, system tray, app packaging
-- [ ] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK)
+- [x] **Phase 2** — Frontend asset bundling, system tray, app packaging
+- [ ] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK) — *in progress*
+
+> **Phase 3 status:** the `glaze/webview` module (`open-window` / `open-webview`) is in
+> development. The macOS backend (NSWindow + WKWebView via pure Racket objc FFI) is
+> verified working end-to-end: window creation, page loads over local HTTP,
+> `webview-navigate`, close (programmatic and the red button), and `#:on-close`
+> callbacks. Windows has the WebView2 async init chain (environment → controller →
+> CoreWebView2) working via pure-Racket COM FFI, but completing `Navigate` is blocked
+> on a COM apartment/lifetime issue; until then Windows keeps the stable
+> system-browser experience. The Linux (WebKitGTK) backend is scaffolded. Callers
+> fall back to `open-browser` when the native backend is unavailable.
 
 ## License
 

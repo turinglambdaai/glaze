@@ -37,3 +37,62 @@ jobs:
       - name: Check formatting
         run: raco fmt --check glaze-lib/ glaze-cli/ glaze-test/
         continue-on-error: true
+
+  package:
+    # Build a sample app with `raco glaze build --installer` on each platform
+    # and upload the resulting distribution + installer as artifacts.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+        racket-version: ['8.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: ${{ matrix.racket-version }}
+
+      - name: Install Glaze packages
+        run: |
+          raco pkg install --no-docs --link ./glaze-lib
+          raco pkg install --no-docs --link ./glaze-cli
+          raco pkg install --link ./glaze
+
+      - name: Install installer toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libayatana-appindicator3-dev libgtk-3-dev
+          # AppImage tooling (optional; build falls back to tar.gz if missing)
+          sudo wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
+          sudo chmod +x /usr/local/bin/appimagetool
+
+      - name: Install installer toolchain (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # WiX Toolset v4 (build falls back to zip if missing)
+          dotnet tool install --global wix
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+      - name: Scaffold and build a sample app
+        shell: bash
+        run: |
+          raco glaze init sampleapp
+          cd sampleapp
+          raco glaze build --name sampleapp --out dist --installer
+
+      - name: Upload distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: glaze-${{ runner.os }}-dist
+          path: |
+            sampleapp/dist/
+            sampleapp/*.zip
+            sampleapp/*.tar.gz
+            sampleapp/dist/*.msi
+            sampleapp/dist/*.dmg
+            sampleapp/dist/*.AppImage
