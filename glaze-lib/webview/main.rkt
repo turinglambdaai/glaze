@@ -19,6 +19,7 @@
          webview-supported?
          webview?
          webview-backend
+         webview-handle
          webview-close
          webview-navigate)
 

@@ -16,7 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   controller delivery is verified working via hand-built COM CompletedHandler
   vtables; ships `WebView2Loader.dll`. Completing `Navigate` is pending a COM
   apartment/lifetime fix.
-- **macOS backend** (`ffi/unsafe/objc`): NSWindow + WKWebView skeleton.
+- **macOS backend** (`ffi/unsafe/objc`, verified end-to-end): NSWindow + WKWebView
+  with a manual run-loop pump (`runMode:beforeDate:`) that services AppKit events
+  and WebKit's IPC sources without blocking Racket's scheduler; window delegate
+  delivers `#:on-close`; autoresizing WKWebView; programmatic close and
+  `webview-navigate` both supported.
 - **Linux backend** (`ffi/unsafe`): GtkWindow + WebKitGTK 4.1 skeleton.
 
 ## [0.2.0] - Unreleased

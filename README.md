@@ -184,12 +184,14 @@ If a platform's native libraries aren't available at runtime, the tray silently 
 - [ ] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK) — *in progress*
 
 > **Phase 3 status:** the `glaze/webview` module (`open-window` / `open-webview`) is in
-> development. On Windows the WebView2 async init chain (environment → controller →
-> CoreWebView2) is verified working via pure-Racket COM FFI, but completing `Navigate`
-> is blocked on a COM apartment/lifetime issue; until then Windows keeps the stable
-> system-browser experience. macOS (WKWebView) and Linux (WebKitGTK) backends are
-> scaffolded and exercised by CI. Callers fall back to `open-browser` when the native
-> backend is unavailable.
+> development. The macOS backend (NSWindow + WKWebView via pure Racket objc FFI) is
+> verified working end-to-end: window creation, page loads over local HTTP,
+> `webview-navigate`, close (programmatic and the red button), and `#:on-close`
+> callbacks. Windows has the WebView2 async init chain (environment → controller →
+> CoreWebView2) working via pure-Racket COM FFI, but completing `Navigate` is blocked
+> on a COM apartment/lifetime issue; until then Windows keeps the stable
+> system-browser experience. The Linux (WebKitGTK) backend is scaffolded. Callers
+> fall back to `open-browser` when the native backend is unavailable.
 
 ## License
 

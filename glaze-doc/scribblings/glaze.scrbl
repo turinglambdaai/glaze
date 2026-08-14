@@ -70,6 +70,37 @@ handle. Never raises for environmental reasons — callers always get a usable
          menu-item?]{}
 @defproc[(menu-separator) menu-item?]{}
 
+@section{Native WebView}
+
+@defmodule[glaze/webview/main]
+
+Opens a native OS window with an embedded WebView pointing at a URL
+(typically the local HTTP server Glaze started). Backends: macOS
+(@racket[NSWindow] + @racket[WKWebView] via objc FFI, verified), Windows
+(WebView2 via COM FFI, in progress), Linux (WebKitGTK, scaffolded). When the
+native backend is unavailable, @racket[open-window] returns @racket[#f] so
+callers can fall back to @racket[open-browser].
+
+@defproc[(open-window
+          [url string?]
+          [#:title title string? "Glaze"]
+          [#:width width exact-positive-integer? 1024]
+          [#:height height exact-positive-integer? 768]
+          [#:on-close on-close (-> any) (lambda () (void))])
+         (or/c webview? #f)]{
+Opens the window and loads @racket[url]. @racket[on-close] runs when the
+window closes (programmatic @racket[webview-close] or the user closing it).
+Returns @racket[#f] when the backend is unavailable.
+}
+
+@defproc[(webview-navigate [wv webview?] [url string?]) void?]{
+Loads a new URL into an open webview.
+}
+
+@defproc[(webview-close [wv webview?]) void?]{
+Closes the window and stops its event pump.
+}
+
 @section{Packaging}
 
 @defmodule[glaze/build]
