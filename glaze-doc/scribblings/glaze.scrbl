@@ -86,11 +86,14 @@ callers can fall back to @racket[open-browser].
           [#:title title string? "Glaze"]
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
-          [#:on-close on-close (-> any) (lambda () (void))])
+          [#:on-close on-close (-> any) (lambda () (void))]
+          [#:fallback-browser? fallback-browser? boolean? #f])
          (or/c webview? #f)]{
 Opens the window and loads @racket[url]. @racket[on-close] runs when the
 window closes (programmatic @racket[webview-close] or the user closing it).
-Returns @racket[#f] when the backend is unavailable.
+Returns @racket[#f] when the backend is unavailable; with
+@racket[#:fallback-browser?] the system browser is opened instead —
+recommended on platforms where the WebView backend is still in progress.
 }
 
 @defproc[(webview-navigate [wv webview?] [url string?]) void?]{
@@ -99,6 +102,26 @@ Loads a new URL into an open webview.
 
 @defproc[(webview-close [wv webview?]) void?]{
 Closes the window and stops its event pump.
+}
+
+@defproc[(webview-title [wv webview?]) (or/c #f string?)]{
+Current page title once the first navigation has committed; @racket[#f]
+before that or when the backend cannot provide it.
+}
+
+@defproc[(webview-url [wv webview?]) (or/c #f string?)]{
+Current page URL once the first navigation has committed.
+}
+
+@defproc[(webview-capture!
+          [wv webview?]
+          [dest (or/c #f string? path?) #f])
+         (or/c #f path?)]{
+Captures the window contents as a PNG to @racket[dest] (a fresh temp file by
+default). Returns the path, or @racket[#f] when the window is closed or not
+currently capturable. Together with @racket[webview-title] and
+@racket[webview-url], this lets automated callers — including AI agents —
+verify what the UI is showing without a human at the screen.
 }
 
 @section{Packaging}

@@ -187,11 +187,14 @@ If a platform's native libraries aren't available at runtime, the tray silently 
 > development. The macOS backend (NSWindow + WKWebView via pure Racket objc FFI) is
 > verified working end-to-end: window creation, page loads over local HTTP,
 > `webview-navigate`, close (programmatic and the red button), and `#:on-close`
-> callbacks. Windows has the WebView2 async init chain (environment → controller →
+> callbacks. macOS also ships the verification APIs — `webview-title`,
+> `webview-url`, `webview-capture!` (window screenshot to PNG) — so automated
+> callers, including AI agents, can assert on UI state without a human at the
+> screen. Windows has the WebView2 async init chain (environment → controller →
 > CoreWebView2) working via pure-Racket COM FFI, but completing `Navigate` is blocked
 > on a COM apartment/lifetime issue; until then Windows keeps the stable
-> system-browser experience. The Linux (WebKitGTK) backend is scaffolded. Callers
-> fall back to `open-browser` when the native backend is unavailable.
+> system-browser experience (`open-window` with `#:fallback-browser?` handles this
+> automatically). The Linux (WebKitGTK) backend is scaffolded.
 
 ## License
 

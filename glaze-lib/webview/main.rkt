@@ -21,7 +21,12 @@
          webview-backend
          webview-handle
          webview-close
-         webview-navigate)
+         webview-navigate
+         webview-title
+         webview-url
+         webview-capture!)
+
+(require (only-in "../browser.rkt" open-browser))
 
 ;; A webview handle wraps the backend-specific handle + the backend tag.
 (struct webview (backend handle) #:transparent)
@@ -40,7 +45,7 @@
   (unless backend-procs
     (set! backend-procs (make-hash))
     (define mod (backend-module-path))
-    (for ([name (in-list '(open-webview supported? close navigate))])
+    (for ([name (in-list '(open-webview supported? close navigate title url capture!))])
       (hash-set! backend-procs name (dynamic-require mod name))))
   backend-procs)
 
@@ -53,29 +58,41 @@
 
 ;; open-window: high-level entry. Opens a native window with a webview
 ;; rendering `url`. Optional #:title, #:width, #:height, #:on-close.
-;; Returns a webview? on success, or #f if the backend is unavailable
-;; (caller should fall back to open-browser).
+;; Returns a webview? on success, or #f if the backend is unavailable.
+;; With #:fallback-browser? #t the system browser is opened instead when the
+;; native backend is unavailable (recommended on platforms where the WebView
+;; backend is still in progress, e.g. Windows today).
 (define (open-window url
                      #:title [title "Glaze"]
                      #:width [width 1024]
                      #:height [height 768]
-                     #:on-close [on-close (lambda () (void))])
-  (open-webview url #:title title #:width width #:height height #:on-close on-close))
+                     #:on-close [on-close (lambda () (void))]
+                     #:fallback-browser? [fallback? #f])
+  (open-webview url
+                #:title title
+                #:width width
+                #:height height
+                #:on-close on-close
+                #:fallback-browser? fallback?))
 
 (define (open-webview url
                       #:title [title "Glaze"]
                       #:width [width 1024]
                       #:height [height 768]
-                      #:on-close [on-close (lambda () (void))])
-  (with-handlers ([exn:fail? (lambda (e)
-                               (fprintf (current-error-port)
-                                        "[glaze] webview backend unavailable (~a); "
-                                        (exn-message e))
-                               (displayln "use open-browser as fallback." (current-error-port))
-                               #f)])
-    (define h
-      ((ref 'open-webview) url #:title title #:width width #:height height #:on-close on-close))
-    (and h (webview (detected-backend) h))))
+                      #:on-close [on-close (lambda () (void))]
+                      #:fallback-browser? [fallback? #f])
+  (define h
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (fprintf (current-error-port)
+                                          "[glaze] webview backend unavailable (~a); "
+                                          (exn-message e))
+                                 (displayln "use open-browser as fallback." (current-error-port))
+                                 #f)])
+      ((ref 'open-webview) url #:title title #:width width #:height height #:on-close on-close)))
+  (cond
+    [h (webview (detected-backend) h)]
+    [fallback? (open-browser url) #f]
+    [else #f]))
 
 (define (detected-backend)
   (case (system-type 'os)
@@ -89,3 +106,22 @@
 
 (define (webview-navigate wv url)
   ((ref 'navigate) (webview-handle wv) url))
+
+;; ---- verification APIs ----
+;; Observe webview state programmatically — the point is that callers (and
+;; agents developing Glaze apps) can assert on what the UI is showing without
+;; a human at the screen. All degrade to #f where a backend cannot provide
+;; the value yet.
+
+;; Current page title once the first navigation has committed, else #f.
+(define (webview-title wv)
+  ((ref 'title) (webview-handle wv)))
+
+;; Current page URL once the first navigation has committed, else #f.
+(define (webview-url wv)
+  ((ref 'url) (webview-handle wv)))
+
+;; Captures the window contents to a PNG. dest defaults to a fresh temp
+;; file. Returns the path, or #f when the backend/window cannot be captured.
+(define (webview-capture! wv [dest #f])
+  ((ref 'capture!) (webview-handle wv) dest))

@@ -46,6 +46,9 @@
          supported?
          close
          navigate
+         title
+         url
+         capture!
          win:webview?)
 
 (define-runtime-path here ".")
@@ -327,3 +330,13 @@
 (define (navigate wv url)
   (set-win:webview-url! wv url)
   (void))
+
+;; Verification APIs. The ICoreWebView2 object is only valid inside the
+;; controller callback in this cut (see header), so title/capture! degrade to
+;; #f; url reflects the requested navigation target.
+(define (title wv)
+  #f)
+(define (url wv)
+  (win:webview-url wv))
+(define (capture! wv [dest #f])
+  #f)

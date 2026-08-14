@@ -44,12 +44,16 @@
 ;;     loads stall at estimatedProgress 0.1); runMode:beforeDate: does.
 
 (require ffi/unsafe
-         ffi/unsafe/objc)
+         ffi/unsafe/objc
+         racket/file)
 
 (provide open-webview
          supported?
          close
          navigate
+         title
+         url
+         capture!
          mac:webview?
          mac:webview-window
          mac:webview-webview
@@ -60,6 +64,11 @@
 (define webkit
   (with-handlers ([exn:fail? (lambda (e) #f)])
     (ffi-lib "/System/Library/Frameworks/WebKit.framework/WebKit")))
+
+;; Window capture lives in CoreGraphics.
+(define coregraphics
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (ffi-lib "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")))
 
 (import-class NSString
               NSApplication
@@ -72,6 +81,7 @@
               NSRunLoop
               NSURL
               NSURLRequest
+              NSBitmapImageRep
               WKWebView
               WKWebViewConfiguration)
 
@@ -80,6 +90,21 @@
 (define-cstruct _NSPoint ([x _double] [y _double]))
 (define-cstruct _NSSize ([width _double] [height _double]))
 (define-cstruct _NSRect ([origin _NSPoint] [size _NSSize]))
+
+;; ---- window capture (CoreGraphics) ----
+(define CGWindowListCreateImage
+  (and coregraphics
+       (get-ffi-obj "CGWindowListCreateImage"
+                    coregraphics
+                    (_fun _NSRect _uint _uint _uint -> _pointer)
+                    (lambda () #f))))
+(define CGImageRelease
+  (and coregraphics
+       (get-ffi-obj "CGImageRelease" coregraphics (_fun _pointer -> _void) (lambda () #f))))
+(define kCGWindowListOptionIncludingWindow 8)
+(define NSPNGFileType 4)
+;; CGRectNull: {+inf, +inf, 0, 0} — capture the window's full bounds.
+(define rect-null (make-NSRect (make-NSPoint +inf.0 +inf.0) (make-NSSize 0.0 0.0)))
 
 ;; AppKit constants.
 (define NSWindowStyleMaskTitled+ 15) ; titled+closable+miniaturizable+resizable
@@ -250,3 +275,54 @@
   (define nsurl (tell (tell NSURL alloc) initWithString: (->nsstring url)))
   (define request (tell (tell NSURLRequest alloc) initWithURL: #:type _id nsurl))
   (tellv (mac:webview-webview wv) loadRequest: #:type _id request))
+
+;; ---- verification APIs (title / url / capture!) ----
+;; These exist so callers — and agents developing Glaze apps — can observe
+;; webview state without a human looking at the screen.
+
+(define (title wv)
+  (define ns (tell #:type _id (mac:webview-webview wv) title))
+  (and (cast ns _id _pointer) (tell #:type _string ns UTF8String)))
+
+(define (url wv)
+  (define u (tell #:type _id (mac:webview-webview wv) URL))
+  (and (cast u _id _pointer)
+       (tell #:type _string (tell #:type _id u absoluteString) UTF8String)))
+
+;; Captures the window to dest (default: a fresh temp .png) and returns the
+;; path, or #f when the window is closed or not currently capturable (e.g. it
+;; sits on a hidden Space). CGWindowListCreateImage is synchronous and needs
+;; no runloop participation.
+(define (capture! wv [dest #f])
+  (and (not (unbox (mac:webview-closed?-box wv)))
+       CGWindowListCreateImage
+       (let ()
+         (define winnum (tell #:type _intptr (mac:webview-window wv) windowNumber))
+         (define img (CGWindowListCreateImage rect-null
+                                               kCGWindowListOptionIncludingWindow
+                                               (bitwise-and winnum #xFFFFFFFF)
+                                               0))
+         (and img
+              (let* ((pool (tell (tell NSAutoreleasePool alloc) init))
+                     (rep (tell (tell NSBitmapImageRep alloc)
+                                initWithCGImage:
+                                #:type _pointer
+                                img))
+                     (data (tell rep
+                                 representationUsingType:
+                                 #:type _int
+                                 NSPNGFileType
+                                 properties:
+                                 #:type _id
+                                 #f))
+                     (path (or dest (make-temporary-file "glaze-capture-~a.png")))
+                     (ok? (tell #:type _bool
+                                data
+                                writeToFile:
+                                (->nsstring (if (string? path) path (path->string path)))
+                                atomically:
+                                #:type _bool
+                                #t)))
+                (tellv pool drain)
+                (when CGImageRelease (CGImageRelease img))
+                (and ok? path))))))

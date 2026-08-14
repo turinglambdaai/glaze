@@ -16,6 +16,9 @@
          supported?
          close
          navigate
+         title
+         url
+         capture!
          lin:webview?)
 
 (define gtk-lib
@@ -45,7 +48,7 @@
 (define webkit_web_view_load_uri
   (maybe-bind webkit-lib "webkit_web_view_load_uri" (_fun _pointer _string -> _void)))
 
-(struct lin:webview (window webview) #:transparent)
+(struct lin:webview (window webview [url #:mutable]) #:transparent)
 
 (define (supported?)
   (and (eq? (system-type 'os) 'unix)
@@ -77,11 +80,21 @@
   ;; (GTK requires its main loop on the thread that called gtk_init; Racket
   ;; threads share one OS thread, so this is consistent.)
   (void (thread gtk_main))
-  (lin:webview window webview))
+  (lin:webview window webview url))
 
 (define (close wv)
   (when gtk_main_quit
     (gtk_main_quit)))
 
 (define (navigate wv url)
+  (set-lin:webview-url! wv url)
   (webkit_web_view_load_uri (lin:webview-webview wv) url))
+
+;; Verification APIs — skeleton: the webkit_web_view_get_title /
+;; get_uri bindings are not wired up yet.
+(define (title wv)
+  #f)
+(define (url wv)
+  (lin:webview-url wv))
+(define (capture! wv [dest #f])
+  #f)

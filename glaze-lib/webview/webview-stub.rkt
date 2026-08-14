@@ -7,7 +7,10 @@
 (provide open-webview
          supported?
          close
-         navigate)
+         navigate
+         title
+         url
+         capture!)
 
 (define (supported?)
   #f)
@@ -23,3 +26,9 @@
   (void))
 (define (navigate h url)
   (void))
+(define (title h)
+  #f)
+(define (url h)
+  #f)
+(define (capture! h [dest #f])
+  #f)

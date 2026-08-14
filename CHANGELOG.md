@@ -11,7 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Native WebView embedding** (`glaze/webview`): public `open-window` /
   `open-webview` API with platform backend dispatch (windows/macos/linux/stub),
   mirroring the tray design and falling back to the stub when native deps are
-  missing.
+  missing. `#:fallback-browser?` opens the system browser when the native
+  backend is unavailable.
+- **Verification APIs** (agent-friendly): `webview-title`, `webview-url`, and
+  `webview-capture!` (window screenshot to PNG) let automated callers assert
+  on UI state without a human at the screen. Fully implemented on macOS;
+  other backends degrade to `#f`.
 - **Windows backend** (pure Racket FFI): the WebView2 async init chain through
   controller delivery is verified working via hand-built COM CompletedHandler
   vtables; ships `WebView2Loader.dll`. Completing `Navigate` is pending a COM
