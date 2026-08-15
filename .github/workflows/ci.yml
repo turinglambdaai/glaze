@@ -29,7 +29,6 @@ jobs:
           raco pkg install --no-docs --link ./glaze-cli
           raco pkg install --no-docs --link ./glaze-doc
           raco pkg install --no-docs --link ./glaze-test
-          raco pkg install --link .
 
       - name: Run tests
         run: raco test glaze-test/
@@ -61,7 +60,6 @@ jobs:
       - name: Install Glaze packages
         run: |
           raco pkg install --no-docs --link ./glaze-lib
-          raco pkg install --link .
 
       - name: Install webview deps (Linux)
         if: runner.os == 'Linux'
@@ -102,7 +100,6 @@ jobs:
         run: |
           raco pkg install --no-docs --link ./glaze-lib
           raco pkg install --no-docs --link ./glaze-cli
-          raco pkg install --link .
 
       - name: Install installer toolchain (Linux)
         if: runner.os == 'Linux'
