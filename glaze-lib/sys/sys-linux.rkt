@@ -5,6 +5,8 @@
 ;; freedesktop front-ends).
 
 (require ffi/unsafe
+         racket/path
+         racket/string
          racket/system)
 
 (provide supported?
