@@ -86,16 +86,24 @@
   #:transparent)
 
 (define (supported?)
-  (and (eq? (system-type 'os) 'unix)
-       gtk-lib
-       webkit-lib
-       gtk_init
-       gtk_window_new
-       webkit_web_view_new
-       webkit_web_view_load_uri
-       g_main_context_iteration
-       g_signal_connect_data
-       #t))
+  (define components
+    `((os . ,(eq? (system-type 'os) 'unix))
+      (gtk-lib . ,(and gtk-lib #t))
+      (webkit-lib . ,(and webkit-lib #t))
+      (gtk_init . ,(and gtk_init #t))
+      (gtk_window_new . ,(and gtk_window_new #t))
+      (webkit_web_view_new . ,(and webkit_web_view_new #t))
+      (webkit_web_view_load_uri . ,(and webkit_web_view_load_uri #t))
+      (g_main_context_iteration . ,(and g_main_context_iteration #t))
+      (g_signal_connect_data . ,(and g_signal_connect_data #t))))
+  (unless (andmap cdr components)
+    (fprintf (current-error-port)
+             "[glaze-linux-webview] unsupported; missing: ~a\n"
+             (string-join
+              (for/list ([c (in-list components)] #:unless (cdr c))
+                (symbol->string (car c)))
+              ", ")))
+  (andmap cdr components))
 
 ;; window-pointer -> on-close thunk registry (GTK "destroy" callback side).
 (define close-callbacks (make-hasheq))

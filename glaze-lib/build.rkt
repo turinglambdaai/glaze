@@ -70,8 +70,12 @@
   (define out-exe-path (build-path project-dir out-exe-name))
 
   (define exe-args
+    ;; --gui is Windows-only (console-less exe). On macOS --gui would make
+    ;; raco exe emit an .app bundle directly, which raco distribute cannot
+    ;; consume; the documented flow is a bare executable, which distribute
+    ;; wraps into dist/<name>.app itself.
     (append (list "exe")
-            (list "--gui")
+            (if (eq? os 'windows) (list "--gui") '())
             (if (and (eq? os 'windows) embed-dlls?)
                 (list "--embed-dlls")
                 '())

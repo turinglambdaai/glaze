@@ -77,8 +77,7 @@
   (bytes #xE0 #xA7 #xC1 #x63 #x68 #xCB #x3B #x44 #x8B #xA8 #x4D #x08 #xCF #x11 #xF0 #xAE))
 
 (define (log fmt . args)
-  (apply fprintf (current-error-port) "[glaze-win-webview] " fmt args)
-  (newline (current-error-port)))
+  (apply fprintf (current-error-port) (string-append "[glaze-win-webview] " fmt "\n") args))
 
 ;; UTF-16 helper (Racket has no string->bytes/utf-16).
 (define conv (bytes-open-converter "platform-UTF-8" "platform-UTF-16"))

@@ -10,7 +10,8 @@
          stub:set-icon!
          stub:set-menu!
          stub:close
-         stub-supported?)
+         stub-supported?
+         stub:supported?)
 
 ;; A tray handle is just a box around a boolean "open?" flag, so callers and
 ;; tests can distinguish an open tray from a closed one without any native
@@ -21,6 +22,10 @@
   ;; The stub is always "available" — it just does nothing. Platforms pick a
   ;; real backend when native support is present and fall back to this.
   #t)
+
+;; The dispatcher requires stub procs under a `stub:` prefix for every
+;; backend name — including `supported?`.
+(define stub:supported? stub-supported?)
 
 (define (stub:make-tray #:icon icon-path
                         #:tooltip tooltip
