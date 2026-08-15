@@ -345,8 +345,10 @@ NSI
       (if (eq? os 'macosx)
           (build-path out-dir (string-append app-name ".app") "Contents" "Resources" "public")
           (build-path out-dir "public")))
-    ;; copy-directory/files creates the dest itself but fails if it already
-    ;; exists, so remove a stale copy first (rebuilds).
+    ;; copy-directory/files creates the dest itself but needs the parent
+    ;; chain (a fresh .app from raco distribute may not have Resources/),
+    ;; and fails if the dest already exists — remove a stale copy first.
+    (make-directory* (path-only dest-public))
     (when (directory-exists? dest-public)
       (delete-directory/files dest-public))
     (copy-directory/files src-public dest-public)))

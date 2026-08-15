@@ -57,8 +57,10 @@
   (printf "[e2e] backend unavailable on this host — FAIL\n")
   (exit 1))
 
-(check! "page 1 title commits"
-        (wait-until (lambda () (equal? (webview-title wv) "E2E One"))))
+(define title1-ok? (wait-until (lambda () (equal? (webview-title wv) "E2E One"))))
+(unless title1-ok?
+  (log (format "timeout: title=~s url=~s" (webview-title wv) (webview-url wv))))
+(check! "page 1 title commits" title1-ok?)
 (check! "page 1 url" (equal? (webview-url wv) (format "http://127.0.0.1:~a/" port)))
 
 ;; capture: may need the window to composite first.
@@ -73,8 +75,10 @@
 (when shot (log (format "capture: ~a (~a bytes)" shot (file-size shot))))
 
 (webview-navigate wv (format "http://127.0.0.1:~a/p2.html" port))
-(check! "navigate -> page 2 title commits"
-        (wait-until (lambda () (equal? (webview-title wv) "E2E Two"))))
+(define title2-ok? (wait-until (lambda () (equal? (webview-title wv) "E2E Two"))))
+(unless title2-ok?
+  (log (format "nav timeout: title=~s url=~s" (webview-title wv) (webview-url wv))))
+(check! "navigate -> page 2 title commits" title2-ok?)
 
 (webview-close wv)
 (sleep 0.5)
