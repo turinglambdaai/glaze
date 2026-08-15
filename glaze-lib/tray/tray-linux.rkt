@@ -43,7 +43,7 @@
     (with-handlers ([exn:fail? (lambda (e) #f)])
       (if (string=? dir "")
           (ffi-lib name (list version #f))
-          (ffi-lib (format "~a~a.so~a" dir name (if version (format ".~a" version) "")))))))
+          (ffi-lib (format "~alib~a.so~a" dir name (if version (format ".~a" version) "")))))))
 
 
 ;; Load the indicator library; try ayatana first, then legacy appindicator.
