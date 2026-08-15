@@ -65,10 +65,7 @@
   (shutdown-proc))
 
 ;; Backward-compatible alias. Prefer `start-server` in new code.
-(define start-dev-server
-  (make-keyword-procedure
-   (lambda (kws kw-args . positional)
-     (keyword-apply start-server kws kw-args positional))))
+(define start-dev-server start-server)
 
 (define listen-wait-secs 3)
 

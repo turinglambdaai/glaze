@@ -97,9 +97,11 @@
             (system* "/usr/bin/curl" "-sN" "--max-time" "3"
                      "-o" (path->string out-path)
                      "http://127.0.0.1:18990/glaze/events"))))
-(sleep 0.5)
-(bus-broadcast! bus 'hello (hasheq 'msg "world"))
-(sleep 0.5)
+;; CI hosts are slower to establish the SSE connection; keep
+;; broadcasting until the stream has had time to subscribe.
+(for ([i (in-range 8)])
+  (sleep 0.5)
+  (bus-broadcast! bus 'hello (hasheq 'msg "world")))
 (shutdown)
 (sync/timeout 4 curl)
 (define sse-text (file->string out-path))
