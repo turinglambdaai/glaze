@@ -28,7 +28,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 | Agent 友好的 UI 验证（title/url/截图） | **内置** | 需 WebDriver | 需 CDP | 有限 |
 | WebView 后端 | WebView2 / WKWebView / WebKitGTK | 相同 | 自带 Chromium | WebView2/WKWebView |
 
-当前的诚实差距：Windows WebView 尚在实验阶段（见下表状态）、未接 devtools、IPC 为纯 JSON 无类型层。
+当前的诚实差距：Windows/Linux WebView 的真机验证待 CI 跑通（见下表状态）、IPC 为纯 JSON 无类型层。
 
 ## 平台支持状态
 
@@ -37,9 +37,10 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 | HTTP 服务器 + 浏览器 | ✅ | ✅ | ✅ |
 | 系统托盘 | ✅ | ✅ | ✅（CI 验证） |
 | JSON API 桥接 | ✅ | ✅ | ✅ |
-| 原生 WebView 窗口 | ✅ 端到端验证 | ⚠️ 实验性（WebView2 初始化已通；`Navigate` 待修 COM 问题） | 🔲 结构完整，未真机验证 |
-| `webview-title` / `webview-url` | ✅ | 部分（url） | 部分（url） |
-| `webview-capture!`（截图） | ✅ | 🔲 | 🔲 |
+| 原生 WebView 窗口 | ✅ 端到端验证 | 🔄 已按官方 SDK 头文件修正，待 CI 验证 | 🔄 结构完整，待 CI（Xvfb）验证 |
+| `webview-title` / `webview-url` | ✅ | 🔄 已实现（`get_DocumentTitle`/`get_Source`），待 CI | 🔄 已实现，待 CI |
+| `webview-capture!`（截图） | ✅ | 🔄 已实现（PrintWindow + PowerShell 转 PNG），待 CI | 🔄 已实现（gdk_pixbuf），待 CI |
+| `#:devtools?` | ✅（inspectable，macOS 13+） | ✅（`OpenDevToolsWindow`） | 🔲 |
 
 原生后端不可用时，`run-app` / `open-window` 自动回退系统浏览器 —— 应用在所有平台都能跑。
 

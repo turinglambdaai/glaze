@@ -66,12 +66,14 @@
                      #:title [title "Glaze"]
                      #:width [width 1024]
                      #:height [height 768]
+                     #:devtools? [devtools? #f]
                      #:on-close [on-close (lambda () (void))]
                      #:fallback-browser? [fallback? #f])
   (open-webview url
                 #:title title
                 #:width width
                 #:height height
+                #:devtools? devtools?
                 #:on-close on-close
                 #:fallback-browser? fallback?))
 
@@ -79,6 +81,7 @@
                       #:title [title "Glaze"]
                       #:width [width 1024]
                       #:height [height 768]
+                      #:devtools? [devtools? #f]
                       #:on-close [on-close (lambda () (void))]
                       #:fallback-browser? [fallback? #f])
   (define h
@@ -88,7 +91,12 @@
                                           (exn-message e))
                                  (displayln "use open-browser as fallback." (current-error-port))
                                  #f)])
-      ((ref 'open-webview) url #:title title #:width width #:height height #:on-close on-close)))
+      ((ref 'open-webview) url
+        #:title title
+        #:width width
+        #:height height
+        #:devtools? devtools?
+        #:on-close on-close)))
   (cond
     [h (webview (detected-backend) h)]
     [fallback? (open-browser url) #f]

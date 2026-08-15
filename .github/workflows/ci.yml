@@ -38,6 +38,48 @@ jobs:
         run: raco fmt --check glaze-lib/ glaze-cli/ glaze-test/
         continue-on-error: true
 
+  webview-e2e:
+    # Real-window WebView end-to-end on each OS: open -> load (title
+    # commits) -> capture -> navigate -> close -> on-close. Windows needs
+    # nothing extra (WebView2 runtime is preinstalled); Linux runs under
+    # Xvfb with the WebKitGTK packages.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+        racket-version: ['8.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: ${{ matrix.racket-version }}
+
+      - name: Install Glaze packages
+        run: |
+          raco pkg install --no-docs --link ./glaze-lib
+          raco pkg install --link ./glaze
+
+      - name: Install webview deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev xvfb
+
+      - name: Run webview e2e
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a racket scripts/webview-e2e.rkt
+          else
+            racket scripts/webview-e2e.rkt
+          fi
+
   package:
     # Build a sample app with `raco glaze build --installer` on each platform
     # and upload the resulting distribution + installer as artifacts.

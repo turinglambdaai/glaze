@@ -25,6 +25,7 @@
 ;;     and kept alive forever (GTK stores the raw pointer).
 
 (require ffi/unsafe
+         racket/file
          racket/path
          racket/string)
 
@@ -128,6 +129,7 @@
                       #:title [title "Glaze"]
                       #:width [width 1024]
                       #:height [height 768]
+                      #:devtools? [devtools? #f]
                       #:on-close [on-close (lambda () (void))])
   (unless (supported?)
     (error 'open-webview "Linux WebView backend not available"))
@@ -167,5 +169,45 @@
     (define u (webkit_web_view_get_uri (lin:webview-webview wv)))
     (and (non-empty-string? u) u)))
 
+;; Window capture via GDK: gdk_pixbuf_get_from_window on the window's
+;; GdkWindow, then gdk_pixbuf_savev to PNG ("png" handler ships with GTK).
+(define gdk-pixbuf-lib
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (ffi-lib "gdk_pixbuf-2.0" '("0" #f))))
+(define gtk_widget_get_window
+  (maybe-bind gtk-lib "gtk_widget_get_window" (_fun _pointer -> _pointer)))
+(define gdk_pixbuf_get_from_window
+  (and gdk-pixbuf-lib
+       (get-ffi-obj "gdk_pixbuf_get_from_window"
+                    gdk-pixbuf-lib
+                    (_fun _pointer _int _int _int _int -> _pointer)
+                    (lambda () #f))))
+(define gdk_pixbuf_savev
+  (and gdk-pixbuf-lib
+       (get-ffi-obj "gdk_pixbuf_savev"
+                    gdk-pixbuf-lib
+                    (_fun _pointer _string _string _pointer _pointer _pointer -> _bool)
+                    (lambda () #f))))
+
 (define (capture! wv [dest #f])
-  #f)
+  (and (not (unbox (lin:webview-closed?-box wv)))
+       gtk_widget_get_window
+       gdk_pixbuf_get_from_window
+       gdk_pixbuf_savev
+       (let ()
+         (define gdkwin (gtk_widget_get_window (lin:webview-window wv)))
+         (and gdkwin
+              (let ()
+                (define pixbuf (gdk_pixbuf_get_from_window gdkwin 0 0 -1 -1))
+                (and pixbuf
+                     (let ()
+                       (define path
+                         (if dest
+                             (if (string? dest) (string->path dest) dest)
+                             (make-temporary-file "glaze-capture-~a.png")))
+                       (define ok?
+                         (gdk_pixbuf_savev pixbuf
+                                           (path->string path)
+                                           "png"
+                                           #f #f #f))
+                       (and ok? path))))))))

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.3.0] - Unreleased
 
+### Fixed (Phase 3, in progress)
+- **Windows WebView2 root cause found and fixed**: the long-standing
+  "COM apartment" diagnosis was wrong — `get_CoreWebView2` was being called
+  at vtable slot 3 (actually `get_IsVisible`, which writes a BOOL into the
+  out-pointer), yielding a garbage pointer that crashed on any vtable
+  access. All vtable indices are now verified against the official
+  Microsoft.Web.WebView2 SDK header. The backend additionally: AddRefs and
+  retains the controller/CoreWebView2 for post-open navigate, implements
+  title/url (get_DocumentTitle / get_Source) and capture! (PrintWindow +
+  PowerShell BMP->PNG), sizes the WebView to the client area, and wires
+  WM_CLOSE to on-close. Runtime verification pending the new CI e2e job.
+- Linux backend: capture! via gdk_pixbuf; CI e2e job added (Xvfb +
+  WebKitGTK) alongside macOS/Windows real-window e2e.
+- `open-window`/`open-webview` accept `#:devtools?` (macOS:
+  setInspectable:; Windows: OpenDevToolsWindow; Linux: not yet).
+
 ### Added (Phase 3, in progress)
 - **JavaScript bridge** (`glaze/api`): real JSON routing over the frontend
   server — `GET`/`POST`/`PUT`/`DELETE` route values with `:param` capture,

@@ -200,6 +200,7 @@
                       #:title [title "Glaze"]
                       #:width [width 1024]
                       #:height [height 768]
+                      #:devtools? [devtools? #f]
                       #:on-close [on-close (lambda () (void))])
   (unless (supported?)
     (error 'open-webview "macOS WebView backend unavailable (WebKit failed to load)"))
@@ -240,6 +241,11 @@
          #:type _uint
          (bitwise-ior NSViewWidthSizable NSViewHeightSizable))
   (tellv window setContentView: #:type _id webview)
+  ;; #:devtools? makes WKWebView inspectable (macOS 13+); on older systems
+  ;; web inspectors need a bundle-local override — ignored here.
+  (when (and devtools?
+             (tell webview respondsToSelector: #:type _SEL (selector setInspectable:)))
+    (tellv webview setInspectable: #:type _bool #t))
 
   ;; Delegate forwards windowWillClose: to the on-close thunk and flags the
   ;; closed?-box so the pump loop exits. Registry key: the window's pointer.

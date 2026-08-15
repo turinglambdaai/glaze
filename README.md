@@ -28,7 +28,7 @@ You get:
 | Agent-friendly UI verification (`title`/`url`/screenshot) | **built-in** | via WebDriver | via CDP | limited |
 | WebView backends | WebView2 / WKWebView / WebKitGTK | same | bundled Chromium | WebView2/WKWebView |
 
-The honest gaps today: Windows webview is experimental (see status below), no devtools wiring, no typed IPC layer — plain JSON.
+The honest gaps today: Windows/Linux webview runtime verification is pending CI (see status below); no typed IPC layer — plain JSON.
 
 ## Platform status
 
@@ -37,9 +37,10 @@ The honest gaps today: Windows webview is experimental (see status below), no de
 | HTTP server + browser | ✅ | ✅ | ✅ |
 | System tray | ✅ | ✅ | ✅ (CI-verified) |
 | JSON API bridge | ✅ | ✅ | ✅ |
-| Native webview window | ✅ verified end-to-end | ⚠️ experimental (WebView2 init works; `Navigate` pending a COM fix) | 🔲 structural, not runtime-verified |
-| `webview-title` / `webview-url` | ✅ | partial (url) | partial (url) |
-| `webview-capture!` (screenshot) | ✅ | 🔲 | 🔲 |
+| Native webview window | ✅ verified end-to-end | 🔄 fixed against official SDK header; CI e2e pending | 🔄 structural; CI e2e (Xvfb) pending |
+| `webview-title` / `webview-url` | ✅ | 🔄 implemented (`get_DocumentTitle`/`get_Source`); CI pending | 🔄 implemented; CI pending |
+| `webview-capture!` (screenshot) | ✅ | 🔄 implemented (PrintWindow + PowerShell PNG); CI pending | 🔄 implemented (gdk_pixbuf); CI pending |
+| `#:devtools?` | ✅ (inspectable, macOS 13+) | ✅ (`OpenDevToolsWindow`) | 🔲 |
 
 Without a native backend, `run-app` / `open-window` automatically fall back to the system browser — the app still works everywhere.
 
