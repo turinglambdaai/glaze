@@ -72,6 +72,8 @@
 
 (import-class NSString
               NSApplication
+              NSMenu
+              NSMenuItem
               NSWindow
               NSView
               NSNotification
@@ -158,11 +160,52 @@
    (lambda ()
      (define app (tell NSApplication sharedApplication))
      (tellv app setActivationPolicy: #:type _int NSApplicationActivationPolicyRegular)
+     (install-standard-menus! app)
      ;; macOS 14+ deprecates activateIgnoringOtherApps: in favor of -activate.
      (if (tell app respondsToSelector: #:type _SEL (selector activate))
          (tellv app activate)
          (tellv app activateIgnoringOtherApps: #:type _bool #t))
      app)))
+
+;; Standard Edit/Window menus with key equivalents. Without an Edit menu a
+;; plain NSApp has NO first-responder chain for copy/paste/select-all —
+;; Cmd+C/V/X/A silently do nothing inside the WKWebView's text fields, a
+;; classic embedding omission. nil-target menu items dispatch to the first
+;; responder, which WKWebView implements.
+(define (mi title action key)
+  (tell (tell NSMenuItem alloc)
+        initWithTitle:
+        (->nsstring title)
+        action:
+        #:type _SEL
+        action
+        keyEquivalent:
+        (->nsstring key)))
+
+(define (install-standard-menus! app)
+  (define main-menu (tell (tell NSMenu alloc) init))
+  ;; Edit menu.
+  (define edit-menu (tell (tell NSMenu alloc) initWithTitle: (->nsstring "Edit")))
+  (for ([item (in-list
+               (list
+                (mi "Undo" (selector undo:) "z")
+                (mi "Redo" (selector redo:) "Z")
+                (mi "Cut" (selector cut:) "x")
+                (mi "Copy" (selector copy:) "c")
+                (mi "Paste" (selector paste:) "v")
+                (mi "Select All" (selector selectAll:) "a")))])
+    (tellv edit-menu addItem: #:type _id item))
+  (define edit-item (mi "Edit" #f ""))
+  (tellv edit-item setSubmenu: #:type _id edit-menu)
+  (tellv main-menu addItem: #:type _id edit-item)
+  ;; Window menu: Close / Minimize.
+  (define window-menu (tell (tell NSMenu alloc) initWithTitle: (->nsstring "Window")))
+  (tellv window-menu addItem: #:type _id (mi "Close" (selector performClose:) "w"))
+  (tellv window-menu addItem: #:type _id (mi "Minimize" (selector miniaturize:) "m"))
+  (define window-item (mi "Window" #f ""))
+  (tellv window-item setSubmenu: #:type _id window-menu)
+  (tellv main-menu addItem: #:type _id window-item)
+  (tellv app setMainMenu: #:type _id main-menu))
 
 ;; Run the main run loop in NSDefaultRunLoopMode for dwell-secs. This is the
 ;; modal-loop idiom ([runMode:beforeDate:]): it services AppKit's event source

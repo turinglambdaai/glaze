@@ -60,6 +60,15 @@ glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt + a
 examples/             # hello / counter（JS↔Racket 桥接）/ agent-verify / tray-demo / webview-demo
 ```
 
+## 事件推送 / 宏路由 / 内置端点
+
+- `glaze/events`：`make-event-bus` + `bus-broadcast!` → 内置 SSE 端点 `GET /glaze/events`
+  （15s keepalive；慢订阅者溢出丢事件不阻塞广播方）
+- `glaze/api-macros`：`define-api-routes` 一处声明 = Racket 过程 + 类型化路由 + JS 客户端入口；
+  path 里的 `:id` 参数自动从 URL 取，其余从 JSON body 取（**symbol 键**）
+- 内置端点：`/glaze/api.js`（生成客户端，`#:serve-api-client? #f` 关闭）
+- Host 头校验默认开启（只认 127.0.0.1/localhost/[::1]）
+
 ## JS↔Racket 桥接（define-api 已废除）
 
 前端 `fetch("/api/...")` → Racket JSON。路由是普通值（`glaze/api` 的 GET/POST/PUT/DELETE +

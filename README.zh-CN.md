@@ -211,6 +211,38 @@ const s = await fetch('/api/counter/bump',
    body: JSON.stringify({delta: 5})}).then(r => r.json());
 ```
 
+### 一处声明，三重产物 —— `define-api-routes`
+
+```racket
+(define-api-routes api
+  [(POST "api/counter/bump")
+   (bump [delta exact-nonnegative-integer? 1])   ; 必填+校验，或缺省
+   (hasheq 'count (add1 delta))])
+```
+
+一个子句同时定义：Racket 过程（`bump`）、路由（坏输入 → 报参数名的 400；过程异常 → 500）、
+JS 客户端入口 —— `/glaze/api.js` 自动提供 `glaze.api.counterBump({delta: 5})`、
+`glaze.call(method, path, body)` 和 `glaze.on(name, fn)`。
+
+### 后端 → 前端推送（SSE）
+
+```racket
+(define bus (make-event-bus))
+(start-server ... #:events bus)
+(bus-broadcast! bus 'count-changed (hasheq 'count 42))   ; 任意线程
+```
+
+```js
+glaze.on('count-changed', s => render(s.count));
+```
+
+页面也可以直接 `new EventSource('/glaze/events')`。浏览器回退同样可用 —— 同源、无额外端口。
+
+### 安全
+
+- 仅服务 Host 为 `127.0.0.1` / `localhost` / `[::1]` 的请求（DNS rebinding 防护，恶意源 403）。
+- API handler 永不断连接 —— 参数问题 400 JSON，过程异常 500 JSON。
+
 完整可运行的应用见 [`examples/counter/`](examples/counter/)。
 
 ## 系统托盘

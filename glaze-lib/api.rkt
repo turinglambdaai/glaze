@@ -31,6 +31,11 @@
          DELETE
          route?
          route-handler
+         route-method
+         route-segments
+         param?
+         param-id
+         (struct-out exn:fail:glaze:bad-param)
          json-response
          api-response
          request-json-body
@@ -40,6 +45,10 @@
 
 (struct route (method segments handler) #:transparent)
 (struct param (id) #:transparent)
+
+;; Raised by define-api-routes argument checking; the server maps it to a
+;; 400 (plain exn:fail from a handler stays a 500).
+(struct exn:fail:glaze:bad-param exn:fail ())
 
 ;; "api/items/:id" -> '("api" "items" (param id))
 (define (parse-path path)
@@ -90,12 +99,21 @@
                  #"application/json; charset=utf-8" '()
                  (list json-bytes)))
 
-;; Parse the request body as JSON. Missing/invalid body -> #f.
+;; Parse the request body as JSON. Missing/empty/invalid body -> the empty
+;; hash, so optional parameters fall back to their defaults and required
+;; ones report a clean 400 instead of an internal type error.
 (define (request-json-body req)
   (define raw (request-post-data/raw req))
-  (and raw
-       (with-handlers ([exn:fail? (lambda (e) #f)])
-         (bytes->jsexpr raw))))
+  (define bs
+    (cond
+      [(not raw) #""]
+      [(eof-object? raw) #""]
+      [(bytes? raw) raw]
+      [else #""]))
+  (define parsed
+    (with-handlers ([exn:fail? (lambda (e) (hasheq))])
+      (bytes->jsexpr bs)))
+  (if (eof-object? parsed) (hasheq) parsed))
 
 (define (error-response status msg)
   (response/full status #"Error" (current-seconds)

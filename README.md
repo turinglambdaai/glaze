@@ -212,6 +212,42 @@ const s = await fetch('/api/counter/bump',
    body: JSON.stringify({delta: 5})}).then(r => r.json());
 ```
 
+### Typed routes, one declaration — `define-api-routes`
+
+```racket
+(define-api-routes api
+  [(POST "api/counter/bump")
+   (bump [delta exact-nonnegative-integer? 1])   ; required, checked, or default
+   (hasheq 'count (add1 delta))])
+```
+
+One clause defines a Racket procedure (`bump`), a route (bad input → a 400
+naming the parameter; handler errors → 500), and a JS client entry — the
+served `/glaze/api.js` exposes `glaze.api.counterBump({delta: 5})`, plus
+`glaze.call(method, path, body)` and `glaze.on(name, fn)`.
+
+### Backend → frontend push (SSE)
+
+```racket
+(define bus (make-event-bus))
+(start-server ... #:events bus)
+(bus-broadcast! bus 'count-changed (hasheq 'count 42))   ; from any thread
+```
+
+```js
+glaze.on('count-changed', s => render(s.count));
+```
+
+The page can also use `new EventSource('/glaze/events')` directly. Works in
+the browser fallback too — same origin, no extra port.
+
+### Security
+
+- Requests are only served for Host headers `127.0.0.1` / `localhost` /
+  `[::1]` (DNS-rebinding guard; hostile origins get 403).
+- API handlers never crash the connection — parameter problems are 400
+  JSON, handler exceptions are 500 JSON.
+
 See [`examples/counter/`](examples/counter/) for the complete working app.
 
 ## System Tray

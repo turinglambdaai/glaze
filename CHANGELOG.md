@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.3.0] - Unreleased
 
+### Added (commercial polish)
+- **Event push** (`glaze/events` + SSE): make-event-bus / bus-broadcast! feed a
+  built-in `GET /glaze/events` Server-Sent-Events endpoint (keepalive every
+  15s, per-subscriber bounded backlog with drop-on-overflow, disconnect
+  cleanup). The browser fallback gets push for free — same origin.
+- **define-api-routes** (`glaze/api-macros`): one declaration yields a
+  callable Racket procedure, a route with typed/optional/:path parameters
+  (bad input -> 400 naming the parameter; handler errors stay 500), and a
+  generated JS client entry.
+- **Generated JS client**: `GET /glaze/api.js` derives `glaze.api.*`
+  functions (path params become arguments), `glaze.call`, and `glaze.on`
+  (EventSource wrapper) from the registered routes. Disable with
+  `#:serve-api-client? #f`.
+- **DNS-rebinding guard**: Host-header validation on every request
+  (127.0.0.1/localhost/[::1]); hostile origins get 403.
+- **macOS standard menus**: Edit (Cmd+Z/X/C/V/A) and Window (Cmd+W/M) —
+  without an Edit menu, keyboard shortcuts silently do nothing in webview
+  text fields.
+- `start-server` rejects non-event-bus `#:events` arguments;
+  `request-json-body` returns the empty hash for absent/empty bodies.
+
 ### Fixed (Phase 3, in progress)
 - **Windows WebView2 root cause found and fixed**: the long-standing
   "COM apartment" diagnosis was wrong — `get_CoreWebView2` was being called
