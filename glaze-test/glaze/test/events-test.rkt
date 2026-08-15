@@ -92,9 +92,12 @@
 ;; ---- SSE over HTTP ----
 ;; ---- SSE over HTTP (curl as a real streaming client) ----
 (define out-path (make-temporary-file "sse-out-~a.txt"))
+(define curl-exe (or (find-executable-path "curl.exe" #f)
+                     (find-executable-path "curl" #f)
+                     "/usr/bin/curl"))
 (define curl
   (thread (lambda ()
-            (system* "/usr/bin/curl" "-sN" "--max-time" "3"
+            (system* curl-exe "-sN" "--no-buffer" "--max-time" "3"
                      "-o" (path->string out-path)
                      "http://127.0.0.1:18990/glaze/events"))))
 ;; CI hosts are slower to establish the SSE connection; keep
@@ -103,7 +106,7 @@
   (sleep 0.5)
   (bus-broadcast! bus 'hello (hasheq 'msg "world")))
 (shutdown)
-(sync/timeout 4 curl)
+(sync/timeout 12 curl)
 (define sse-text (file->string out-path))
 (delete-file out-path)
 (check-true (string-contains? sse-text "event: hello") "SSE event name delivered")
