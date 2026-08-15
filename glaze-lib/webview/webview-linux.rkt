@@ -194,13 +194,22 @@
 (define gtk_widget_get_window
   (maybe-bind gtk-lib "gtk_widget_get_window" (_fun _pointer -> _pointer)))
 ;; gdk_pixbuf_get_from_window lives in libgdk-3 (exported via libgtk-3),
-;; NOT in libgdk_pixbuf; savev lives in libgdk_pixbuf.
+;; NOT in libgdk_pixbuf; savev lives in libgdk_pixbuf. width/height must be
+;; the real window size — passing -1 (as on macOS CGRectNull) returns NULL.
 (define gdk_pixbuf_get_from_window
   (and gtk-lib
        (get-ffi-obj "gdk_pixbuf_get_from_window"
                     gtk-lib
                     (_fun _pointer _int _int _int _int -> _pointer)
                     (lambda () #f))))
+(define gdk_window_get_width
+  (and gtk-lib
+       (get-ffi-obj "gdk_window_get_width" gtk-lib (_fun _pointer -> _int))
+       (lambda () #f)))
+(define gdk_window_get_height
+  (and gtk-lib
+       (get-ffi-obj "gdk_window_get_height" gtk-lib (_fun _pointer -> _int))
+       (lambda () #f)))
 (define gdk_pixbuf_savev
   (and gdk-pixbuf-lib
        (get-ffi-obj "gdk_pixbuf_savev"
@@ -228,7 +237,12 @@
                   (and gdkwin #t))
          (and gdkwin
               (let ()
-                (define pixbuf (gdk_pixbuf_get_from_window gdkwin 0 0 -1 -1))
+                (define pixbuf
+                  (gdk_pixbuf_get_from_window gdkwin
+                                              0
+                                              0
+                                              (gdk_window_get_width gdkwin)
+                                              (gdk_window_get_height gdkwin)))
                 (fprintf (current-error-port)
                          "[glaze-linux-webview] capture: pixbuf=~a\n"
                          (and pixbuf #t))
