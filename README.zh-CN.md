@@ -252,16 +252,13 @@ Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜�
 
 - [x] **Phase 1** — 本地 HTTP 服务器 + 系统浏览器
 - [x] **Phase 2** — 前端资源打包、系统托盘、应用打包
-- [ ] **Phase 3** — 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）— *进行中*
+- [x] **Phase 3** — 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）— *完成，三平台 CI e2e 验证*
 
-> **Phase 3 状态：** `glaze/webview` 模块（`open-window` / `open-webview`）正在开发中。macOS 后端
-> （NSWindow + WKWebView，纯 Racket objc FFI）已端到端验证可用：窗口创建、本地 HTTP 页面加载、
-> `webview-navigate`、关闭（编程关闭与红色按钮均支持）以及 `#:on-close` 回调。macOS 还提供验证
-> API——`webview-title`、`webview-url`、`webview-capture!`（窗口截图为 PNG）——让自动化调用方
-> （包括 AI agent）无需人眼盯屏即可断言 UI 状态。Windows 上
-> WebView2 的异步初始化链（environment → controller → CoreWebView2）已通过纯 Racket COM FFI 验证跑通，
-> 但完成 `Navigate` 还卡在一个 COM apartment/对象生命周期问题上；在此之前 Windows 保持稳定的系统
-> 浏览器体验（`open-window` 加 `#:fallback-browser?` 会自动处理回退）。Linux（WebKitGTK）后端已搭建骨架。
+> **Phase 3 完成：** 三个后端（macOS WKWebView、Windows WebView2、Linux WebKitGTK）均通过
+> 真窗口 CI e2e——open、页面加载、`webview-title`/`url` 验证、`webview-capture!` 截图、
+> `webview-navigate`、关闭（编程与系统按钮）、`#:on-close` 回调；`#:devtools?` 支持 macOS/Windows。
+> 全程纯 Racket FFI，无编译器。剩余打磨（非阻塞）：Linux `#:devtools?`、Windows 窗口缩放跟随
+> （`put_Bounds` 仅在创建时设置，未接 WM_SIZE）、多窗口体验。
 
 ## 许可证
 

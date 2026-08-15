@@ -253,20 +253,15 @@ If a platform's native libraries aren't available at runtime, the tray silently 
 
 - [x] **Phase 1** — Local HTTP server + system browser
 - [x] **Phase 2** — Frontend asset bundling, system tray, app packaging
-- [ ] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK) — *in progress*
+- [x] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK) — *done, verified by the 3-OS CI e2e*
 
-> **Phase 3 status:** the `glaze/webview` module (`open-window` / `open-webview`) is in
-> development. The macOS backend (NSWindow + WKWebView via pure Racket objc FFI) is
-> verified working end-to-end: window creation, page loads over local HTTP,
-> `webview-navigate`, close (programmatic and the red button), and `#:on-close`
-> callbacks. macOS also ships the verification APIs — `webview-title`,
-> `webview-url`, `webview-capture!` (window screenshot to PNG) — so automated
-> callers, including AI agents, can assert on UI state without a human at the
-> screen. Windows has the WebView2 async init chain (environment → controller →
-> CoreWebView2) working via pure-Racket COM FFI, but completing `Navigate` is blocked
-> on a COM apartment/lifetime issue; until then Windows keeps the stable
-> system-browser experience (`open-window` with `#:fallback-browser?` handles this
-> automatically). The Linux (WebKitGTK) backend is scaffolded.
+> **Phase 3 done:** all three backends (macOS WKWebView, Windows WebView2, Linux
+> WebKitGTK) pass the real-window CI e2e — open, page load, `webview-title`/`url`
+> verification, `webview-capture!` screenshots, `webview-navigate`, close (programmatic
+> and OS chrome), and `#:on-close` callbacks; `#:devtools?` on macOS/Windows. Pure
+> Racket FFI throughout, no compiler. Remaining polish (not blockers): Linux
+> `#:devtools?`, Windows resize-follow (`put_Bounds` is set once, not on WM_SIZE),
+> multi-window ergonomics.
 
 ## License
 
