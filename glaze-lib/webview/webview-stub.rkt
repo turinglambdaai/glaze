@@ -10,7 +10,10 @@
          navigate
          title
          url
-         capture!)
+         capture!
+         set-title!
+         set-size!
+         set-fullscreen!)
 
 (define (supported?)
   #f)
@@ -33,3 +36,7 @@
   #f)
 (define (capture! h [dest #f])
   #f)
+
+(define (set-title! h t) (void))
+(define (set-size! h w height) (void))
+(define (set-fullscreen! h on?) (void))

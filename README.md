@@ -259,6 +259,20 @@ the browser fallback too — same origin, no extra port.
 
 See [`examples/counter/`](examples/counter/) for the complete working app.
 
+## System Integrations (`glaze/sys`)
+
+```racket
+(require glaze/sys)
+(clipboard-set! "hello")            ; (clipboard-get)
+(notify! "Download finished" "report.pdf is ready")
+(open-path "/Users/me/report.pdf")  ; default handler
+(reveal-path "/Users/me/report.pdf"); Finder/Explorer, selected
+(unless (single-instance? "com.me.app") (exit 0))
+```
+
+Window controls (from `glaze/webview`): `webview-set-title!`,
+`webview-set-size!`, `webview-set-fullscreen!`.
+
 ## System Tray
 
 Glaze provides a cross-platform system tray so your app can live in the notification area / menu bar with a right-click (or left-click on macOS) menu. The backend is chosen by platform — pure Racket FFI, no native compilation required:

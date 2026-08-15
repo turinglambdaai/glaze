@@ -4,6 +4,7 @@
          "api.rkt"
          "api-macros.rkt"
          "events.rkt"
+         "sys/main.rkt"
          "browser.rkt"
          "assets.rkt"
          "build.rkt"
@@ -12,7 +13,7 @@
          "webview/main.rkt")
 
 (provide (all-from-out "server.rkt" "api.rkt" "api-macros.rkt" "events.rkt"
-                       "browser.rkt" "assets.rkt" "build.rkt")
+                       "browser.rkt" "assets.rkt" "build.rkt" "sys/main.rkt")
          (all-from-out "app.rkt")
          (all-from-out "tray/main.rkt")
          (all-from-out "webview/main.rkt"))

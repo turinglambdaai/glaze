@@ -36,6 +36,9 @@
          title
          url
          capture!
+         set-title!
+         set-size!
+         set-fullscreen!
          lin:webview?)
 
 ;; Racket's ffi-lib misses the Debian/Ubuntu multiarch dirs on some hosts
@@ -275,3 +278,21 @@
                          (fprintf (current-error-port)
                                   "[glaze-linux-webview] capture: savev failed\n"))
                        (and ok? path))))))))
+
+
+;; ---- window controls ----
+(define gtk_window_fullscreen
+  (maybe-bind gtk-lib "gtk_window_fullscreen" (_fun _pointer -> _void)))
+(define gtk_window_unfullscreen
+  (maybe-bind gtk-lib "gtk_window_unfullscreen" (_fun _pointer -> _void)))
+
+(define (set-title! wv t)
+  (gtk_window_set_title (lin:webview-window wv) t))
+
+(define (set-size! wv width height)
+  (gtk_window_set_default_size (lin:webview-window wv) width height))
+
+(define (set-fullscreen! wv on?)
+  (if on?
+      (gtk_window_fullscreen (lin:webview-window wv))
+      (gtk_window_unfullscreen (lin:webview-window wv))))

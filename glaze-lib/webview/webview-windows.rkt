@@ -53,6 +53,9 @@
          title
          url
          capture!
+         set-title!
+         set-size!
+         set-fullscreen!
          win:webview?)
 
 (define-runtime-path here ".")
@@ -581,3 +584,38 @@
                                                 "-NoProfile" "-NonInteractive" "-Command" ps))))
                        (delete-file bmp-path)
                        (and ok? (file-exists? png-path) png-path)))))))))
+
+;; ---- window controls ----
+(define SetWindowTextW
+  (get-ffi-obj "SetWindowTextW" user32 (_fun _pointer _pointer -> _bool) (lambda () #f)))
+(define SetWindowPos
+  (get-ffi-obj "SetWindowPos"
+               user32
+               (_fun _pointer _pointer _int _int _int _int _uint -> _bool)
+               (lambda () #f)))
+(define GetWindowLongPtrW
+  (get-ffi-obj "GetWindowLongPtrW" user32 (_fun _pointer _int -> _intptr) (lambda () #f)))
+(define SetWindowLongPtrW
+  (get-ffi-obj "SetWindowLongPtrW" user32 (_fun _pointer _int _intptr -> _intptr)
+               (lambda () #f)))
+
+(define SWP_NOMOVE #x0002)
+(define SWP_NOZORDER #x0004)
+(define GWL_STYLE -16)
+(define WS_MAXIMIZEBOX #x00010000)
+(define WS_MINIMIZEBOX #x00020000)
+(define SW_MAXIMIZE 3)
+(define SW_RESTORE 9)
+
+(define (set-title! wv t)
+  (define hwnd (unbox (win:webview-hwnd-box wv)))
+  (and hwnd SetWindowTextW (SetWindowTextW hwnd (wstr t))))
+
+(define (set-size! wv width height)
+  (define hwnd (unbox (win:webview-hwnd-box wv)))
+  (and hwnd SetWindowPos
+       (SetWindowPos hwnd #f 0 0 width height (bitwise-ior SWP_NOMOVE SWP_NOZORDER))))
+
+(define (set-fullscreen! wv on?)
+  (define hwnd (unbox (win:webview-hwnd-box wv)))
+  (and hwnd ShowWindow (ShowWindow hwnd (if on? SW_MAXIMIZE SW_RESTORE))))

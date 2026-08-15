@@ -54,6 +54,9 @@
          title
          url
          capture!
+         set-title!
+         set-size!
+         set-fullscreen!
          mac:webview?
          mac:webview-window
          mac:webview-webview
@@ -115,7 +118,8 @@
 (define NSViewHeightSizable 16)
 (define NSApplicationActivationPolicyRegular 0)
 
-(struct mac:webview (window webview delegate closed?-box [thread #:mutable]) #:transparent)
+(struct mac:webview (window webview delegate closed?-box fullscreen?-box [thread #:mutable])
+  #:transparent)
 
 (define (supported?)
   (and (eq? (system-type 'os) 'macosx) webkit #t))
@@ -307,7 +311,7 @@
       (tellv app activate)
       (tellv app activateIgnoringOtherApps: #:type _bool #t))
 
-  (define wv (mac:webview window webview delegate closed? #f))
+  (define wv (mac:webview window webview delegate closed? (box #f) #f))
   (navigate wv url)
 
   ;; Pump AppKit events until the window closes.
@@ -375,3 +379,22 @@
                 (tellv pool drain)
                 (when CGImageRelease (CGImageRelease img))
                 (and ok? path))))))
+
+
+;; ---- window controls ----
+(define (set-title! wv t)
+  (tellv (mac:webview-window wv) setTitle: (->nsstring t)))
+
+(define (set-size! wv width height)
+  (tellv (mac:webview-window wv)
+         setContentSize:
+         #:type _NSSize
+         (make-NSSize (* 1.0 width) (* 1.0 height))))
+
+;; Host state query selectors come and go across macOS versions; track
+;; the flag ourselves (windows start non-fullscreen) and toggle on change.
+(define (set-fullscreen! wv on?)
+  (define window (mac:webview-window wv))
+  (unless (eq? (unbox (mac:webview-fullscreen?-box wv)) (and on? #t))
+    (set-box! (mac:webview-fullscreen?-box wv) (and on? #t))
+    (tellv window toggleFullScreen: #:type _id window)))

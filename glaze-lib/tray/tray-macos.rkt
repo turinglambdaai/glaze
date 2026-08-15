@@ -31,6 +31,11 @@
          supported?
          mac:tray?)
 
+;; Without loading AppKit explicitly, NSStatusBar etc. resolve to NULL and
+;; every tray call silently no-ops (nil-messaging) — only processes that
+;; loaded WebKit (which pulls AppKit in) ever got a working tray.
+(define appkit (ffi-lib "/System/Library/Frameworks/AppKit.framework/AppKit"))
+
 (import-class NSString NSStatusBar NSStatusItem NSMenu NSMenuItem NSImage NSObject)
 
 ;; AppKit length constants. NSSquareStatusItemLength = -1.0,

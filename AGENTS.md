@@ -60,6 +60,14 @@ glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt + a
 examples/             # hello / counter（JS↔Racket 桥接）/ agent-verify / tray-demo / webview-demo
 ```
 
+## 系统集成（glaze/sys）
+
+- 剪贴板（三平台 FFI）、通知（mac osascript / linux notify-send；windows 待接）、
+  open/reveal、单实例锁（派生端口绑定）
+- 窗口控制：`webview-set-title!/set-size!/set-fullscreen!`（四后端）
+- **AppKit 必须显式加载**：Racket 只链接 Foundation；不加载 AppKit 的进程里
+  NSStatusBar/NSPasteboard 等类为 NULL，objc 消息发给 nil 静默返回 nil（曾致 tray 空转）
+
 ## 加固层
 
 - `#:api-token`（start-server/run-app）：只护 API+SSE；api.js 引导 cookie、程序化走 `X-Glaze-Token`；

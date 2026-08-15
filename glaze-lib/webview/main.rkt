@@ -24,7 +24,10 @@
          webview-navigate
          webview-title
          webview-url
-         webview-capture!)
+         webview-capture!
+         webview-set-title!
+         webview-set-size!
+         webview-set-fullscreen!)
 
 (require (only-in "../browser.rkt" open-browser))
 
@@ -45,7 +48,8 @@
   (unless backend-procs
     (set! backend-procs (make-hash))
     (define mod (backend-module-path))
-    (for ([name (in-list '(open-webview supported? close navigate title url capture!))])
+    (for ([name (in-list '(open-webview supported? close navigate title url capture!
+                             set-title! set-size! set-fullscreen!))])
       (hash-set! backend-procs name (dynamic-require mod name))))
   backend-procs)
 
@@ -133,3 +137,11 @@
 ;; file. Returns the path, or #f when the backend/window cannot be captured.
 (define (webview-capture! wv [dest #f])
   ((ref 'capture!) (webview-handle wv) dest))
+
+
+;; ---- window controls ----
+(define (webview-set-title! wv t) ((ref 'set-title!) (webview-handle wv) t))
+(define (webview-set-size! wv width height)
+  ((ref 'set-size!) (webview-handle wv) width height))
+(define (webview-set-fullscreen! wv on?)
+  ((ref 'set-fullscreen!) (webview-handle wv) on?))

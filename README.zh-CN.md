@@ -251,6 +251,20 @@ glaze.on('count-changed', s => render(s.count));
 
 完整可运行的应用见 [`examples/counter/`](examples/counter/)。
 
+## 系统集成（`glaze/sys`）
+
+```racket
+(require glaze/sys)
+(clipboard-set! "hello")            ; (clipboard-get)
+(notify! "下载完成" "report.pdf 已就绪")
+(open-path "/Users/me/report.pdf")  ; 默认处理器打开
+(reveal-path "/Users/me/report.pdf"); Finder/资源管理器中定位
+(unless (single-instance? "com.me.app") (exit 0))
+```
+
+窗口控制（`glaze/webview`）：`webview-set-title!`、`webview-set-size!`、
+`webview-set-fullscreen!`。
+
 ## 系统托盘
 
 Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜单栏，带右键（macOS 为左键）菜单。后端按平台选择——纯 Racket FFI，无需编译任何原生代码：

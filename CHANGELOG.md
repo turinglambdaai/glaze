@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.3.0] - Unreleased
 
+### Added (system integrations)
+- **`glaze/sys`**: clipboard (get/set, NSPasteboard / Win32 / GTK FFI),
+  desktop notifications (osascript / notify-send; Windows pending tray or
+  WinRT wiring), open/reveal paths with OS handlers, and a portable
+  single-instance lock (derived-port bind, no lockfiles).
+- **Window controls**: `webview-set-title!` / `webview-set-size!` /
+  `webview-set-fullscreen!` across all backends.
+- **macOS AppKit now loads explicitly** in the tray and sys backends:
+  previously NSStatusBar & friends resolved to NULL in processes that
+  hadn't loaded WebKit (which incidentally pulls AppKit in), so a
+  tray-only app silently no-opped.
+
 ### Added (hardening)
 - **API token** (opt-in): `start-server`/`run-app` accept `#:api-token`
   (string, or `#t` in run-app to auto-generate via make-api-token). Guards
