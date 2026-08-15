@@ -38,23 +38,26 @@
          capture!
          lin:webview?)
 
-(define gtk-lib
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    (ffi-lib "gtk-3" '("0" #f))))
+;; Racket's ffi-lib misses the Debian/Ubuntu multiarch dirs on some hosts
+;; (dlopen wrapper search path), so try the bare soname first and then
+;; common absolute locations.
+(define lib-search-dirs
+  '("" "/lib/x86_64-linux-gnu/" "/usr/lib/x86_64-linux-gnu/"
+    "/lib/aarch64-linux-gnu/" "/usr/lib/aarch64-linux-gnu/"
+    "/usr/lib64/" "/usr/lib/" "/lib/"))
 
-(define webkit-lib
-  (or (with-handlers ([exn:fail? (lambda (e) #f)])
-        (ffi-lib "webkit2gtk-4.1" '("0" #f)))
-      (with-handlers ([exn:fail? (lambda (e) #f)])
-        (ffi-lib "webkit2gtk-4.0" '("37" #f)))))
+(define (try-ffi-lib name version)
+  (for/or ([dir (in-list lib-search-dirs)])
+    (with-handlers ([exn:fail? (lambda (e) #f)])
+      (if (string=? dir "")
+          (ffi-lib name (list version #f))
+          (ffi-lib (format "~a~a.so~a" dir name (if version (format ".~a" version) "")))))))
 
-(define glib-lib
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    (ffi-lib "glib-2.0" '("0" #f))))
-
-(define gobject-lib
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    (ffi-lib "gobject-2.0" '("0" #f))))
+(define gtk-lib (try-ffi-lib "gtk-3" "0"))
+(define webkit-lib (or (try-ffi-lib "webkit2gtk-4.1" "0")
+                       (try-ffi-lib "webkit2gtk-4.0" "37")))
+(define glib-lib (try-ffi-lib "glib-2.0" "0"))
+(define gobject-lib (try-ffi-lib "gobject-2.0" "0"))
 
 (define (maybe-bind lib name type)
   (and lib (get-ffi-obj name lib type (lambda () #f))))
@@ -179,9 +182,7 @@
 
 ;; Window capture via GDK: gdk_pixbuf_get_from_window on the window's
 ;; GdkWindow, then gdk_pixbuf_savev to PNG ("png" handler ships with GTK).
-(define gdk-pixbuf-lib
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    (ffi-lib "gdk_pixbuf-2.0" '("0" #f))))
+(define gdk-pixbuf-lib (try-ffi-lib "gdk_pixbuf-2.0" "0"))
 (define gtk_widget_get_window
   (maybe-bind gtk-lib "gtk_widget_get_window" (_fun _pointer -> _pointer)))
 (define gdk_pixbuf_get_from_window

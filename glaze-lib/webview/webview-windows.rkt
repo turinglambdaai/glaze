@@ -89,16 +89,16 @@
   (ptr-set! p _uint16 (quotient n 2) 0)
   p)
 
+;; NOTE: bytes-open-converter is one-directional; converting UTF-16 back
+;; with a UTF-8->UTF-16 converter silently produces garbage ("E\0\0\0...").
+;; Walk the UTF-16 units directly instead.
 (define (wstr->string p)
   (and p
-       (let loop ([i 0])
-         (if (zero? (ptr-ref p _uint16 i))
-             (let* ((n (* 2 i))
-                    (bs (make-bytes n)))
-               (memcpy bs p n)
-               (define-values (out _in _status) (bytes-convert conv bs))
-               (bytes->string/utf-8 out))
-             (loop (add1 i))))))
+       (let loop ([i 0] [chars '()])
+         (define u (ptr-ref p _uint16 i))
+         (if (zero? u)
+             (list->string (reverse chars))
+             (loop (add1 i) (cons (integer->char u) chars))))))
 
 (define (ptr->bytes p n)
   (define bs (make-bytes n))

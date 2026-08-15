@@ -30,22 +30,33 @@
          supported?
          lin:tray?)
 
+
+;; Racket's ffi-lib misses Debian/Ubuntu multiarch dirs on some hosts;
+;; try the bare soname first, then common absolute locations.
+(define lib-search-dirs
+  '("" "/lib/x86_64-linux-gnu/" "/usr/lib/x86_64-linux-gnu/"
+    "/lib/aarch64-linux-gnu/" "/usr/lib/aarch64-linux-gnu/"
+    "/usr/lib64/" "/usr/lib/" "/lib/"))
+
+(define (try-ffi-lib name version)
+  (for/or ([dir (in-list lib-search-dirs)])
+    (with-handlers ([exn:fail? (lambda (e) #f)])
+      (if (string=? dir "")
+          (ffi-lib name (list version #f))
+          (ffi-lib (format "~a~a.so~a" dir name (if version (format ".~a" version) "")))))))
+
+
 ;; Load the indicator library; try ayatana first, then legacy appindicator.
 (define indicator-lib
-  (or (with-handlers ([exn:fail? (lambda (e) #f)])
-        (ffi-lib "ayatana-appindicator3" '("1" #f)))
+  (or (try-ffi-lib "ayatana-appindicator3" "1")
       (with-handlers ([exn:fail? (lambda (e) #f)])
-        (ffi-lib "appindicator" '("3" #f)))
+        (try-ffi-lib "appindicator" "3"))
       (with-handlers ([exn:fail? (lambda (e) #f)])
-        (ffi-lib "appindicator3" '("1" #f)))))
+        (try-ffi-lib "appindicator3" "1"))))
 
-(define gtk-lib
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    (ffi-lib "gtk-3" '("0" #f))))
+(define gtk-lib (try-ffi-lib "gtk-3" "0"))
 
-(define gobject-lib
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    (ffi-lib "gobject-2.0" '("0" #f))))
+(define gobject-lib (try-ffi-lib "gobject-2.0" "0"))
 
 ;; Bindings (resolved only if the libraries loaded; otherwise #f).
 (define (maybe-bind lib name type)
