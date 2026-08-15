@@ -204,12 +204,16 @@
                     (lambda () #f))))
 (define gdk_window_get_width
   (and gtk-lib
-       (get-ffi-obj "gdk_window_get_width" gtk-lib (_fun _pointer -> _int))
-       (lambda () #f)))
+       (get-ffi-obj "gdk_window_get_width"
+                    gtk-lib
+                    (_fun _pointer -> _int)
+                    (lambda () #f))))
 (define gdk_window_get_height
   (and gtk-lib
-       (get-ffi-obj "gdk_window_get_height" gtk-lib (_fun _pointer -> _int))
-       (lambda () #f)))
+       (get-ffi-obj "gdk_window_get_height"
+                    gtk-lib
+                    (_fun _pointer -> _int)
+                    (lambda () #f))))
 (define gdk_pixbuf_savev
   (and gdk-pixbuf-lib
        (get-ffi-obj "gdk_pixbuf_savev"
