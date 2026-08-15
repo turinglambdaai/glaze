@@ -19,9 +19,9 @@ Glaze 是 "Tauri-like framework for Racket"——Racket 写后端，Web 技术�
 
 | 平台 | 状态 | 说明 |
 |------|------|------|
-| macOS | ✅ 端到端可用 | NSWindow + WKWebView（objc FFI），含验证 API + devtools |
-| Windows | 🔄 修复待 CI 验证 | 历史上卡在"COM apartment"——真相是 `get_CoreWebView2` vtable 索引错（25 被写成 3，实际调了 `get_IsVisible`）。vtable 顺序已对官方 SDK 头文件逐一核对，详见 `webview-windows.rkt` 头注释 |
-| Linux | 🔄 待 CI 验证 | 泵结构 + destroy 回调 + title/url/capture 已接线，Xvfb CI e2e |
+| macOS | ✅ 本机 + CI e2e | NSWindow + WKWebView（objc FFI），验证 API + devtools |
+| Windows | ✅ CI e2e | 历史上卡在"COM apartment"——真相是 `get_CoreWebView2` vtable 索引错（25 被写成 3）。vtable 顺序已对官方 SDK 头文件核对，详见 `webview-windows.rkt` 头注释 |
+| Linux | ✅ CI e2e（Xvfb） | 泵 + destroy 回调 + title/url/capture（gdk_pixbuf）；注意 ffi-lib 需要 multiarch 绝对路径兜底 |
 
 ## 快速命令
 

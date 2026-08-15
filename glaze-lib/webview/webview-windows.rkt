@@ -501,13 +501,12 @@
          (and (> w 0)
               (> h 0)
               (let ()
-                (log "capture: client ~ax~a" w h)
                 (define hdc (GetDC hwnd))
                 (define mem (CreateCompatibleDC hdc))
                 (define bmp (CreateCompatibleBitmap hdc w h))
                 (define old (SelectObject mem bmp))
                 (define pw-ok? (PrintWindow hwnd mem PW_RENDERFULLCONTENT))
-                (log "capture: PrintWindow=~a" pw-ok?)
+                (unless pw-ok? (log "capture: PrintWindow failed"))
                 (define bmi (make-BMI
                              (make-BMIH (ctype-sizeof _BMIH)
                                         w
@@ -519,7 +518,7 @@
                              0))
                 (define buf (malloc (* 4 w h) _uint8 'raw))
                 (define got (GetDIBits mem bmp 0 h buf bmi DIB_RGB_COLORS))
-                (log "capture: GetDIBits=~a" got)
+                (unless (> got 0) (log "capture: GetDIBits returned ~a" got))
                 (SelectObject mem old)
                 (DeleteObject bmp)
                 (DeleteDC mem)
@@ -558,7 +557,6 @@
                           "');$b.Save('"
                           (path->string png-path)
                           "', [System.Drawing.Imaging.ImageFormat]::Png);$b.Dispose()"))
-                       (log "capture: converting BMP -> PNG via powershell")
                        (define ok? (with-handlers ([exn:fail? (lambda (e)
                                                  (log "capture: powershell failed: ~a"
                                                       (exn-message e))
@@ -567,6 +565,4 @@
                                        (system* (find-executable-path "powershell.exe")
                                                 "-NoProfile" "-NonInteractive" "-Command" ps))))
                        (delete-file bmp-path)
-                       (log "capture: ok?=~a png-exists=~a"
-                            ok? (and ok? (file-exists? png-path)))
                        (and ok? (file-exists? png-path) png-path)))))))))

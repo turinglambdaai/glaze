@@ -15,11 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   access. All vtable indices are now verified against the official
   Microsoft.Web.WebView2 SDK header. The backend additionally: AddRefs and
   retains the controller/CoreWebView2 for post-open navigate, implements
-  title/url (get_DocumentTitle / get_Source) and capture! (PrintWindow +
-  PowerShell BMP->PNG), sizes the WebView to the client area, and wires
-  WM_CLOSE to on-close. Runtime verification pending the new CI e2e job.
-- Linux backend: capture! via gdk_pixbuf; CI e2e job added (Xvfb +
-  WebKitGTK) alongside macOS/Windows real-window e2e.
+  title/url (get_DocumentTitle / get_Source; UTF-16 walked directly —
+  bytes-open-converter is one-directional) and capture! (PrintWindow ->
+  DIB -> BMP (little-endian headers) -> PowerShell PNG), sizes the WebView
+  to the client area, and wires WM_CLOSE to on-close.
+- Linux backend: capture! via gdk_pixbuf (get_from_window lives in
+  libgtk-3, needs real window dimensions); ffi-lib gains multiarch
+  absolute-path fallbacks (Racket's dlopen misses /lib/x86_64-linux-gnu
+  for some libraries).
+- **All three webview backends pass the real-window CI e2e** (macOS,
+  Windows, Linux/Xvfb): open, load, capture, navigate, close, on-close.
+- CI: pre-existing failures fixed (root meta-package install path,
+  tray-stub naming, raco-exe --gui on macOS, .app Resources creation).
 - `open-window`/`open-webview` accept `#:devtools?` (macOS:
   setInspectable:; Windows: OpenDevToolsWindow; Linux: not yet).
 

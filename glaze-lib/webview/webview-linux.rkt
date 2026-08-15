@@ -220,25 +220,18 @@
                     gdk-pixbuf-lib
                     (_fun _pointer _string _string _pointer _pointer _pointer -> _bool)
                     (lambda () #f))))
-(define (capture-bindings-ok?)
-  (fprintf (current-error-port)
-           "[glaze-linux-webview] capture bindings: gdkwin-fn=~a from-window=~a savev=~a gdkpixbuf-lib=~a\n"
-           (and gtk_widget_get_window #t)
-           (and gdk_pixbuf_get_from_window #t)
-           (and gdk_pixbuf_savev #t)
-           (and gdk-pixbuf-lib #t)))
+
 
 (define (capture! wv [dest #f])
-  (capture-bindings-ok?)
   (and (not (unbox (lin:webview-closed?-box wv)))
        gtk_widget_get_window
        gdk_pixbuf_get_from_window
        gdk_pixbuf_savev
        (let ()
          (define gdkwin (gtk_widget_get_window (lin:webview-window wv)))
-         (fprintf (current-error-port)
-                  "[glaze-linux-webview] capture: gdkwin=~a\n"
-                  (and gdkwin #t))
+         (unless gdkwin
+           (fprintf (current-error-port)
+                    "[glaze-linux-webview] capture: window not realized\n"))
          (and gdkwin
               (let ()
                 (define pixbuf
@@ -247,9 +240,9 @@
                                               0
                                               (gdk_window_get_width gdkwin)
                                               (gdk_window_get_height gdkwin)))
-                (fprintf (current-error-port)
-                         "[glaze-linux-webview] capture: pixbuf=~a\n"
-                         (and pixbuf #t))
+                (unless pixbuf
+                  (fprintf (current-error-port)
+                           "[glaze-linux-webview] capture: get_from_window returned NULL\n"))
                 (and pixbuf
                      (let ()
                        (define path
@@ -261,7 +254,7 @@
                                            (path->string path)
                                            "png"
                                            #f #f #f))
-                       (fprintf (current-error-port)
-                                "[glaze-linux-webview] capture: savev=~a\n"
-                                ok?)
+                       (unless ok?
+                         (fprintf (current-error-port)
+                                  "[glaze-linux-webview] capture: savev failed\n"))
                        (and ok? path))))))))
