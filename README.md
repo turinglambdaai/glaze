@@ -14,7 +14,34 @@ You get:
 
 - **Racket for logic** — the full power of Racket's macro system, contracts, pattern matching
 - **Web for UI** — Tailwind, Svelte, React, or any web framework
-- **JSON API bridge** — Racket macros auto-generate API endpoints
+- **JSON API bridge** — the page calls Racket with plain `fetch("/api/...")`
+
+### How it compares
+
+| | Glaze | Tauri | Electron | wails |
+|---|---|---|---|---|
+| Backend language | Racket | Rust | JS/Node | Go |
+| Native toolchain needed | **none** (pure FFI) | Rust + cargo | none | Go + WebView2 deps |
+| Binary size | tiny (Racket exe + assets) | small | 100 MB+ | small |
+| Frontend→backend | HTTP JSON routes (`fetch`) | `invoke()` IPC | Node APIs | bindings |
+| Works without webview (browser fallback) | **yes** | no | no | no |
+| Agent-friendly UI verification (`title`/`url`/screenshot) | **built-in** | via WebDriver | via CDP | limited |
+| WebView backends | WebView2 / WKWebView / WebKitGTK | same | bundled Chromium | WebView2/WKWebView |
+
+The honest gaps today: Windows webview is experimental (see status below), no devtools wiring, no typed IPC layer — plain JSON.
+
+## Platform status
+
+| Capability | macOS | Windows | Linux |
+|---|---|---|---|
+| HTTP server + browser | ✅ | ✅ | ✅ |
+| System tray | ✅ | ✅ | ✅ (CI-verified) |
+| JSON API bridge | ✅ | ✅ | ✅ |
+| Native webview window | ✅ verified end-to-end | ⚠️ experimental (WebView2 init works; `Navigate` pending a COM fix) | 🔲 structural, not runtime-verified |
+| `webview-title` / `webview-url` | ✅ | partial (url) | partial (url) |
+| `webview-capture!` (screenshot) | ✅ | 🔲 | 🔲 |
+
+Without a native backend, `run-app` / `open-window` automatically fall back to the system browser — the app still works everywhere.
 
 ## Requirements
 
@@ -118,18 +145,32 @@ glaze/
 
 ## API
 
-### `start-dev-server`
+### `run-app`
 
-Starts a local HTTP server that serves static files from a directory.
+The one-call entry: picks a free port, starts the server (static + JSON API), opens the native webview window, and blocks until the window closes.
 
 ```racket
-(start-dev-server #:port 8080 #:public-dir "public")
-;; Returns (values port shutdown-proc)
+(run-app #:public-dir "public"
+         #:api (list (GET "api/ping" ...)))
+;; webview path: window closed -> server stopped -> (values 'webview shutdown)
+;; browser fallback (no native backend): opens browser -> (values 'browser shutdown)
+```
+
+### `start-server` / `start-dev-server`
+
+Starts a local HTTP server serving static files with SPA fallback, plus optional JSON API routes. `start-dev-server` is a backward-compatible alias.
+
+```racket
+(start-server #:port 8080
+              #:public-dir "public"
+              #:api (list (GET "api/ping" (lambda (req) (hasheq 'pong #t)))))
+;; Returns (values port shutdown-proc); verifies the listener is accepting
+;; before returning.
 ```
 
 ### `stop-server`
 
-Stops the dev server.
+Stops the server.
 
 ```racket
 (stop-server shutdown-proc)
@@ -143,14 +184,34 @@ Opens a URL in the system default browser (cross-platform: Windows, macOS, Linux
 (open-browser "http://127.0.0.1:8080")
 ```
 
-### `define-api`
+## JavaScript Bridge
 
-Macro for defining JSON API endpoints.
+The frontend calls Racket with plain `fetch("/api/...")` — Glaze's answer to Tauri's `invoke()`. One code path works in the embedded WebView, in the system-browser fallback, and in dev (curl-able). Routes are ordinary values:
 
 ```racket
-(define-api (my-handler request)
-  (json-response (hasheq 'status "ok")))
+(require glaze)
+
+(GET  "api/ping"            (lambda (req) (hasheq 'pong #t)))
+(POST "api/items/:id/bump"  (lambda (req id) (hasheq 'id id 'bumped #t)))
+(POST "api/echo"            (lambda (req)
+                              (define body (request-json-body req))
+                              (hasheq 'echo body)))
 ```
+
+- Handlers take the request plus captured `:params`; return a jsexpr (auto-wrapped as JSON 200) or a full response.
+- `request-json-body` parses the JSON body — note Racket jsexpr parses JSON object keys as **symbols** (`(hash-ref body 'delta)`).
+- A handler that raises becomes a 500 JSON error, never a broken connection.
+- Unmatched requests fall through to static files (SPA `index.html` fallback).
+
+In the page:
+
+```js
+const s = await fetch('/api/counter/bump',
+  {method:'POST', headers:{'Content-Type':'application/json'},
+   body: JSON.stringify({delta: 5})}).then(r => r.json());
+```
+
+See [`examples/counter/`](examples/counter/) for the complete working app.
 
 ## System Tray
 
@@ -176,6 +237,16 @@ If a platform's native libraries aren't available at runtime, the tray silently 
 ```
 
 > **macOS note:** a pure menu-bar app (no Dock icon) requires building as an `.app` bundle with `LSUIElement` set — `raco glaze build` configures this for you.
+
+## Examples
+
+| Example | What it shows |
+|---|---|
+| [`examples/hello/`](examples/hello/) | Minimal app — `run-app` in 8 lines |
+| [`examples/counter/`](examples/counter/) | JS↔Racket bridge — `fetch` calls Racket state |
+| [`examples/webview-demo.rkt`](examples/webview-demo.rkt) | Webview lifecycle: load, navigate, close, verification APIs |
+| [`examples/agent-verify.rkt`](examples/agent-verify.rkt) | Agent workflow: assert page state + screenshot with no human |
+| [`examples/tray-demo.rkt`](examples/tray-demo.rkt) | Cross-platform system tray with a working menu |
 
 ## Roadmap
 

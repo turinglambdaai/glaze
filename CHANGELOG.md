@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.3.0] - Unreleased
 
 ### Added (Phase 3, in progress)
+- **JavaScript bridge** (`glaze/api`): real JSON routing over the frontend
+  server — `GET`/`POST`/`PUT`/`DELETE` route values with `:param` capture,
+  `request-json-body` (jsexpr, symbol keys), jsexpr auto-wrapping, 500-JSON
+  on handler errors; unmatched paths fall through to static SPA serving.
+  Replaces the old no-op `define-api` macro. One code path works in the
+  webview, the browser fallback, and curl.
+- **`run-app`** (`glaze/app`): one-call composition — free-port picking,
+  server + API + webview window lifecycle, `#:on-ready` hook (agent
+  verification point), graceful system-browser fallback with explicit
+  shutdown semantics.
+- **`start-server` now verifies the listener is accepting** before
+  returning; bind/listen failures surface as a clear error instead of a
+  later "connection refused" (fixes a long-standing flaky e2e symptom).
+- **Linux webview backend structurally fixed**: the blocking `gtk_main` call
+  (which would freeze the whole Racket scheduler) is replaced by a
+  g_main_context_iteration pump with scheduler yields, mirroring the
+  verified macOS design; `destroy`-signal on-close registry; `title`/`url`
+  wired to WebKitGTK getters. Runtime-verification on a Linux host pending.
+- **Examples**: hello (minimal run-app), counter (JS↔Racket bridge),
+  agent-verify (no-human UI verification), tray-demo, webview-demo.
+- Support matrix + framework comparison in README (en/zh).
 - **Native WebView embedding** (`glaze/webview`): public `open-window` /
   `open-webview` API with platform backend dispatch (windows/macos/linux/stub),
   mirroring the tray design and falling back to the stub when native deps are

@@ -51,12 +51,20 @@ glaze-lib/
 ├── api.rkt           # define-api 宏（JSON 端点）
 ├── assets.rkt        # public/ 目录解析、MIME
 ├── build.rkt         # raco exe + distribute 封装
+├── app.rkt           # run-app：服务+窗口+生命周期一键入口
 ├── tray/             # 托盘：main.rkt 调度 + tray-{windows,macos,linux,stub}.rkt
 └── webview/          # WebView：main.rkt 调度 + webview-{windows,macos,linux,stub}.rkt
 glaze-cli/            # raco glaze init / dev / build
 glaze-doc/            # scribble 文档
-glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt）
+glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt + api-test.rkt）
+examples/             # hello / counter（JS↔Racket 桥接）/ agent-verify / tray-demo / webview-demo
 ```
+
+## JS↔Racket 桥接（define-api 已废除）
+
+前端 `fetch("/api/...")` → Racket JSON。路由是普通值（`glaze/api` 的 GET/POST/PUT/DELETE +
+`:param` 捕获），由 `start-server #:api` 或 `run-app #:api` 挂载。**陷阱**：Racket jsexpr 把
+JSON 对象键解析为 symbol（`hash-ref body 'delta`，不是 `"delta"`）——写成字符串键会静默取默认值。
 
 ## 后端契约（webview 与 tray 同构）
 
@@ -107,7 +115,6 @@ glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt）
 ## 已知问题
 
 - Windows `Navigate` 卡 COM apartment（头部注释有完整分析）
-- `raco test` 环境下 main.rkt 的 e2e HTTP 测试在本机 Racket 9.2 偶发 connection refused（CI 的 8.12 正常），与 webview 无关
 - macOS 多窗口共用主 RunLoop（每窗口一个泵线程，可运行但未优化）
 - **后台会话白屏**：从无控制终端的分离会话启动（如 CI 后台任务、`nohup`、某些 agent 工具的后台执行）时，
   macOS 窗口可能停在白屏——WebKit 加载/IPC 全通（`webview-title` 正常），但绘制不上屏（窗口合成被冻结）。

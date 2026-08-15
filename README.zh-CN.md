@@ -8,13 +8,40 @@
 
 ## 为什么选择 Glaze？
 
-Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 UI。Glaze 采用了不同的思路：从 Racket 启动一个本地 Web 服务，然后在系统浏览器（Phase 1）或嵌入式 WebView（Phase 3）中展示。
+Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 UI。Glaze 采用不同的思路：从 Racket 启动本地 Web 服务，用系统浏览器（Phase 1）或嵌入式 WebView（Phase 3）展示。
 
 你将获得：
 
-- **Racket 处理逻辑** — 完整的宏系统、契约、模式匹配
-- **Web 构建界面** — Tailwind、Svelte、React 或任意 Web 框架
-- **JSON API 桥接** — Racket 宏自动生成 API 端点
+- **Racket 写逻辑** —— 完整的宏系统、contracts、模式匹配
+- **Web 写界面** —— Tailwind、Svelte、React 或任何 Web 框架
+- **JSON API 桥接** —— 页面用普通 `fetch("/api/...")` 调用 Racket
+
+### 横向对比
+
+| | Glaze | Tauri | Electron | wails |
+|---|---|---|---|---|
+| 后端语言 | Racket | Rust | JS/Node | Go |
+| 原生工具链 | **无需**（纯 FFI） | Rust + cargo | 无 | Go + WebView2 依赖 |
+| 二进制体积 | 极小 | 小 | 100 MB+ | 小 |
+| 前后端桥接 | HTTP JSON 路由（`fetch`） | `invoke()` IPC | Node API | 绑定层 |
+| 无 WebView 时浏览器兜底 | **支持** | 不支持 | 不支持 | 不支持 |
+| Agent 友好的 UI 验证（title/url/截图） | **内置** | 需 WebDriver | 需 CDP | 有限 |
+| WebView 后端 | WebView2 / WKWebView / WebKitGTK | 相同 | 自带 Chromium | WebView2/WKWebView |
+
+当前的诚实差距：Windows WebView 尚在实验阶段（见下表状态）、未接 devtools、IPC 为纯 JSON 无类型层。
+
+## 平台支持状态
+
+| 能力 | macOS | Windows | Linux |
+|---|---|---|---|
+| HTTP 服务器 + 浏览器 | ✅ | ✅ | ✅ |
+| 系统托盘 | ✅ | ✅ | ✅（CI 验证） |
+| JSON API 桥接 | ✅ | ✅ | ✅ |
+| 原生 WebView 窗口 | ✅ 端到端验证 | ⚠️ 实验性（WebView2 初始化已通；`Navigate` 待修 COM 问题） | 🔲 结构完整，未真机验证 |
+| `webview-title` / `webview-url` | ✅ | 部分（url） | 部分（url） |
+| `webview-capture!`（截图） | ✅ | 🔲 | 🔲 |
+
+原生后端不可用时，`run-app` / `open-window` 自动回退系统浏览器 —— 应用在所有平台都能跑。
 
 ## 环境要求
 
@@ -118,18 +145,31 @@ glaze/
 
 ## API
 
-### `start-dev-server`
+### `run-app`
 
-启动本地 HTTP 服务器，从指定目录提供静态文件。
+一键入口：自动挑空闲端口、启动服务器（静态 + JSON API）、打开原生 WebView 窗口、阻塞到窗口关闭。
 
 ```racket
-(start-dev-server #:port 8080 #:public-dir "public")
-;; 返回 (values port shutdown-proc)
+(run-app #:public-dir "public"
+         #:api (list (GET "api/ping" ...)))
+;; webview 路径：窗口关闭 -> 服务器停止 -> (values 'webview shutdown)
+;; 浏览器回退（无原生后端）：打开浏览器 -> (values 'browser shutdown)
+```
+
+### `start-server` / `start-dev-server`
+
+启动本地 HTTP 服务器：静态文件 + SPA 回退 + 可选 JSON API 路由。`start-dev-server` 为兼容别名。
+
+```racket
+(start-server #:port 8080
+              #:public-dir "public"
+              #:api (list (GET "api/ping" (lambda (req) (hasheq 'pong #t)))))
+;; 返回 (values port shutdown-proc)；返回前会确认端口已在监听
 ```
 
 ### `stop-server`
 
-停止开发服务器。
+停止服务器。
 
 ```racket
 (stop-server shutdown-proc)
@@ -137,20 +177,40 @@ glaze/
 
 ### `open-browser`
 
-在系统默认浏览器中打开 URL（跨平台：Windows、macOS、Linux）。
+用系统默认浏览器打开 URL（跨平台：Windows、macOS、Linux）。
 
 ```racket
 (open-browser "http://127.0.0.1:8080")
 ```
 
-### `define-api`
+## JavaScript 桥接
 
-用于定义 JSON API 端点的宏。
+前端用普通 `fetch("/api/...")` 调 Racket —— 这是 Glaze 对 Tauri `invoke()` 的回答。同一套代码在嵌入式 WebView、系统浏览器回退、dev 调试（可 curl）下都工作。路由是普通值：
 
 ```racket
-(define-api (my-handler request)
-  (json-response (hasheq 'status "ok")))
+(require glaze)
+
+(GET  "api/ping"            (lambda (req) (hasheq 'pong #t)))
+(POST "api/items/:id/bump"  (lambda (req id) (hasheq 'id id 'bumped #t)))
+(POST "api/echo"            (lambda (req)
+                              (define body (request-json-body req))
+                              (hasheq 'echo body)))
 ```
+
+- Handler 收到 request 加捕获的 `:param`；返回 jsexpr（自动包装为 JSON 200）或完整 response
+- `request-json-body` 解析 JSON body —— 注意 Racket jsexpr 把 JSON 对象键解析为 **symbol**（`(hash-ref body 'delta)`）
+- handler 抛异常会变成 500 JSON 错误，不会断掉连接
+- 未匹配的请求回落到静态文件（SPA `index.html` 回退）
+
+页面侧：
+
+```js
+const s = await fetch('/api/counter/bump',
+  {method:'POST', headers:{'Content-Type':'application/json'},
+   body: JSON.stringify({delta: 5})}).then(r => r.json());
+```
+
+完整可运行的应用见 [`examples/counter/`](examples/counter/)。
 
 ## 系统托盘
 
@@ -176,6 +236,16 @@ Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜�
 ```
 
 > **macOS 注意**：纯菜单栏应用（不显示 Dock 图标）需要构建为 `.app` bundle 并设置 `LSUIElement`——`raco glaze build` 会为你配置好。
+
+## 示例
+
+| 示例 | 展示内容 |
+|---|---|
+| [`examples/hello/`](examples/hello/) | 最小应用 —— 8 行 `run-app` |
+| [`examples/counter/`](examples/counter/) | JS↔Racket 桥接 —— `fetch` 调用 Racket 状态 |
+| [`examples/webview-demo.rkt`](examples/webview-demo.rkt) | WebView 生命周期：加载、导航、关闭、验证 API |
+| [`examples/agent-verify.rkt`](examples/agent-verify.rkt) | Agent 工作流：无人值守断言页面状态 + 截图 |
+| [`examples/tray-demo.rkt`](examples/tray-demo.rkt) | 跨平台系统托盘 + 可用菜单 |
 
 ## 路线图
 

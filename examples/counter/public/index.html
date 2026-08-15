@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Counter · Glaze</title>
+  <style>
+    body{font-family:-apple-system,sans-serif;background:#F4F3EE;color:#2d2a26;
+         display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+    .card{text-align:center}
+    #count{font-size:96px;font-weight:800;color:#C15F3C;margin:12px 0}
+    button{background:#C15F3C;color:#fff;border:none;border-radius:10px;
+           padding:12px 22px;font-size:16px;font-weight:600;cursor:pointer;margin:0 6px}
+    button.secondary{background:#d8d4c8;color:#2d2a26}
+    #history{color:#6b675f;font-size:15px;min-height:22px;margin-top:18px}
+    .hint{margin-top:26px;font-size:12px;color:#9a958a}
+    #err{color:#b3402a;font-size:13px;min-height:18px}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div style="font-size:14px;color:#6b675f">Racket 侧状态，由 fetch 驱动</div>
+  <div id="count">–</div>
+  <div id="err"></div>
+  <button onclick="bump(1)">+1</button>
+  <button onclick="bump(5)">+5</button>
+  <button class="secondary" onclick="reset()">重置</button>
+  <div id="history"></div>
+  <div class="hint">POST /api/counter/bump · GET /api/counter —— 状态在 Racket 里，页面只是视图</div>
+</div>
+<script>
+  async function call(path, body) {
+    const r = await fetch(path, body
+      ? {method:'POST', headers:{'Content-Type':'application/json'},
+         body: JSON.stringify(body)}
+      : {method:'POST'});
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+  async function render() {
+    const s = await call('/api/counter/bump', {delta: 0});
+    document.getElementById('count').textContent = s.count;
+    document.getElementById('history').textContent =
+      s.history.length ? '历史: ' + s.history.join(' · ') : '';
+  }
+  async function bump(d) {
+    try {
+      const s = await call('/api/counter/bump', {delta: d});
+      document.getElementById('count').textContent = s.count;
+      document.getElementById('history').textContent =
+        s.history.length ? '历史: ' + s.history.join(' · ') : '';
+      document.getElementById('err').textContent = '';
+    } catch (e) { document.getElementById('err').textContent = e.message; }
+  }
+  async function reset() {
+    await call('/api/counter/reset');
+    document.getElementById('count').textContent = 0;
+    document.getElementById('history').textContent = '';
+  }
+  render();
+</script>
+</body>
+</html>

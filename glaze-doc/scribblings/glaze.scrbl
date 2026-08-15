@@ -16,19 +16,46 @@ Build desktop apps with Racket backend and web frontend.
 
 @section{Core API}
 
+@defmodule[glaze/app]
+
+@defproc[(run-app
+          [#:public-dir public-dir (or/c string? path?) "public"]
+          [#:api api (listof route?) '()]
+          [#:port port (or/c #f exact-nonnegative-integer?) #f]
+          [#:title title string? "Glaze"]
+          [#:width width exact-positive-integer? 1024]
+          [#:height height exact-positive-integer? 768]
+          [#:fallback-browser? fallback-browser? boolean? #t]
+          [#:on-close on-close (-> any) (lambda () (void))]
+          [#:on-ready on-ready (-> (or/c webview? #f) string? any)
+                      (lambda (wv url) (void))])
+         (values (or/c 'webview 'browser) procedure?)]{
+The one-call entry: picks a free port (unless @racket[#:port] is given),
+starts the server (static + JSON API), opens the native webview window, and
+blocks until the window closes. @racket[on-ready] receives the webview
+handle and URL as soon as the window is up — the hook agents use for
+verification. Returns @racket['webview] after a window-driven shutdown
+(server already stopped) or @racket['browser] immediately after opening the
+system-browser fallback (server still running; call the returned shutdown
+procedure to stop it).
+}
+
 @defmodule[glaze/server]
 
 @defproc[(start-server
           [#:port port exact-nonnegative-integer? 8080]
-          [#:public-dir public-dir (or/c string? path?) "public"])
+          [#:public-dir public-dir (or/c string? path?) "public"]
+          [#:api api (listof route?) '()])
          (values exact-nonnegative-integer? procedure?)]{
 Starts a local HTTP server on @racket[127.0.0.1] serving static files from
-@racket[public-dir]. Returns the requested port and a shutdown procedure.
+@racket[public-dir] (SPA index.html fallback) with optional JSON API routes
+(see @secref["js-bridge"]). Verifies the listener is accepting before
+returning. Returns the port and a shutdown procedure.
 @racket[start-dev-server] is a backward-compatible alias.
 }
 
 @defproc[(stop-server [shutdown-proc procedure?]) void?]{
-Stops the dev server.
+Stops the server.
 }
 
 @defmodule[glaze/browser]
@@ -36,6 +63,43 @@ Stops the dev server.
 @defproc[(open-browser [url string?]) void?]{
 Opens the system browser to the given URL.
 }
+
+@section[#:tag "js-bridge"]{JavaScript Bridge}
+
+@defmodule[glaze/api]
+
+The page calls Racket with plain @litchar{fetch("/api/...")}; Racket answers
+JSON. One code path works in the embedded WebView, in the system-browser
+fallback, and in dev (curl-able).
+
+@defproc[(GET [path string?] [handler procedure?]) route?]{}
+@defproc[(POST [path string?] [handler procedure?]) route?]{}
+@defproc[(PUT [path string?] [handler procedure?]) route?]{}
+@defproc[(DELETE [path string?] [handler procedure?]) route?]{
+Build a route for @racket[path]. @litchar{":x"} segments capture the
+request path segment as a string. The handler receives the web-server
+request followed by the captured values and returns a jsexpr (auto-wrapped
+as a 200 JSON response) or a full response.
+}
+
+@defproc[(request-json-body [req request?]) (or/c #f jsexpr?)]{
+Parses the request body as JSON. Racket jsexpr parses JSON object keys as
+@bold{symbols}: @racket[(hash-ref body 'delta)].
+}
+
+@defproc[(json-response [data jsexpr?]) response?]{ A 200 JSON response. }
+
+@codeblock|{
+#lang racket/base
+(require glaze)
+(run-app
+ #:public-dir "public"
+ #:api (list
+        (POST "api/counter/bump"
+              (lambda (req)
+                (define body (request-json-body req))
+                (bump! (hash-ref body 'delta 1))))))
+}|
 
 @section{System Tray}
 
