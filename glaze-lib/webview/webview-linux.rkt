@@ -213,9 +213,15 @@
        gdk_pixbuf_savev
        (let ()
          (define gdkwin (gtk_widget_get_window (lin:webview-window wv)))
+         (fprintf (current-error-port)
+                  "[glaze-linux-webview] capture: gdkwin=~a\n"
+                  (and gdkwin #t))
          (and gdkwin
               (let ()
                 (define pixbuf (gdk_pixbuf_get_from_window gdkwin 0 0 -1 -1))
+                (fprintf (current-error-port)
+                         "[glaze-linux-webview] capture: pixbuf=~a\n"
+                         (and pixbuf #t))
                 (and pixbuf
                      (let ()
                        (define path
@@ -227,4 +233,7 @@
                                            (path->string path)
                                            "png"
                                            #f #f #f))
+                       (fprintf (current-error-port)
+                                "[glaze-linux-webview] capture: savev=~a\n"
+                                ok?)
                        (and ok? path))))))))
