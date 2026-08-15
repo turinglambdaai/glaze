@@ -486,6 +486,9 @@
 ;; Window capture: PrintWindow into a DIB, write a BMP, convert to PNG with
 ;; PowerShell's System.Drawing (present on every Windows install).
 (define (capture! wv [dest #f])
+  (with-handlers ([exn:fail? (lambda (e)
+                               (log "capture failed: ~a" (exn-message e))
+                               #f)])
   (and (not (unbox (win:webview-closed?-box wv)))
        GetClientRect
        PrintWindow
@@ -510,7 +513,7 @@
                                         1
                                         32
                                         BI_RGB
-                                        0 0 0 0 0 0)
+                                        0 0 0 0 0)
                              0))
                 (define buf (malloc (* 4 w h) _uint8 'raw))
                 (define got (GetDIBits mem bmp 0 h buf bmi DIB_RGB_COLORS))
@@ -557,4 +560,4 @@
                                        (system* (find-executable-path "powershell.exe")
                                                 "-NoProfile" "-NonInteractive" "-Command" ps))))
                        (delete-file bmp-path)
-                       (and ok? (file-exists? png-path) png-path))))))))
+                       (and ok? (file-exists? png-path) png-path)))))))))

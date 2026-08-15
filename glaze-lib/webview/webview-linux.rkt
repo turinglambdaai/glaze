@@ -105,7 +105,15 @@
              (string-join
               (for/list ([c (in-list components)] #:unless (cdr c))
                 (symbol->string (car c)))
-              ", ")))
+              ", "))
+    ;; Surface why dlopen refused the first missing library — dependency
+    ;; resolution failures otherwise stay invisible.
+    (unless gtk-lib
+      (fprintf (current-error-port)
+               "[glaze-linux-webview] gtk-3 load error: ~a\n"
+               (with-handlers ([exn:fail? exn-message])
+                 (ffi-lib "/lib/x86_64-linux-gnu/libgtk-3.so.0")
+                 "loaded"))))
   (andmap cdr components))
 
 ;; window-pointer -> on-close thunk registry (GTK "destroy" callback side).
