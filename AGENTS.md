@@ -109,3 +109,6 @@ glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt）
 - Windows `Navigate` 卡 COM apartment（头部注释有完整分析）
 - `raco test` 环境下 main.rkt 的 e2e HTTP 测试在本机 Racket 9.2 偶发 connection refused（CI 的 8.12 正常），与 webview 无关
 - macOS 多窗口共用主 RunLoop（每窗口一个泵线程，可运行但未优化）
+- **后台会话白屏**：从无控制终端的分离会话启动（如 CI 后台任务、`nohup`、某些 agent 工具的后台执行）时，
+  macOS 窗口可能停在白屏——WebKit 加载/IPC 全通（`webview-title` 正常），但绘制不上屏（窗口合成被冻结）。
+  前台会话（用户终端）不受影响。诊断时优先怀疑启动会话，而不是 glaze 代码
