@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.3.0] - Unreleased
 
+### Added (hardening)
+- **API token** (opt-in): `start-server`/`run-app` accept `#:api-token`
+  (string, or `#t` in run-app to auto-generate via make-api-token). Guards
+  capabilities (API routes + the SSE stream) — not resources: static files
+  and the api.js bootstrap stay open, and api.js sets the `glaze_token`
+  cookie that carries the token into the page (EventSource cannot set
+  headers, but same-origin requests carry cookies). Programmatic clients
+  pass `X-Glaze-Token`. Missing/invalid -> 401. Honest scope: raises the
+  bar against casual local callers; a determined local process can still
+  fetch the token — full local isolation is not achievable over plain HTTP.
+- **Error reporting**: `current-glaze-error-reporter` parameter feeds API
+  handler failures (the 500 path) to `run-app`'s `#:on-error`.
+- **Update checking** (`glaze/update`): `check-update` fetches a JSON
+  manifest ({"version","url","notes"}), semver-aware numeric comparison
+  ("1.10" > "1.9"); `run-app`'s `#:check-update` + `#:current-version`
+  print and broadcast `update-available` on the event bus. Deliberately
+  stops at notification — replacing a running app is a per-distribution
+  decision.
+- `run-app` now forwards `#:events` (routes + push in one call) and
+  exposes `current-api-token` / `make-api-token`.
+- Linux `#:devtools?` (WebKitGTK inspector, retry-until-realized); Windows
+  webview follows window resizes (WM_SIZE -> put_Bounds).
+
 ### Added (commercial polish)
 - **Event push** (`glaze/events` + SSE): make-event-bus / bus-broadcast! feed a
   built-in `GET /glaze/events` Server-Sent-Events endpoint (keepalive every

@@ -250,6 +250,7 @@
 
 (define WM_DESTROY 2)
 (define WM_CLOSE 16)
+(define WM_SIZE 5)
 (define WM_QUIT 18)
 (define WS_OVERLAPPEDWINDOW #x00CF0000)
 (define CW_USEDEFAULT -2147483648)
@@ -276,10 +277,24 @@
 
 ;; WM_CLOSE from the title bar: forward to our close semantics.
 (define wndprocs (make-hasheq)) ; hwnd-addr -> wv (for WM_CLOSE dispatch)
+(define (resize-controller! wv hwnd)
+  ;; Keep the WebView glued to the client area on window resizes.
+  (define controller (win:webview-controller-box wv))
+  (when controller
+    (define rc (make-RECT 0 0 0 0))
+    (GetClientRect hwnd rc)
+    (define put-bounds
+      (cast (vtfn controller 6) _fpointer (_fun _pointer _RECT -> _int32)))
+    (put-bounds controller (make-RECT 0 0 (RECT-right rc) (RECT-bottom rc)))))
+
 (define wndproc-cptr
   (function-ptr
    (lambda (hwnd msg w l)
      (cond
+       [(= msg WM_SIZE)
+        (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
+        (when wv (resize-controller! wv hwnd))
+        0]
        [(= msg WM_CLOSE)
         (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
         (cond

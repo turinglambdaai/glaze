@@ -246,7 +246,16 @@ the browser fallback too — same origin, no extra port.
 - Requests are only served for Host headers `127.0.0.1` / `localhost` /
   `[::1]` (DNS-rebinding guard; hostile origins get 403).
 - API handlers never crash the connection — parameter problems are 400
-  JSON, handler exceptions are 500 JSON.
+  JSON, handler exceptions are 500 JSON (and reach `run-app`'s
+  `#:on-error` for crash reporting hooks).
+- Optional API token (`#:api-token`): guards API routes and the SSE stream
+  (401 otherwise); the generated api.js bootstraps a `glaze_token` cookie
+  so pages work unmodified, programmatic clients send `X-Glaze-Token`.
+  Honest scope: defense-in-depth against casual local callers — full
+  local-process isolation is not achievable over plain HTTP.
+- Update checks: `run-app #:check-update <manifest-url> #:current-version "1.0.0"`
+  fetches `{"version","url","notes"}`, reports to stderr and broadcasts
+  `update-available`. Self-replacement stays the app's decision.
 
 See [`examples/counter/`](examples/counter/) for the complete working app.
 

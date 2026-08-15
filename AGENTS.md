@@ -60,6 +60,15 @@ glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt + a
 examples/             # hello / counter（JS↔Racket 桥接）/ agent-verify / tray-demo / webview-demo
 ```
 
+## 加固层
+
+- `#:api-token`（start-server/run-app）：只护 API+SSE；api.js 引导 cookie、程序化走 `X-Glaze-Token`；
+  诚实边界写在 README（纯 HTTP 挡不住执意读本机端口的进程）
+- `current-glaze-error-reporter`（parameter）：500 路径的异常上报，run-app `#:on-error` 装配；
+  **必须先 parameterize 再 start-server**（连接线程继承 accept 循环的 parameterization）
+- `glaze/update`：`check-update` + `newer-version?`（数值点分比较，"1.10">"1.9"）；run-app
+  `#:check-update`/`#:current-version` 通知 + 广播；注意 `#rx` 不支持 `{n}` 量词（用 `#px`）
+
 ## 事件推送 / 宏路由 / 内置端点
 
 - `glaze/events`：`make-event-bus` + `bus-broadcast!` → 内置 SSE 端点 `GET /glaze/events`

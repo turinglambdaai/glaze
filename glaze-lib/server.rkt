@@ -31,7 +31,17 @@
 (provide start-dev-server
          start-server
          stop-server
-         path->mime-type)
+         path->mime-type
+         current-glaze-error-reporter)
+
+;; Exception reporter for API-handler failures (the 500 path). Default logs
+;; to stderr; run-app parameterizes this to its #:on-error callback.
+(define current-glaze-error-reporter
+  (make-parameter
+   (lambda (exn uri)
+     (fprintf (current-error-port)
+              "[glaze] handler error on ~a: ~a\n"
+              uri (exn-message exn)))))
 
 (define sse-path "glaze/events")
 (define api-client-path "glaze/api.js")
@@ -49,10 +59,14 @@
                       #:public-dir [public-dir "public"]
                       #:api [api-routes '()]
                       #:events [event-bus #f]
+                      #:api-token [api-token #f]
                       #:serve-api-client? [serve-client? #t])
   (when (and event-bus (not (event-bus? event-bus)))
     (raise-argument-error 'start-server "event-bus?" event-bus))
-  (define dispatcher (make-dispatcher public-dir api-routes port event-bus serve-client?))
+  (when (and api-token (not (string? api-token)))
+    (raise-argument-error 'start-server "(or/c #f string?)" api-token))
+  (define dispatcher
+    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))
   (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
@@ -110,18 +124,51 @@
 
 ;; ---- dispatcher ----
 
-(define (make-dispatcher public-dir api-routes port event-bus serve-client?)
+(define (make-dispatcher public-dir api-routes port event-bus serve-client? api-token)
   (lambda (conn req)
     (define resp
       (cond
         [(not (host-allowed? req port)) (error-response 403 "host not allowed")]
+        ;; The token guards capabilities (API routes + the event stream),
+        ;; not resources: static files and the api.js bootstrap stay open —
+        ;; the cookie that carries the token INTO the page is set by api.js.
+        [(and api-token (pair? api-routes) (not (token-ok? req api-token))
+              (or (api-matches? api-routes req)
+                  (and event-bus (sse-request? req))))
+         (error-response 401 "missing or invalid glaze token")]
         [(find-api-response api-routes req)]
         [(and event-bus (sse-request? req)) (sse-response event-bus)]
         [(and serve-client? (api-client-request? req))
-         (api-client-response api-routes)]
+         (api-client-response api-routes api-token)]
         [(directory-exists? public-dir) (serve-static-file public-dir req)]
         [else (make-404-response)]))
     (output-response conn resp)))
+
+;; Does any route match this request (method + path shape)?
+(define (api-matches? api-routes req)
+  (define method
+    (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
+  (define segments
+    (filter (lambda (s) (not (equal? s "")))
+            (map path/param-path (url-path (request-uri req)))))
+  (for/or ([r (in-list api-routes)])
+    (and (route-match r method segments) #t)))
+
+;; Token arrives as the X-Glaze-Token header (curl / programmatic clients)
+;; or the glaze_token cookie (browsers — EventSource cannot set headers, but
+;; same-origin requests carry cookies, so SSE works unmodified).
+(define (token-ok? req expected)
+  (define h (headers-assq #"X-Glaze-Token" (request-headers/raw req)))
+  (or (and h (string=? (bytes->string/latin-1 (header-value h)) expected))
+      (let* ([cookie-h (headers-assq #"Cookie" (request-headers/raw req))]
+             [cookie-str (and cookie-h
+                              (bytes->string/latin-1 (header-value cookie-h)))])
+        (and cookie-str
+             (for/or ([part (in-list (string-split cookie-str ";"))])
+               (define kv (string-split (string-trim part) "="))
+               (and (= (length kv) 2)
+                    (string=? (first kv) "glaze_token")
+                    (string=? (second kv) expected)))))))
 
 (define (sse-request? req)
   (and (bytes=? (request-method req) #"GET")
@@ -171,10 +218,16 @@
 ;;                                                path params become arguments
 ;;   glaze.on('counter-changed', fn)            — EventSource subscription
 ;;                                                (only when #:events is live)
-(define (api-client-response api-routes)
+(define (api-client-response api-routes [api-token #f])
   (define js (generate-api-client api-routes))
   (response/full 200 #"OK" (current-seconds)
-                 #"application/javascript; charset=utf-8" '()
+                 #"application/javascript; charset=utf-8"
+                 (if api-token
+                     (list (header #"Set-Cookie"
+                                   (string->bytes/latin-1
+                                    (format "glaze_token=~a; Path=/; SameSite=Strict"
+                                            api-token))))
+                     '())
                  (list (string->bytes/utf-8 js))))
 
 (define (generate-api-client api-routes)
@@ -251,8 +304,12 @@
     (and captured
          (with-handlers ([exn:fail:glaze:bad-param?
                           (lambda (e) (error-response 400 (exn-message e)))]
-                         [exn:fail? (lambda (e)
-                                      (error-response 500 (exn-message e)))])
+                         [exn:fail?
+                          (lambda (e)
+                            ((current-glaze-error-reporter)
+                             e
+                             (url-path-string (request-uri req)))
+                            (error-response 500 (exn-message e)))])
            (define result (apply (route-handler r) req captured))
            (cond
              [(response? result) result]

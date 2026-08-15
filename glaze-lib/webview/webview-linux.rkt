@@ -78,6 +78,10 @@
   (maybe-bind webkit-lib "webkit_web_view_get_title" (_fun _pointer -> _string)))
 (define webkit_web_view_get_uri
   (maybe-bind webkit-lib "webkit_web_view_get_uri" (_fun _pointer -> _string)))
+(define webkit_web_view_get_inspector
+  (maybe-bind webkit-lib "webkit_web_view_get_inspector" (_fun _pointer -> _pointer)))
+(define webkit_web_inspector_show
+  (maybe-bind webkit-lib "webkit_web_inspector_show" (_fun _pointer -> _void)))
 (define g_main_context_iteration
   (maybe-bind glib-lib "g_main_context_iteration" (_fun _pointer _bool -> _bool)))
 (define g_signal_connect_data
@@ -150,6 +154,18 @@
                       #:height [height 768]
                       #:devtools? [devtools? #f]
                       #:on-close [on-close (lambda () (void))])
+  (define (show-devtools-later!)
+    ;; The inspector window needs the webview realized; retry briefly.
+    (thread
+     (lambda ()
+       (let retry ([deadline (+ (current-inexact-milliseconds) 3000)])
+         (define insp (and webkit_web_view_get_inspector
+                           (webkit_web_view_get_inspector webview)))
+         (cond
+           [(and insp webkit_web_inspector_show)
+            (webkit_web_inspector_show insp)]
+           [(> (current-inexact-milliseconds) deadline) (void)]
+           [else (sleep 0.1) (retry deadline)])))))
   (unless (supported?)
     (error 'open-webview "Linux WebView backend not available"))
   (gtk_init #f #f)
@@ -160,6 +176,7 @@
   (gtk_container_add window webview)
   (webkit_web_view_load_uri webview url)
   (gtk_widget_show_all window)
+  (when devtools? (show-devtools-later!))
 
   (define closed? (box #f))
   (connect-on-close! window (lambda () (set-box! closed? #t) (on-close)))

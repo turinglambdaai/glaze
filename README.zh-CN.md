@@ -241,7 +241,13 @@ glaze.on('count-changed', s => render(s.count));
 ### 安全
 
 - 仅服务 Host 为 `127.0.0.1` / `localhost` / `[::1]` 的请求（DNS rebinding 防护，恶意源 403）。
-- API handler 永不断连接 —— 参数问题 400 JSON，过程异常 500 JSON。
+- API handler 永不断连接 —— 参数问题 400 JSON，过程异常 500 JSON（并送达 `run-app` 的
+  `#:on-error`，接崩溃上报钩子）。
+- 可选 API token（`#:api-token`）：保护 API 路由与 SSE 流（否则 401）；生成的 api.js 通过
+  `glaze_token` cookie 引导，页面无需改动，程序化客户端发 `X-Glaze-Token`。
+  诚实边界：对随手本机调用者提高门槛 —— 纯 HTTP 无法实现完整的本机进程隔离。
+- 更新检查：`run-app #:check-update <清单url> #:current-version "1.0.0"` 拉取
+  `{"version","url","notes"}`，stderr 提示并广播 `update-available`。自我替换由应用决策。
 
 完整可运行的应用见 [`examples/counter/`](examples/counter/)。
 
