@@ -193,10 +193,12 @@
 (define gdk-pixbuf-lib (try-ffi-lib "gdk_pixbuf-2.0" "0"))
 (define gtk_widget_get_window
   (maybe-bind gtk-lib "gtk_widget_get_window" (_fun _pointer -> _pointer)))
+;; gdk_pixbuf_get_from_window lives in libgdk-3 (exported via libgtk-3),
+;; NOT in libgdk_pixbuf; savev lives in libgdk_pixbuf.
 (define gdk_pixbuf_get_from_window
-  (and gdk-pixbuf-lib
+  (and gtk-lib
        (get-ffi-obj "gdk_pixbuf_get_from_window"
-                    gdk-pixbuf-lib
+                    gtk-lib
                     (_fun _pointer _int _int _int _int -> _pointer)
                     (lambda () #f))))
 (define gdk_pixbuf_savev
@@ -205,8 +207,16 @@
                     gdk-pixbuf-lib
                     (_fun _pointer _string _string _pointer _pointer _pointer -> _bool)
                     (lambda () #f))))
+(define (capture-bindings-ok?)
+  (fprintf (current-error-port)
+           "[glaze-linux-webview] capture bindings: gdkwin-fn=~a from-window=~a savev=~a gdkpixbuf-lib=~a\n"
+           (and gtk_widget_get_window #t)
+           (and gdk_pixbuf_get_from_window #t)
+           (and gdk_pixbuf_savev #t)
+           (and gdk-pixbuf-lib #t)))
 
 (define (capture! wv [dest #f])
+  (capture-bindings-ok?)
   (and (not (unbox (lin:webview-closed?-box wv)))
        gtk_widget_get_window
        gdk_pixbuf_get_from_window
