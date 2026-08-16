@@ -20,3 +20,7 @@ dist/
 
 # Build output
 build/
+
+# showcase runtime artifacts (generated at startup / by self-check)
+examples/showcase/public/manifest.json
+examples/showcase/public/shots/
