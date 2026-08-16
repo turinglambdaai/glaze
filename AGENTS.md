@@ -9,7 +9,7 @@ Glaze 是 "Tauri-like framework for Racket"——Racket 写后端，Web 技术�
 
 1. **本地 HTTP 服务器**（Phase 1，稳定）：`glaze/server`
 2. **资源打包 / 系统托盘 / 应用打包**（Phase 2，稳定）：`glaze/assets` / `glaze/tray` / `glaze/build`
-3. **原生 WebView 窗口**（Phase 3，进行中）：`glaze/webview`
+3. **原生 WebView 窗口**（Phase 3，已完成，三平台 CI e2e 验证）：`glaze/webview`
 
 纯 Racket FFI，**不需要 C 编译器**。核心卖点之一是 agent 友好：框架提供
 `webview-title` / `webview-url` / `webview-capture!` 验证 API，让 agent 能以编程方式
@@ -45,26 +45,31 @@ racket -e '(require glaze/server glaze/webview/main)
 ## 项目结构
 
 ```
+glaze/                # 元包：`raco pkg install glaze` 装齐下列全部
 glaze-lib/
 ├── server.rkt        # start-server / stop-server（start-dev-server 是别名）
 ├── browser.rkt       # open-browser（跨平台系统浏览器）
-├── api.rkt           # define-api 宏（JSON 端点）
+├── api.rkt           # API 路由值（GET/POST/PUT/DELETE + :param 捕获）
+├── api-macros.rkt    # define-api-routes（一处声明 = 过程+路由+JS 客户端）
+├── events.rkt        # 事件总线 → 内置 SSE 端点 /glaze/events
 ├── assets.rkt        # public/ 目录解析、MIME
 ├── build.rkt         # raco exe + distribute 封装
+├── update.rkt        # 更新检查（check-update / newer-version?）
 ├── app.rkt           # run-app：服务+窗口+生命周期一键入口
+├── sys/              # 系统集成：剪贴板/通知/open/reveal/单实例（main 调度 + 平台后端）
 ├── tray/             # 托盘：main.rkt 调度 + tray-{windows,macos,linux,stub}.rkt
 └── webview/          # WebView：main.rkt 调度 + webview-{windows,macos,linux,stub}.rkt
 glaze-cli/            # raco glaze init / dev / build
 glaze-doc/            # scribble 文档
-glaze-test/           # rackunit 套件（main.rkt 基础 + webview-test.rkt + api-test.rkt）
-examples/             # hello / counter（JS↔Racket 桥接）/ agent-verify / tray-demo / webview-demo
+glaze-test/           # rackunit 套件（main + webview + api + events + hardening + sys）
+examples/             # showcase / hello / counter / agent-verify / tray-demo / webview-demo
 ```
 
 ## 系统集成（glaze/sys）
 
 - 剪贴板（三平台 FFI）、通知（mac osascript / linux notify-send；windows 待接）、
   open/reveal、单实例锁（派生端口绑定）
-- 窗口控制：`webview-set-title!/set-size!/set-fullscreen!`（四后端）
+- 窗口控制：`webview-set-title!/set-size!/set-fullscreen!`、`webview-focus!`（四后端）
 - **AppKit 必须显式加载**：Racket 只链接 Foundation；不加载 AppKit 的进程里
   NSStatusBar/NSPasteboard 等类为 NULL，objc 消息发给 nil 静默返回 nil（曾致 tray 空转）
 
@@ -94,9 +99,10 @@ JSON 对象键解析为 symbol（`hash-ref body 'delta`，不是 `"delta"`）—
 
 ## 后端契约（webview 与 tray 同构）
 
-每个 webview 后端模块必须导出同名 7 个过程，调度层按 `(system-type 'os)` 动态加载：
+每个 webview 后端模块必须导出同名 11 个过程，调度层按 `(system-type 'os)` 动态加载：
 
-`open-webview` / `supported?` / `close` / `navigate` / `title` / `url` / `capture!`
+`open-webview` / `supported?` / `close` / `navigate` / `title` / `url` / `capture!` /
+`set-title!` / `set-size!` / `set-fullscreen!` / `focus!`
 
 约定：
 
@@ -133,14 +139,13 @@ JSON 对象键解析为 symbol（`hash-ref body 'delta`，不是 `"delta"`）—
 
 ## 不要破坏的契约
 
-- 后端 7 导出 + 公开层 `webview-*` 名称（测试和下游依赖）
+- 后端导出契约 + 公开层 `webview-*` 名称（测试和下游依赖）
 - `open-window` 返回 `webview?` 或 `#f`（配合 `#:fallback-browser?` 语义）
 - `raco glaze` 子命令名与参数
 - tray 公开 API（`make-tray` 等五个）
 
 ## 已知问题
 
-- Windows `Navigate` 卡 COM apartment（头部注释有完整分析）
 - macOS 多窗口共用主 RunLoop（每窗口一个泵线程，可运行但未优化）
 - **后台会话白屏**：从无控制终端的分离会话启动（如 CI 后台任务、`nohup`、某些 agent 工具的后台执行）时，
   macOS 窗口可能停在白屏——WebKit 加载/IPC 全通（`webview-title` 正常），但绘制不上屏（窗口合成被冻结）。

@@ -65,8 +65,7 @@
 ;; rendering `url`. Optional #:title, #:width, #:height, #:on-close.
 ;; Returns a webview? on success, or #f if the backend is unavailable.
 ;; With #:fallback-browser? #t the system browser is opened instead when the
-;; native backend is unavailable (recommended on platforms where the WebView
-;; backend is still in progress, e.g. Windows today).
+;; native backend is unavailable.
 (define (open-window url
                      #:title [title "Glaze"]
                      #:width [width 1024]
