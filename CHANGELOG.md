@@ -5,7 +5,20 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.3.0] - Unreleased
+## [Unreleased]
+
+## [0.3.0] - 2026-08-16
+
+### Added (packaging & distribution)
+- **`glaze` meta package**: `raco pkg install --auto glaze` now installs the
+  library, CLI, and documentation in one command from the Racket package
+  catalog. The repo follows the standard multi-package layout (meta package
+  in `glaze/`, no root package), mirroring `typed-racket` / `srfi`.
+- Version metadata (`0.3.0`) on the packages; CI badge and release badge in
+  the READMEs; Scribble documentation extended to cover `glaze/sys`, the SSE
+  event bus, `define-api-routes` + the generated JS client, update checks,
+  and the security model; README platform table updated (Linux `#:devtools?`
+  and Windows resize-follow are done).
 
 ### Added (system integrations)
 - **`glaze/sys`**: clipboard (get/set, NSPasteboard / Win32 / GTK FFI),
@@ -63,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `start-server` rejects non-event-bus `#:events` arguments;
   `request-json-body` returns the empty hash for absent/empty bodies.
 
-### Fixed (Phase 3, in progress)
+### Fixed (Phase 3)
 - **Windows WebView2 root cause found and fixed**: the long-standing
   "COM apartment" diagnosis was wrong — `get_CoreWebView2` was being called
   at vtable slot 3 (actually `get_IsVisible`, which writes a BOOL into the
@@ -86,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `open-window`/`open-webview` accept `#:devtools?` (macOS:
   setInspectable:; Windows: OpenDevToolsWindow; Linux: not yet).
 
-### Added (Phase 3, in progress)
+### Added (Phase 3)
 - **JavaScript bridge** (`glaze/api`): real JSON routing over the frontend
   server — `GET`/`POST`/`PUT`/`DELETE` route values with `:param` capture,
   `request-json-body` (jsexpr, symbol keys), jsexpr auto-wrapping, 500-JSON
@@ -128,7 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `webview-navigate` both supported.
 - **Linux backend** (`ffi/unsafe`): GtkWindow + WebKitGTK 4.1 skeleton.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-08-14
 
 ### Added
 - **Frontend asset bundling**: `start-server` (canonical entry, `start-dev-server`
@@ -149,7 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CI `package` job builds a sample app on all three OSes and uploads the
   distribution + installer as artifacts.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-05-08
 
 ### Added
 - Local HTTP server for serving web frontend

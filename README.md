@@ -2,9 +2,11 @@
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
-![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.3.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
+
+<p align="center"><img src="docs/showcase.png" alt="Glaze Showcase — every capability in one window" width="720"></p>
 
 ## Why Glaze?
 
@@ -40,7 +42,7 @@ All three webview backends pass the real-window CI e2e (open, load, capture, nav
 | Native webview window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
-| `#:devtools?` | ✅ (inspectable, macOS 13+) | ✅ (`OpenDevToolsWindow`) | 🔲 |
+| `#:devtools?` | ✅ (inspectable, macOS 13+) | ✅ (`OpenDevToolsWindow`) | ✅ (WebKitGTK inspector) |
 
 Without a native backend, `run-app` / `open-window` automatically fall back to the system browser — the app still works everywhere.
 
@@ -52,33 +54,34 @@ Without a native backend, `run-app` / `open-window` automatically fall back to t
 
 ## Quick Start
 
-### 1. Clone
+### 1. Install
 
 ```bash
-git clone https://github.com/turinglambdaai/glaze.git
-cd glaze
+raco pkg install --auto glaze
 ```
 
-### 2. Install
+Installing from the Racket package catalog pulls in the library, the `raco glaze` CLI, and the documentation (browse it later with `raco docs`).
 
-```bash
-raco pkg install glaze
-```
-
-### 3. Create a new project
+### 2. Create a new project
 
 ```bash
 raco glaze init myapp
 cd myapp
 ```
 
-### 4. Run
+### 3. Run
 
 ```bash
 racket main.rkt
 ```
 
-Your browser opens to `http://127.0.0.1:8080` with a working page.
+A native window opens showing your app served from a local HTTP server; without a WebView backend it falls back to the system browser at `http://127.0.0.1:<port>`.
+
+> Prefer installing straight from GitHub instead of the catalog?
+> ```bash
+> raco pkg install --auto https://github.com/turinglambdaai/glaze
+> ```
+> To work on Glaze itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## CLI Commands
 
@@ -139,7 +142,7 @@ myapp/
 glaze/
 ├── glaze/            # Umbrella package (install `glaze` to get everything)
 ├── glaze-lib/        # Core library (server, API, browser launcher, assets)
-├── glaze-cli/        # CLI tool (raco glaze init / dev)
+├── glaze-cli/        # CLI tool (raco glaze init / dev / build)
 ├── glaze-doc/        # Documentation (Scribble)
 └── glaze-test/       # Tests
 ```
@@ -318,10 +321,9 @@ If a platform's native libraries aren't available at runtime, the tray silently 
 > **Phase 3 done:** all three backends (macOS WKWebView, Windows WebView2, Linux
 > WebKitGTK) pass the real-window CI e2e — open, page load, `webview-title`/`url`
 > verification, `webview-capture!` screenshots, `webview-navigate`, close (programmatic
-> and OS chrome), and `#:on-close` callbacks; `#:devtools?` on macOS/Windows. Pure
-> Racket FFI throughout, no compiler. Remaining polish (not blockers): Linux
-> `#:devtools?`, Windows resize-follow (`put_Bounds` is set once, not on WM_SIZE),
-> multi-window ergonomics.
+> and OS chrome), and `#:on-close` callbacks; `#:devtools?` and resize-follow on all
+> three platforms. Pure Racket FFI throughout, no compiler. Remaining polish
+> (not a blocker): multi-window ergonomics.
 
 ## License
 
