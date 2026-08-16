@@ -5,8 +5,11 @@
 ```bash
 git clone https://github.com/turinglambdaai/glaze.git
 cd glaze
-raco pkg install --link ./glaze-lib ./glaze-cli ./glaze-doc ./glaze-test ./glaze
+raco pkg install --auto --link ./glaze-lib ./glaze-cli ./glaze-doc ./glaze-test
 ```
+
+(End users don't need any of this — `raco pkg install --auto glaze` from the
+Racket package catalog installs everything, via the `glaze` metapackage.)
 
 ## Running Tests
 
