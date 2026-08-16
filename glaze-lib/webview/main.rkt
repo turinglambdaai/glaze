@@ -27,7 +27,8 @@
          webview-capture!
          webview-set-title!
          webview-set-size!
-         webview-set-fullscreen!)
+         webview-set-fullscreen!
+         webview-focus!)
 
 (require (only-in "../browser.rkt" open-browser))
 
@@ -49,7 +50,7 @@
     (set! backend-procs (make-hash))
     (define mod (backend-module-path))
     (for ([name (in-list '(open-webview supported? close navigate title url capture!
-                             set-title! set-size! set-fullscreen!))])
+                             set-title! set-size! set-fullscreen! focus!))])
       (hash-set! backend-procs name (dynamic-require mod name))))
   backend-procs)
 
@@ -145,3 +146,5 @@
   ((ref 'set-size!) (webview-handle wv) width height))
 (define (webview-set-fullscreen! wv on?)
   ((ref 'set-fullscreen!) (webview-handle wv) on?))
+
+(define (webview-focus! wv) ((ref 'focus!) (webview-handle wv)))

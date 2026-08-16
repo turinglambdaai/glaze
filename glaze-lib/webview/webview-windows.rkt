@@ -619,3 +619,9 @@
 (define (set-fullscreen! wv on?)
   (define hwnd (unbox (win:webview-hwnd-box wv)))
   (and hwnd ShowWindow (ShowWindow hwnd (if on? SW_MAXIMIZE SW_RESTORE))))
+
+(define SetForegroundWindow
+  (get-ffi-obj "SetForegroundWindow" user32 (_fun _pointer -> _bool) (lambda () #f)))
+(define (focus! wv)
+  (define hwnd (unbox (win:webview-hwnd-box wv)))
+  (and hwnd SetForegroundWindow (SetForegroundWindow hwnd)))

@@ -296,3 +296,7 @@
   (if on?
       (gtk_window_fullscreen (lin:webview-window wv))
       (gtk_window_unfullscreen (lin:webview-window wv))))
+
+(define gtk_window_present
+  (maybe-bind gtk-lib "gtk_window_present" (_fun _pointer -> _void)))
+(define (focus! wv) (gtk_window_present (lin:webview-window wv)))

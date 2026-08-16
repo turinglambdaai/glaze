@@ -57,6 +57,7 @@
          set-title!
          set-size!
          set-fullscreen!
+         focus!
          mac:webview?
          mac:webview-window
          mac:webview-webview
@@ -73,7 +74,7 @@
   (with-handlers ([exn:fail? (lambda (e) #f)])
     (ffi-lib "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")))
 
-(import-class NSString
+(import-class NSString NSNull
               NSApplication
               NSMenu
               NSMenuItem
@@ -398,3 +399,13 @@
   (unless (eq? (unbox (mac:webview-fullscreen?-box wv)) (and on? #t))
     (set-box! (mac:webview-fullscreen?-box wv) (and on? #t))
     (tellv window toggleFullScreen: #:type _id window)))
+
+;; Bring the window to the front (app activation included) — the right
+;; way to surface a background window; external osascript frontmost calls
+;; get immediately stolen back by the caller's app.
+(define (focus! wv)
+  (define app (tell NSApplication sharedApplication))
+  (if (tell app respondsToSelector: #:type _SEL (selector activate))
+      (tellv app activate)
+      (tellv app activateIgnoringOtherApps: #:type _bool #t))
+  (tellv (mac:webview-window wv) makeKeyAndOrderFront: #:type _id (tell NSNull null)))

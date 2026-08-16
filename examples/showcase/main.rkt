@@ -9,11 +9,20 @@
 
 (define-runtime-path public "public")
 
+(provide api bus wv-box)
+
 ;; ---- state & services ----------------------------------------------------
 (define bus (make-event-bus))
 (define wv-box (box #f))
 (define wide? (box #f))
 (define hits (box 0))
+
+;; subprocess-backed actions run on a thread: osascript/open take 1-2s to
+;; spawn, and answering the HTTP request first keeps the UI snappy.
+(define (reveal-later!)
+  (thread (lambda ()
+            (reveal-path (path->string (find-system-path 'run-file)))))
+  #t)
 
 ;; 1 Hz event stream (SSE tab)
 (void (thread (lambda ()
@@ -51,10 +60,11 @@
    (hasheq 'text (clipboard-get))]
   [(POST "api/notify")
    (do-notify title body)
-   (hasheq 'ok (notify! title body #:subtitle "showcase"))]
+   (begin (thread (lambda () (notify! title body #:subtitle "showcase")))
+          (hasheq 'ok #t))]
   [(POST "api/reveal")
    (do-reveal)
-   (hasheq 'ok (reveal-path (path->string (find-system-path 'run-file))))]
+   (hasheq 'ok (reveal-later!))]
   ;; window controls (handle arrives via #:on-ready)
   [(POST "api/win-title")
    (win-title n)
@@ -68,6 +78,16 @@
      (and (unbox wv-box)
           (webview-set-size! (unbox wv-box) (if w? 1080 860) (if w? 700 560)))
      (hasheq 'size (if w? "1080x700" "860x560")))]
+  [(POST "api/focus")
+   (do-focus)
+   (begin (and (unbox wv-box) (webview-focus! (unbox wv-box)))
+          (hasheq 'ok #t))]
+  [(POST "api/fullscreen")
+   (fullscreen)
+   (and (unbox wv-box) (webview-set-fullscreen! (unbox wv-box) #t)
+        (sleep 1.2)
+        (webview-set-fullscreen! (unbox wv-box) #f))
+   (hasheq 'now "toggled and back")]
   ;; verification APIs: the agent workflow, on demand
   [(POST "api/self-check")
    (self-check)
@@ -128,4 +148,24 @@
    #:width 860 #:height 560
    #:port 18952
    #:on-error report-error!
-   #:on-ready (lambda (wv url) (when wv (set-box! wv-box wv)))))
+   #:on-ready
+   (lambda (wv url)
+     (when wv
+       (set-box! wv-box wv)
+       ;; boot self-check: WKWebView in a bare (non-bundle) process
+       ;; occasionally stalls before first paint — detect and reload once.
+       (thread
+        (lambda ()
+          (sleep 4)
+          (define t1 (webview-title wv))
+          (fprintf (current-error-port) "[showcase] boot check #1: title=~s url=~s\n"
+                   t1 (webview-url wv))
+          (flush-output (current-error-port))
+          (when (or (not t1) (string=? t1 ""))
+            (fprintf (current-error-port) "[showcase] page stalled — reloading\n")
+            (flush-output (current-error-port))
+            (webview-navigate wv url)
+            (sleep 3)
+            (fprintf (current-error-port) "[showcase] boot check #2: title=~s\n"
+                     (webview-title wv))
+            (flush-output (current-error-port)))))))))

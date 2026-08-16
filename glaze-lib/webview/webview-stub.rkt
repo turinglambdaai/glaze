@@ -13,7 +13,8 @@
          capture!
          set-title!
          set-size!
-         set-fullscreen!)
+         set-fullscreen!
+         focus!)
 
 (define (supported?)
   #f)
@@ -40,3 +41,5 @@
 (define (set-title! h t) (void))
 (define (set-size! h w height) (void))
 (define (set-fullscreen! h on?) (void))
+
+(define (focus! h) (void))
