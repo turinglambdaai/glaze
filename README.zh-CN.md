@@ -294,6 +294,7 @@ Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜�
 
 | 示例 | 展示内容 |
 |---|---|
+| [`examples/showcase/`](examples/showcase/) | **综合演示（推荐先看）** —— 全部能力一屏尽览 |
 | [`examples/hello/`](examples/hello/) | 最小应用 —— 8 行 `run-app` |
 | [`examples/counter/`](examples/counter/) | JS↔Racket 桥接 —— `fetch` 调用 Racket 状态 |
 | [`examples/webview-demo.rkt`](examples/webview-demo.rkt) | WebView 生命周期：加载、导航、关闭、验证 API |

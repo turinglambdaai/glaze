@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Glaze Showcase</title>
+<style>
+  :root{--bg:#F4F3EE;--ink:#2d2a26;--sub:#6b675f;--acc:#C15F3C;--line:#e2ded4}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,sans-serif;background:var(--bg);color:var(--ink);margin:0;height:100vh;display:flex;flex-direction:column}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
+  header h1{font-size:16px;margin:0} header em{color:var(--acc);font-style:normal;font-weight:800}
+  header .sp{flex:1} #tick{font-size:11px;color:var(--sub);font-family:ui-monospace,Menlo,monospace}
+  nav{display:flex;border-bottom:1px solid var(--line);background:#efede7}
+  nav div{padding:8px 14px;font-size:13px;cursor:pointer;color:var(--sub)}
+  nav div.on{color:var(--ink);border-bottom:2px solid var(--acc);font-weight:700}
+  main{flex:1;overflow:auto;padding:16px}
+  .tab{display:none}.tab.on{display:block}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  button{background:var(--acc);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
+  button.alt{background:#d8d4c8;color:var(--ink)}
+  input{padding:8px 10px;border:1px solid #c9c4b8;border-radius:8px;font-size:13px;width:110px}
+  .log{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:12px ui-monospace,Menlo,monospace;
+       color:#4a463f;min-height:70px;max-height:180px;overflow:auto;white-space:pre-wrap;margin-top:10px}
+  .err{color:#b3402a}.ok{color:#5d7f5b}
+  .note{font-size:12px;color:var(--sub);margin:6px 0}
+  img.shot{max-width:100%;border:1px solid var(--line);border-radius:10px;margin-top:10px;background:#fff}
+  .big{font-size:34px;font-weight:800;color:var(--acc)}
+</style>
+</head>
+<body>
+<header><h1>Glaze <em>Showcase</em></h1><span class="note">每个标签都是真实后端调用</span>
+  <span class="sp"></span><span id="tick">SSE 未连接</span></header>
+<nav id="nav">
+  <div class="on" data-t="bridge">桥接 · 宏路由</div>
+  <div data-t="events">事件 · SSE</div>
+  <div data-t="sys">系统功能</div>
+  <div data-t="verify">验证 · Agent</div>
+  <div data-t="secure">安全 · 更新</div>
+</nav>
+<main>
+<!-- 桥接 -->
+<section class="tab on" id="bridge">
+  <div class="row"><input id="a" value="17"> + <input id="b" value="25">
+    <button onclick="doAdd()">求和（类型校验）</button>
+    <button class="alt" onclick="doAdd(true)">传错误类型 → 400</button></div>
+  <div class="row"><input id="msg" value="hello-glaze" style="width:180px">
+    <button class="alt" onclick="doEcho()">:path 参数 echo</button></div>
+  <div class="row"><button class="alt" onclick="doBoom()">触发 500（看错误回流）</button></div>
+  <div class="note">错误会被后端 on-error 捕获并经 SSE 推回本页（见“事件”标签与下方日志）</div>
+  <div class="log" id="blog"></div>
+</section>
+<!-- 事件 -->
+<section class="tab" id="events">
+  <div class="row"><button onclick="glaze.api.add({a:1,b:1}).then(()=>log('elog','一次后端广播已触发（见右上角时钟与系统通知）'))">后端推一条事件</button>
+    <button class="alt" onclick="glaze.api.notify({title:'Showcase',body:'SSE 事件驱动'})">同时发通知</button></div>
+  <div class="note">右上角时间戳由后端 1Hz 广播驱动；下面是原始事件流：</div>
+  <div class="log" id="elog"></div>
+</section>
+<!-- 系统 -->
+<section class="tab" id="sys">
+  <div class="row"><input id="cliptext" value="showcase 剪贴板" style="width:200px">
+    <button onclick="glaze.api.clipWrite({text:cli()}).then(r=>log('slog','剪贴板写入 '+r.ok))">写剪贴板</button>
+    <button class="alt" onclick="glaze.api.clipRead().then(r=>log('slog','剪贴板内容: '+JSON.stringify(r.text)))">读剪贴板</button></div>
+  <div class="row"><button onclick="glaze.api.notify({title:'Showcase',body:'系统通知来了'}).then(()=>log('slog','通知已发送（看右上角）'))">系统通知</button>
+    <button class="alt" onclick="glaze.api.reveal().then(r=>log('slog','Finder 定位 '+r.ok))">Finder 定位</button></div>
+  <div class="row"><button class="alt" onclick="glaze.api.winTitle({n:Date.now()%1000|0}).then(r=>log('slog','标题 → '+r.title))">改窗口标题</button>
+    <button class="alt" onclick="glaze.api.winSize().then(r=>log('slog','尺寸 → '+r.size))">窗口宽度切换</button></div>
+  <div class="log" id="slog"></div>
+</section>
+<!-- 验证 -->
+<section class="tab" id="verify">
+  <div class="row"><button onclick="doCheck()">运行 Agent 自检</button>
+    <span class="note">title / url / capture 三项断言 + 截图回传</span></div>
+  <div class="log" id="vlog"></div>
+  <img class="shot" id="shot" style="display:none">
+</section>
+<!-- 安全更新 -->
+<section class="tab" id="secure">
+  <div class="row"><button onclick="glaze.api.secret().then(r=>log('glog','token 路由（cookie 自动授权）: '+JSON.stringify(r)),
+      e=>log('glog','失败: '+e.message))">调受 token 保护的路由</button>
+    <button class="alt" onclick="fetch('/api/secret',{method:'POST'}).then(r=>log('glog','不带 token 直调 → HTTP '+r.status+'（401 = 守卫生效）'))">不带 token 直调 → 401</button></div>
+  <div class="row"><button class="alt" onclick="glaze.api.checkUpdate().then(r=>log('glog','更新检查: '+JSON.stringify(r)))">检查更新（本地 manifest v99）</button></div>
+  <div class="log" id="glog"></div>
+</section>
+</main>
+<script src="/glaze/api.js"></script>
+<script>
+const logs={blog:'#2d2a26',elog:'#2d2a26',slog:'#2d2a26',vlog:'#2d2a26',glog:'#2d2a26'};
+function log(id,msg){const el=document.getElementById(id);el.textContent+='▸ '+msg+'\n';el.scrollTop=el.scrollHeight;}
+const cli=()=>document.getElementById('cliptext').value;
+async function doAdd(bad){
+  const a=bad?'不是数字':+document.getElementById('a').value;
+  const b=+document.getElementById('b').value;
+  try{const r=await glaze.api.add({a,b});log('blog','a+b = '+r.sum+'（第 '+r.hits+' 次调用）');}
+  catch(e){log('blog','400: '+e.message);}
+}
+async function doEcho(){const r=await glaze.api.echo(document.getElementById('msg').value);
+  log('blog',`:path echo → ${JSON.stringify(r.echo)} (len=${r.len})`);}
+async function doBoom(){
+  try{await glaze.api.boom();}catch(e){log('blog','500 已返回: '+e.message.slice(0,60)+'…');}
+}
+async function doCheck(){
+  const r=await glaze.api.selfCheck();
+  log('vlog',`title=${JSON.stringify(r.title)} url=${r.url}`);
+  log('vlog',`capture=${r.shotBytes} bytes → 全部通过: ${r.ok}`);
+  const img=document.getElementById('shot');img.style.display='block';
+  img.src='/shots/latest.png?'+Date.now();
+}
+// tabs
+document.getElementById('nav').addEventListener('click',e=>{
+  if(!e.target.dataset.t)return;
+  document.querySelectorAll('nav div').forEach(d=>d.classList.toggle('on',d===e.target));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id===e.target.dataset.t));
+});
+// SSE: clock + error stream
+glaze.on('tick',d=>{document.getElementById('tick').textContent='SSE · '+new Date(d.now).toLocaleTimeString();});
+glaze.on('backend-error',d=>{log('blog','[on-error 回流] '+d.uri+': '+d.message.slice(0,50));log('elog','[error] '+d.uri);});
+</script>
+</body>
+</html>

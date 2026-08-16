@@ -276,7 +276,17 @@
    "\n};\n"))
 
 ;; "api/counter/bump" -> counterBump ; "api/items/:id/bump" -> itemsIdBump
-;; The first segment keeps its case (api/bump -> bump, not Bump).
+;; "api/clip-copy" -> clipCopy. Hyphenated segments camel-case (a bare
+;; hyphen key like `clip-copy:` would be ILLEGAL JavaScript and break the
+;; whole generated file); the first segment keeps a lowercase head.
+(define (js-camel seg first-lower?)
+  (define parts (filter non-empty-string? (string-split seg "-")))
+  (apply string-append
+         (for/list ([p (in-list parts)] [i (in-naturals)])
+           (if (and (zero? i) first-lower? (regexp-match? #rx"^[a-z]" p))
+               p
+               (string-append (string-upcase (substring p 0 1)) (substring p 1))))))
+
 (define (route->js-name segments)
   (define drop-api
     (if (and (pair? segments) (string=? (first segments) "api"))
@@ -286,9 +296,8 @@
          (for/list ([seg (in-list drop-api)] [i (in-naturals)])
            (cond
              [(param? seg) (string-titlecase (param-id seg))]
-             [(and (positive? i) (regexp-match? #rx"^[a-z]" seg))
-              (string-append (string-upcase (substring seg 0 1)) (substring seg 1))]
-             [else (if (param? seg) (param-id seg) seg)]))))
+             [(zero? i) (js-camel seg #t)]
+             [else (js-camel seg #f)]))))
 
 ;; Try each route against the request; on a match apply the handler and
 ;; normalize its result (jsexpr -> 200 JSON; response -> itself; exception ->

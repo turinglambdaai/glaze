@@ -302,6 +302,7 @@ If a platform's native libraries aren't available at runtime, the tray silently 
 
 | Example | What it shows |
 |---|---|
+| [`examples/showcase/`](examples/showcase/) | **Kitchen sink (start here)** — every capability in one window |
 | [`examples/hello/`](examples/hello/) | Minimal app — `run-app` in 8 lines |
 | [`examples/counter/`](examples/counter/) | JS↔Racket bridge — `fetch` calls Racket state |
 | [`examples/webview-demo.rkt`](examples/webview-demo.rkt) | Webview lifecycle: load, navigate, close, verification APIs |
