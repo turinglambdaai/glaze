@@ -137,11 +137,11 @@ myapp/
 
 ```
 glaze/
+├── glaze/            # Umbrella package (install `glaze` to get everything)
 ├── glaze-lib/        # Core library (server, API, browser launcher, assets)
 ├── glaze-cli/        # CLI tool (raco glaze init / dev)
 ├── glaze-doc/        # Documentation (Scribble)
-├── glaze-test/       # Tests
-└── info.rkt          # Multi-package root
+└── glaze-test/       # Tests
 ```
 
 ## API

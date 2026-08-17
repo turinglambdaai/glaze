@@ -137,11 +137,11 @@ myapp/
 
 ```
 glaze/
+├── glaze/            # Umbrella 包（安装 `glaze` 即包含全部组件）
 ├── glaze-lib/        # 核心库（服务器、API、浏览器启动、资源管理）
 ├── glaze-cli/        # CLI 工具（raco glaze init / dev）
 ├── glaze-doc/        # 文档（Scribble）
-├── glaze-test/       # 测试
-└── info.rkt          # 多包根配置
+└── glaze-test/       # 测试
 ```
 
 ## API
