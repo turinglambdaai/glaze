@@ -29,6 +29,10 @@ jobs:
           raco pkg install --no-docs --link ./glaze-cli
           raco pkg install --no-docs --link ./glaze-doc
           raco pkg install --no-docs --link ./glaze-test
+          # The umbrella must stay installable: its deps resolve against the
+          # four linked packages above. This is the exact check whose absence
+          # let the catalog entry go stale (2026-08 restructure).
+          raco pkg install --no-docs --link ./glaze
 
       - name: Run tests
         run: raco test glaze-test/
