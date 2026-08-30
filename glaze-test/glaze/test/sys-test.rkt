@@ -28,6 +28,11 @@
   ;; notify is best-effort; assert it returned a boolean, not an error
   (check-true (boolean? (notify! "glaze test" "body")) "notify returns a boolean"))
 
+;; ---- Windows live ----
+(when (and (eq? (system-type 'os) 'windows) (sys-supported?))
+  ;; WinRT toast via PowerShell: best-effort delivery, boolean result either way
+  (check-true (boolean? (notify! "glaze test" "body")) "notify returns a boolean"))
+
 ;; ---- window controls through the public API (macOS live) ----
 (when (and (eq? (system-type 'os) 'macosx) (webview-supported?))
   (define closed? (box #f))

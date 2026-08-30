@@ -66,8 +66,7 @@
   (when (and api-token (not (string? api-token)))
     (raise-argument-error 'start-server "(or/c #f string?)" api-token))
   (define dispatcher
-    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))
-  (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
+    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))  (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
   ;; only "connection refused" much later. Prove the listener is accepting
@@ -129,9 +128,16 @@
     (define resp
       (cond
         [(not (host-allowed? req port)) (error-response 403 "host not allowed")]
+        ;; One-time bootstrap: the capability URL (?glaze-token=..., opened by
+        ;; run-app) exchanges the token for an HttpOnly cookie and redirects
+        ;; to the clean path. api.js no longer hands the token out, so a
+        ;; casual local prober that can read openly-served endpoints still
+        ;; cannot mint a cookie.
+        [(and api-token (bootstrap-request? req api-token))
+         (bootstrap-response req)]
         ;; The token guards capabilities (API routes + the event stream),
         ;; not resources: static files and the api.js bootstrap stay open —
-        ;; the cookie that carries the token INTO the page is set by api.js.
+        ;; the page received its cookie via the bootstrap redirect above.
         [(and api-token (pair? api-routes) (not (token-ok? req api-token))
               (or (api-matches? api-routes req)
                   (and event-bus (sse-request? req))))
@@ -169,6 +175,35 @@
                (and (= (length kv) 2)
                     (string=? (first kv) "glaze_token")
                     (string=? (second kv) expected)))))))
+
+;; ---- token bootstrap (capability URL -> HttpOnly cookie) ----
+
+(define bootstrap-param 'glaze-token)
+
+(define (bootstrap-request? req expected)
+  (for/or ([kv (in-list (url-query (request-uri req)))])
+    (and (eq? (car kv) bootstrap-param)
+         (string? (cdr kv))
+         (string=? (cdr kv) expected))))
+
+;; 302 back to the same path (query dropped), setting the cookie the page
+;; will use for API + SSE calls. A wrong token in the query never matches
+;; and falls through to the normal flow — no cookie is minted.
+(define (bootstrap-response req)
+  (define target
+    (string-append "/" (url-path-string (request-uri req))))
+  (define token
+    (for/or ([kv (in-list (url-query (request-uri req)))]
+             #:when (eq? (car kv) bootstrap-param))
+      (cdr kv)))
+  (response/full 302 #"Found" (current-seconds)
+                 #"text/plain; charset=utf-8"
+                 (list (header #"Location" (string->bytes/latin-1 target))
+                       (header #"Set-Cookie"
+                               (string->bytes/latin-1
+                                (format "glaze_token=~a; Path=/; HttpOnly; SameSite=Strict"
+                                        token))))
+                 (list (string->bytes/utf-8 (format "Redirecting to ~a\n" target)))))
 
 (define (sse-request? req)
   (and (bytes=? (request-method req) #"GET")
@@ -219,15 +254,15 @@
 ;;   glaze.on('counter-changed', fn)            — EventSource subscription
 ;;                                                (only when #:events is live)
 (define (api-client-response api-routes [api-token #f])
+  ;; api-token is accepted for signature compatibility but deliberately NOT
+  ;; served here: this endpoint is openly readable, and embedding the token
+  ;; (or setting the cookie) in the response would let any local prober
+  ;; mint credentials. The page gets its cookie via the ?glaze-token=
+  ;; bootstrap redirect instead (run-app opens that URL automatically).
   (define js (generate-api-client api-routes))
   (response/full 200 #"OK" (current-seconds)
                  #"application/javascript; charset=utf-8"
-                 (if api-token
-                     (list (header #"Set-Cookie"
-                                   (string->bytes/latin-1
-                                    (format "glaze_token=~a; Path=/; SameSite=Strict"
-                                            api-token))))
-                     '())
+                 '()
                  (list (string->bytes/utf-8 js))))
 
 (define (generate-api-client api-routes)

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-30
+
+### Added
+- **Windows desktop notifications**: `notify!` now works on all three
+  platforms — Windows drives a WinRT toast through Windows PowerShell 5.1
+  (present on every Windows 10/11 install), attributing to PowerShell's
+  registered AppUserModelID; same blessed-subprocess pattern as macOS
+  (osascript) and Linux (notify-send). XML-escaped titles/bodies; the
+  script file sidesteps command-line quoting.
+- **Token bootstrap hardening**: `run-app` opens the window at a one-time
+  capability URL (`/?glaze-token=...`); the server exchanges the token for
+  an `HttpOnly` cookie (was: `SameSite=Strict` only) and redirects to the
+  clean path. **Breaking-ish:** `GET /glaze/api.js` no longer sets the
+  cookie — it previously handed the token to any local caller able to read
+  an openly-served endpoint, which defeated the API token entirely.
+  Pages are unaffected (the redirect happens before app code runs);
+  programmatic clients keep using `X-Glaze-Token`.
+
+### Changed
+- **Single shared pump thread** for all macOS webview windows (previously
+  one pump thread per window, all contending for the same main run loop).
+  The pump starts with the first window, exits with the last; the
+  0 -> 1 open-count transition makes restart race-free.
+- Windows opened with `orderFrontRegardless`, a no-op normally — a
+  mitigation for the background-session white screen (see below).
+
+### Fixed
+- Multi-window macOS apps no longer spawn one OS-thread per window; the
+  new multi-window e2e loads two distinct pages, closes one, verifies the
+  survivor still services fresh navigations, and asserts the shared pump
+  exits.
+
+### Known issues (updated)
+- Background-session white screen: windows are now also ordered front
+  unconditionally; a `nohup`-detached probe on macOS 26 composites and
+  captures correctly. If a white window is ever seen again, compare
+  `webview-title`/`webview-url` (they work) against `webview-capture!`
+  (`#f` = not composited) and prefer relaunching from a foreground
+  terminal over debugging glaze.
+
 ## [0.3.0] - 2026-08-16
 
 ### Added (packaging & distribution)

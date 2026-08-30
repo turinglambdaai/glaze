@@ -2,7 +2,7 @@
 
 用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.3.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.4.0-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
 
@@ -248,9 +248,10 @@ glaze.on('count-changed', s => render(s.count));
 - 仅服务 Host 为 `127.0.0.1` / `localhost` / `[::1]` 的请求（DNS rebinding 防护，恶意源 403）。
 - API handler 永不断连接 —— 参数问题 400 JSON，过程异常 500 JSON（并送达 `run-app` 的
   `#:on-error`，接崩溃上报钩子）。
-- 可选 API token（`#:api-token`）：保护 API 路由与 SSE 流（否则 401）；生成的 api.js 通过
-  `glaze_token` cookie 引导，页面无需改动，程序化客户端发 `X-Glaze-Token`。
-  诚实边界：对随手本机调用者提高门槛 —— 纯 HTTP 无法实现完整的本机进程隔离。
+- 可选 API token（`#:api-token`）：保护 API 路由与 SSE 流（否则 401）。应用窗口打开一次性的
+  `?glaze-token=` 引导 URL，把 token 换成 `HttpOnly` cookie（api.js 有意不发放任何凭据）；
+  程序化客户端发 `X-Glaze-Token`。诚实边界：对随手本机调用者提高门槛 —— 同用户进程仍可从
+  进程内存读取 token。
 - 更新检查：`run-app #:check-update <清单url> #:current-version "1.0.0"` 拉取
   `{"version","url","notes"}`，stderr 提示并广播 `update-available`。自我替换由应用决策。
 
@@ -266,6 +267,8 @@ glaze.on('count-changed', s => render(s.count));
 (reveal-path "/Users/me/report.pdf"); Finder/资源管理器中定位
 (unless (single-instance? "com.me.app") (exit 0))
 ```
+
+桌面通知三平台可用（osascript / notify-send / WinRT toast 经 PowerShell）。
 
 窗口控制（`glaze/webview`）：`webview-set-title!`、`webview-set-size!`、
 `webview-set-fullscreen!`。

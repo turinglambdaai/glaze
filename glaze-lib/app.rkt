@@ -82,6 +82,12 @@
                                    #:events event-bus
                                    #:api-token token)))
   (define url (format "http://127.0.0.1:~a/" actual-port))
+  ;; Capability URL: the one-time ?glaze-token= bootstrap exchanges the token
+  ;; for an HttpOnly cookie and redirects to the clean URL. Without it the
+  ;; page would have no way to receive the token (api.js deliberately no
+  ;; longer hands it out); programmatic clients use the X-Glaze-Token header.
+  (define open-url
+    (if token (format "~a?glaze-token=~a" url token) url))
   ;; Once-guard so callers may always call shutdown, even after run-app
   ;; already stopped the server on window close.
   (define once (make-semaphore 1))
@@ -102,7 +108,7 @@
         (when event-bus
           (bus-broadcast! event-bus 'update-available info))))
     (define wv
-      (open-window url
+      (open-window open-url
                    #:title title
                    #:width width
                    #:height height
@@ -120,8 +126,8 @@
        ;; Browser fallback: no window to wait on. Leave the server running so
        ;; the browser keeps working; caller decides when to exit.
        (on-ready #f url)
-       (printf "[glaze] app served at ~a (system-browser fallback)~n" url)
+       (printf "[glaze] app served at ~a (system-browser fallback)~n" open-url)
        (when token
-         (printf "[glaze] api token: ~a~n" token))
+         (printf "[glaze] api token (X-Glaze-Token header): ~a~n" token))
        (printf "[glaze] call the returned shutdown procedure or exit to stop~n")
        (values 'browser shutdown)])))

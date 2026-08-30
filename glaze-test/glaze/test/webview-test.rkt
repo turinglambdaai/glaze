@@ -8,6 +8,7 @@
 
 (require rackunit
          racket/file
+         glaze/server
          glaze/webview/main)
 
 ;; ---- Public API surface (all platforms) ----
@@ -80,4 +81,61 @@
   (check-not-exn (lambda () (webview-close wv)) "close does not raise")
   (sleep 0.2)
   (check-true (unbox closed2?) "public open-window on-close fired")
-  (check-false (webview-capture! wv) "capture after close returns #f"))
+  (check-false (webview-capture! wv) "capture after close returns #f")
+
+  ;; ---- multi-window: one shared pump services every open window ----
+  ;; (previously one pump thread per window, all contending for the same
+  ;; main run loop). Two webviews load distinct pages; both must commit,
+  ;; the survivor must stay serviced after the first closes, and the pump
+  ;; must exit when the last window closes.
+  (define mv-dir (make-temporary-file "glaze-mv-~a" 'directory))
+  (make-directory* (build-path mv-dir "a"))
+  (make-directory* (build-path mv-dir "b"))
+  (make-directory* (build-path mv-dir "c"))
+  (call-with-output-file (build-path mv-dir "a" "index.html")
+    (lambda (o) (display "<html><head><title>alpha</title></head></html>" o)))
+  (call-with-output-file (build-path mv-dir "b" "index.html")
+    (lambda (o) (display "<html><head><title>beta</title></head></html>" o)))
+  (call-with-output-file (build-path mv-dir "c" "index.html")
+    (lambda (o) (display "<html><head><title>gamma</title></head></html>" o)))
+  (define-values (mv-port mv-stop)
+    (start-server #:port 18993 #:public-dir mv-dir))
+  (define mod-title (dynamic-require 'glaze/webview/webview-macos 'title))
+  (define closed-a? (box #f))
+  (define closed-b? (box #f))
+  (define wa
+    (mod-open (format "http://127.0.0.1:~a/a/index.html" mv-port)
+              #:title "multi-a" #:on-close (lambda () (set-box! closed-a? #t))))
+  (define wb
+    (mod-open (format "http://127.0.0.1:~a/b/index.html" mv-port)
+              #:title "multi-b" #:on-close (lambda () (set-box! closed-b? #t))))
+  ;; both pages commit through the one pump (deadline: slow CI hosts)
+  (define both-loaded?
+    (let dl ([deadline (+ (current-inexact-milliseconds) 10000)])
+      (cond
+        [(and (equal? (mod-title wa) "alpha") (equal? (mod-title wb) "beta")) #t]
+        [(> (current-inexact-milliseconds) deadline) #f]
+        [else (sleep 0.1) (dl deadline)])))
+  (check-true both-loaded? "shared pump services both windows")
+  (mod-close wa)
+  (sleep 0.2)
+  (check-true (unbox closed-a?) "first window on-close fired")
+  ;; survivor stays serviced after the first window closed: a fresh
+  ;; navigation must still commit (title reads alone would not prove the
+  ;; runloop is being pumped, since they bypass it)
+  (mod-navigate wb (format "http://127.0.0.1:~a/c/index.html" mv-port))
+  (define survivor-serviced?
+    (let dl ([deadline (+ (current-inexact-milliseconds) 10000)])
+      (cond
+        [(equal? (mod-title wb) "gamma") #t]
+        [(> (current-inexact-milliseconds) deadline) #f]
+        [else (sleep 0.1) (dl deadline)])))
+  (check-true survivor-serviced? "survivor still serviced after first close")
+  (mod-close wb)
+  (sleep 0.2)
+  (check-true (unbox closed-b?) "second window on-close fired")
+  ;; the shared pump exits once no window remains
+  (check-not-false (sync/timeout 3 (thread-dead-evt (mod-thread wb)))
+                   "shared pump exits after the last window closes")
+  (mv-stop)
+  (delete-directory/files mv-dir))

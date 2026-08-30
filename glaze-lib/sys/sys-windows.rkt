@@ -1,11 +1,16 @@
 #lang racket/base
 
-;; Windows system-integration backend. Clipboard via Win32 FFI;
-;; open/reveal via explorer subprocesses. Notifications need either a
-;; tray icon (Shell_NotifyIcon balloon) or WinRT toast COM — return #f
-;; until the tray-based path is wired (documented limitation).
+;; Windows system-integration backend. Clipboard via Win32 FFI; open/reveal
+;; via explorer subprocesses; notifications via WinRT toasts driven by
+;; Windows PowerShell 5.1 — present on every Windows 10/11 install, so the
+;; same blessed-subfront-end pattern as macOS (osascript) / Linux
+;; (notify-send) applies: no app bundle, no COM registration. Toasts
+;; attribute to PowerShell's own AppUserModelID; a packaged app that wants
+;; its own attribution can register an AUMID and swap it in.
 
 (require ffi/unsafe
+         racket/file
+         racket/string
          racket/system)
 
 (provide supported?
@@ -89,9 +94,68 @@
                (or s ""))))
        (lambda () (CloseClipboard)))]))
 
+;; The AppUserModelID of the inbox PowerShell shortcut — toasts from an
+;; unregistered AUMID are dropped, but this one ships registered on every
+;; desktop Windows since 10.
+(define powershell-aumid
+  "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe")
+
+;; XML text content escaping (& first — otherwise it would double-escape
+;; the replacements).
+(define (xml-escape s)
+  (string-replace
+   (string-replace
+    (string-replace
+     (string-replace (string-replace s "&" "&amp;") "<" "&lt;")
+     ">" "&gt;")
+    "\"" "&quot;")
+   "'" "&apos;"))
+
+(define (toast-visual title body subtitle)
+  (define lines
+    (append (list title body)
+            (if (non-empty-string? subtitle) (list subtitle) '())))
+  (define texts
+    (apply string-append
+           (for/list ([l (in-list lines)]) (format "<text>~a</text>" (xml-escape l)))))
+  (format "<toast><visual><binding template=\"ToastGeneric\">~a</binding></visual></toast>"
+          texts))
+
+;; PowerShell single-quoted literal: '' is the only escape.
+(define (ps-quote s) (string-replace s "'" "''"))
+
 (define (notify! title body subtitle)
-  ;; Requires a tray icon (balloon) or WinRT toast — not wired yet.
-  #f)
+  (define ps (find-executable-path "powershell.exe"))
+  (and ps
+       (let ()
+         (define script
+           (string-append
+            "$ErrorActionPreference = 'Stop'\n"
+            "try {\n"
+            "  [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
+            "  [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null\n"
+            "  $xml = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
+            (format "  $xml.LoadXml('~a')\n" (ps-quote (toast-visual title body subtitle)))
+            "  $toast = New-Object Windows.UI.Notifications.ToastNotification $xml\n"
+            (format "  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('~a').Show($toast)\n"
+                    (ps-quote powershell-aumid))
+            "  exit 0\n"
+            "} catch {\n"
+            "  exit 1\n"
+            "}\n"))
+         ;; The script file sidesteps command-line quoting for arbitrary
+         ;; title/body text (xml-escape already made the XML safe).
+         (define path (make-temporary-file "glaze-notify-~a.ps1"))
+         (dynamic-wind
+           (lambda () (with-output-to-file path
+                        (lambda () (display script))
+                        #:exists 'replace))
+           (lambda ()
+             (= 0 (system*/exit-code ps "-NoProfile" "-NonInteractive"
+                                     "-ExecutionPolicy" "Bypass"
+                                     "-WindowStyle" "Hidden"
+                                     "-File" (path->string path))))
+           (lambda () (delete-file path))))))
 
 (define (open-path p)
   (define e (find-executable-path "explorer.exe"))

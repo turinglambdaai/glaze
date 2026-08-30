@@ -419,14 +419,17 @@ loopback to reach the app's API; hostile origins get 403.
 
 The optional API token (@racket[#:api-token]) guards @emph{capabilities} —
 API routes and the SSE stream (401 otherwise) — not resources: static files
-and the api.js bootstrap stay open, and api.js sets a @litchar{glaze_token}
-cookie that carries the token into the page (EventSource cannot set headers,
-but same-origin requests carry cookies). Programmatic clients send
-@litchar{X-Glaze-Token}.
+and the api.js bootstrap stay open. @racket[run-app] opens the window at a
+one-time capability URL, @litchar{/?glaze-token=...}: the server exchanges
+the token for an @litchar{HttpOnly} @litchar{glaze_token} cookie and
+redirects to the clean path (EventSource cannot set headers, but
+same-origin requests carry cookies). api.js deliberately hands out nothing,
+so a caller that can only read openly-served endpoints cannot mint
+credentials. Programmatic clients send @litchar{X-Glaze-Token}.
 
 @bold{Honest scope:} this raises the bar against casual local callers; a
-determined local process can still fetch the token — full local-process
-isolation is not achievable over plain HTTP.
+process running as the same user can still read the token from process
+memory — full local-process isolation is not achievable over plain HTTP.
 
 @section{Packaging}
 

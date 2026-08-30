@@ -2,7 +2,7 @@
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.3.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.4.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -254,10 +254,11 @@ the browser fallback too — same origin, no extra port.
   JSON, handler exceptions are 500 JSON (and reach `run-app`'s
   `#:on-error` for crash reporting hooks).
 - Optional API token (`#:api-token`): guards API routes and the SSE stream
-  (401 otherwise); the generated api.js bootstraps a `glaze_token` cookie
-  so pages work unmodified, programmatic clients send `X-Glaze-Token`.
-  Honest scope: defense-in-depth against casual local callers — full
-  local-process isolation is not achievable over plain HTTP.
+  (401 otherwise). The app window opens a one-time `?glaze-token=` bootstrap
+  URL that exchanges the token for an `HttpOnly` cookie (api.js deliberately
+  hands out nothing); programmatic clients send `X-Glaze-Token`.
+  Honest scope: defense-in-depth against casual local callers — a process
+  of the same user can still read the token from process memory.
 - Update checks: `run-app #:check-update <manifest-url> #:current-version "1.0.0"`
   fetches `{"version","url","notes"}`, reports to stderr and broadcasts
   `update-available`. Self-replacement stays the app's decision.
@@ -274,6 +275,9 @@ See [`examples/counter/`](examples/counter/) for the complete working app.
 (reveal-path "/Users/me/report.pdf"); Finder/Explorer, selected
 (unless (single-instance? "com.me.app") (exit 0))
 ```
+
+Desktop notifications work on all three platforms (osascript /
+notify-send / WinRT toast via PowerShell).
 
 Window controls (from `glaze/webview`): `webview-set-title!`,
 `webview-set-size!`, `webview-set-fullscreen!`.

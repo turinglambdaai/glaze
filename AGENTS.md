@@ -67,7 +67,8 @@ examples/             # showcase / hello / counter / agent-verify / tray-demo / 
 
 ## 系统集成（glaze/sys）
 
-- 剪贴板（三平台 FFI）、通知（mac osascript / linux notify-send；windows 待接）、
+- 剪贴板（三平台 FFI）、通知（三平台：mac osascript / linux notify-send /
+  windows WinRT toast 经 PowerShell 子进程，脚本走临时 .ps1 避开命令行转义）、
   open/reveal、单实例锁（派生端口绑定）
 - 窗口控制：`webview-set-title!/set-size!/set-fullscreen!`、`webview-focus!`（四后端）
 - **AppKit 必须显式加载**：Racket 只链接 Foundation；不加载 AppKit 的进程里
@@ -75,8 +76,9 @@ examples/             # showcase / hello / counter / agent-verify / tray-demo / 
 
 ## 加固层
 
-- `#:api-token`（start-server/run-app）：只护 API+SSE；api.js 引导 cookie、程序化走 `X-Glaze-Token`；
-  诚实边界写在 README（纯 HTTP 挡不住执意读本机端口的进程）
+- `#:api-token`（start-server/run-app）：只护 API+SSE；run-app 打开一次性 `?glaze-token=` 引导 URL，
+  服务器把 token 换成 HttpOnly cookie 后 302 回净路径；api.js 有意不发凭据（曾经发过 = 任何本地进程
+  curl 一下就绕过 token）；程序化走 `X-Glaze-Token`；诚实边界写在 README（同用户进程仍可读内存）
 - `current-glaze-error-reporter`（parameter）：500 路径的异常上报，run-app `#:on-error` 装配；
   **必须先 parameterize 再 start-server**（连接线程继承 accept 循环的 parameterization）
 - `glaze/update`：`check-update` + `newer-version?`（数值点分比较，"1.10">"1.9"）；run-app
@@ -146,7 +148,10 @@ JSON 对象键解析为 symbol（`hash-ref body 'delta`，不是 `"delta"`）—
 
 ## 已知问题
 
-- macOS 多窗口共用主 RunLoop（每窗口一个泵线程，可运行但未优化）
+- macOS 多窗口：单一共享泵线程服务所有窗口（0.3.x 是每窗口一个泵线程）；0→1 转变触发启动，
+  最后一个窗口关闭时退出。多窗口 e2e 在 `webview-test.rkt`
 - **后台会话白屏**：从无控制终端的分离会话启动（如 CI 后台任务、`nohup`、某些 agent 工具的后台执行）时，
   macOS 窗口可能停在白屏——WebKit 加载/IPC 全通（`webview-title` 正常），但绘制不上屏（窗口合成被冻结）。
-  前台会话（用户终端）不受影响。诊断时优先怀疑启动会话，而不是 glaze 代码
+  窗口现已 `orderFrontRegardless` 无条件置前（缓解）；本机 `nohup` 探针已验证正常合成+截图。
+  若再现：`webview-title`/`url` 正常而 `webview-capture!` 返回 `#f` 即此症状，优先换前台终端启动，
+  而不是排查 glaze 代码

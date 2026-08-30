@@ -18,7 +18,7 @@
     "glaze-cli"
     "glaze-doc"))
 
-(define version "0.3.0")
+(define version "0.4.0")
 (define pkg-desc "Build desktop apps with Racket backend and web frontend — a Tauri-like framework for Racket")
 (define pkg-authors '(turinglambdaai))
 (define license 'MIT)

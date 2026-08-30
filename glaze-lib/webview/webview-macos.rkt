@@ -19,6 +19,14 @@
 ;;     runs the main run loop with runMode:beforeDate: (the modal-loop idiom):
 ;;     it services AppKit's event source AND every other main-runloop source —
 ;;     WKWebView's XPC/IPC replies, NSTimers, GCD main-queue callbacks.
+;;   - ONE pump thread is shared by every open window (each window owning a
+;;     pump thread made N threads contend for the same run loop). The pump
+;;     starts on the first window, exits when the last one closes, and a
+;;     later window restarts it. The 0 -> 1 open-count transition is the
+;;     start trigger, so a new window never races a dying pump: in the tiny
+;;     overlap window two pumps may briefly coexist, which is harmless (the
+;;     per-window design had N from the start) and self-corrects as both
+;;     exit once the count reaches 0.
 ;;   - The pump sleeps briefly between iterations: when a runloop source is
 ;;     always ready, runMode returns immediately, and a yield-less loop would
 ;;     monopolize the OS thread and starve every other Racket thread.
@@ -224,7 +232,7 @@
 ;; fresh NSString per iteration would churn the allocator for no benefit.
 (define default-runloop-mode
   (tell (tell NSString alloc) initWithUTF8String: #:type _string "NSDefaultRunLoopMode"))
-(define (pump-once app)
+(define (pump-once)
   (define pool (tell (tell NSAutoreleasePool alloc) init))
   (tell (tell NSRunLoop mainRunLoop)
         runMode:
@@ -234,10 +242,34 @@
         (tell NSDate dateWithTimeIntervalSinceNow: #:type _double dwell-secs))
   (tellv pool drain))
 
-(define (pump-loop app wv)
+;; ---- shared pump lifecycle ----
+;; The pump exits once no window remains (checked under the same lock the
+;; opener uses), so an open failure between acquire and release cannot strand
+;; the thread: open-webview acquires only after navigate succeeded.
+(define pump-lock (make-semaphore 1))
+(define open-windows 0)
+(define pump-thread #f)
+
+(define (acquire-pump!)
+  (call-with-semaphore pump-lock
+    (lambda ()
+      (set! open-windows (add1 open-windows))
+      ;; Start on the 0 -> 1 transition only; a still-dying old pump from the
+      ;; tiny overlap window observes the new count and keeps servicing.
+      (when (= open-windows 1)
+        (set! pump-thread (thread pump-forever))))))
+
+(define (release-pump!)
+  (call-with-semaphore pump-lock
+    (lambda ()
+      (set! open-windows (max 0 (sub1 open-windows))))))
+
+(define (pump-forever)
   (let loop ()
-    (unless (unbox (mac:webview-closed?-box wv))
-      (pump-once app)
+    (define keep-going?
+      (call-with-semaphore pump-lock (lambda () (> open-windows 0))))
+    (when keep-going?
+      (pump-once)
       ;; Mandatory scheduler yield: when a runloop source is always ready,
       ;; runMode:beforeDate: returns immediately and a yield-less loop would
       ;; monopolize the OS thread, starving every other Racket thread.
@@ -303,9 +335,15 @@
   (callback-put! (cast window _id _uintptr)
                  (lambda ()
                    (set-box! closed? #t)
+                   (release-pump!)
                    (on-close)))
 
   (tellv window makeKeyAndOrderFront: #:type _id window)
+  ;; orderFrontRegardless: makeKeyAndOrderFront is a no-op when the app is
+  ;; not active, which is exactly the detached/background-session case that
+  ;; leaves windows uncomposited (the "white screen" report). Ordering front
+  ;; unconditionally costs nothing in the normal case.
+  (tellv window orderFrontRegardless)
   ;; Re-activate with the window on screen: on modern macOS the pre-window
   ;; activate alone does not always bring the window to the active Space.
   (if (tell app respondsToSelector: #:type _SEL (selector activate))
@@ -315,8 +353,10 @@
   (define wv (mac:webview window webview delegate closed? (box #f) #f))
   (navigate wv url)
 
-  ;; Pump AppKit events until the window closes.
-  (set-mac:webview-thread! wv (thread (lambda () (pump-loop app wv))))
+  ;; One shared pump services every open window; acquire only after navigate
+  ;; succeeded so a throwing open cannot strand the thread.
+  (acquire-pump!)
+  (set-mac:webview-thread! wv pump-thread)
   wv)
 
 (define (close wv)

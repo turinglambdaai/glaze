@@ -47,21 +47,42 @@
 (let*-values ([(_s3 _h3 _b3)
                (call "/api/ping" #:headers (list (format "X-Glaze-Token: ~a" token)))])
   (check-true (string-contains? _s3 "200") "header token -> 200"))
-;; api.js bootstrap sets the cookie
-(let*-values ([(_s4 h4 _b4) (call "/glaze/api.js")])
-  (define set-cookie
-    (for/or ([hh (in-list h4)])
-      (define s (bytes->string/latin-1 hh))
-      (and (string-prefix? (string-downcase s) "set-cookie:")
-           (string-trim (substring s (string-length "Set-Cookie:"))))))
-  (check-true (and set-cookie
-                   (string-contains? set-cookie (format "glaze_token=~a" token)))
-              "api.js sets glaze_token cookie")
-  ;; cookie channel: replay the Set-Cookie value as a Cookie header
-  (define cookie-header (car (string-split set-cookie ";")))
-  (let*-values ([(_s5 _h5 _b5) (call "/api/ping"
-                         #:headers (list (string-append "Cookie: " cookie-header)))])
-    (check-true (string-contains? _s5 "200") "cookie token -> 200")))
+;; api.js is openly readable, so it must not mint credentials — no cookie,
+;; no token anywhere in it
+(let*-values ([(_s4 h4 b4) (call "/glaze/api.js")])
+  (check-false
+   (for/or ([hh (in-list h4)])
+     (string-prefix? (string-downcase (bytes->string/latin-1 hh)) "set-cookie:"))
+   "api.js sets no cookie")
+  (check-false (string-contains? (bytes->string/utf-8 b4) token)
+               "api.js body does not contain the token"))
+
+;; one-time bootstrap: ?glaze-token= exchanges the token for an HttpOnly
+;; cookie and redirects to the clean path
+(let*-values ([(_s5 h5 _b5) (call (format "/?glaze-token=~a" token))])
+  (check-true (string-contains? _s5 "302") "bootstrap redirects")
+  (check-true
+   (for/or ([hh (in-list h5)])
+     (string-contains? (string-downcase (bytes->string/latin-1 hh))
+                       (format "glaze_token=~a" token)))
+   "bootstrap sets glaze_token cookie")
+  (check-true
+   (for/or ([hh (in-list h5)])
+     (define s (string-downcase (bytes->string/latin-1 hh)))
+     (and (string-prefix? s "set-cookie:")
+          (string-contains? s "httponly")))
+   "bootstrap cookie is HttpOnly")
+  ;; cookie channel: replay the minted cookie as a Cookie header
+  (let*-values ([(_s6 _h6 _b6) (call "/api/ping"
+                         #:headers (list (format "Cookie: glaze_token=~a" token)))])
+    (check-true (string-contains? _s6 "200") "cookie token -> 200")))
+
+;; wrong token in the query never mints anything
+(let*-values ([(_s7 h7 _b7) (call "/?glaze-token=wrong")])
+  (check-false
+   (for/or ([hh (in-list h7)])
+     (string-prefix? (string-downcase (bytes->string/latin-1 hh)) "set-cookie:"))
+   "wrong bootstrap token mints nothing"))
 
 ;; ---- on-error reporting through the 500 path ----
 (define reported '())
