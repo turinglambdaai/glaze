@@ -77,9 +77,11 @@ racket main.rkt
 
 A native window opens showing your app served from a local HTTP server; without a WebView backend it falls back to the system browser at `http://127.0.0.1:<port>`.
 
-> Prefer installing straight from GitHub instead of the catalog?
+> Prefer installing straight from a GitHub checkout instead of the catalog?
 > ```bash
-> raco pkg install --auto https://github.com/turinglambdaai/glaze
+> git clone https://github.com/turinglambdaai/glaze.git
+> cd glaze
+> raco pkg install --auto --link ./glaze-lib ./glaze-cli ./glaze-doc
 > ```
 > To work on Glaze itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
 

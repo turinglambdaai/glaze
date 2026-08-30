@@ -2,9 +2,11 @@
 
 用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
 
-![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.3.0-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
+
+<p align="center"><img src="docs/showcase.png" alt="Glaze Showcase —— 全部能力一屏尽览" width="720"></p>
 
 ## 为什么选择 Glaze？
 
@@ -40,7 +42,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
-| `#:devtools?` | ✅（inspectable，macOS 13+） | ✅（`OpenDevToolsWindow`） | 🔲 |
+| `#:devtools?` | ✅（inspectable，macOS 13+） | ✅（`OpenDevToolsWindow`） | ✅（WebKitGTK inspector） |
 
 原生后端不可用时，`run-app` / `open-window` 自动回退系统浏览器 —— 应用在所有平台都能跑。
 
@@ -52,20 +54,15 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 
 ## 快速开始
 
-### 1. 克隆
+### 1. 安装
 
 ```bash
-git clone https://github.com/turinglambdaai/glaze.git
-cd glaze
+raco pkg install --auto glaze
 ```
 
-### 2. 安装
+从 Racket 官方包索引安装，会一并装好核心库、`raco glaze` CLI 和文档（之后可用 `raco docs` 浏览）。
 
-```bash
-raco pkg install glaze
-```
-
-### 3. 创建新项目
+### 2. 创建新项目
 
 ```bash
 raco glaze init myapp
@@ -78,7 +75,15 @@ cd myapp
 racket main.rkt
 ```
 
-浏览器会自动打开 `http://127.0.0.1:8080`，显示一个可用的页面。
+会打开一个原生窗口展示你的应用（由本地 HTTP 服务器驱动）；无 WebView 后端时自动回退系统浏览器，访问 `http://127.0.0.1:<端口>`。
+
+> 想直接从 GitHub 检出安装而不走包索引？
+> ```bash
+> git clone https://github.com/turinglambdaai/glaze.git
+> cd glaze
+> raco pkg install --auto --link ./glaze-lib ./glaze-cli ./glaze-doc
+> ```
+> 想参与 Glaze 开发，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## CLI 命令
 
@@ -309,9 +314,8 @@ Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜�
 
 > **Phase 3 完成：** 三个后端（macOS WKWebView、Windows WebView2、Linux WebKitGTK）均通过
 > 真窗口 CI e2e——open、页面加载、`webview-title`/`url` 验证、`webview-capture!` 截图、
-> `webview-navigate`、关闭（编程与系统按钮）、`#:on-close` 回调；`#:devtools?` 支持 macOS/Windows。
-> 全程纯 Racket FFI，无编译器。剩余打磨（非阻塞）：Linux `#:devtools?`、Windows 窗口缩放跟随
-> （`put_Bounds` 仅在创建时设置，未接 WM_SIZE）、多窗口体验。
+> `webview-navigate`、关闭（编程与系统按钮）、`#:on-close` 回调；三平台均已支持
+> `#:devtools?` 与窗口缩放跟随。全程纯 Racket FFI，无编译器。剩余打磨（非阻塞）：多窗口体验。
 
 ## 许可证
 
