@@ -11,8 +11,6 @@
     "glaze-lib"
     "glaze-cli"
     "glaze-doc"))
-(define build-deps
-  '("glaze-test"))
 (define implies
   '("glaze-lib"
     "glaze-cli"
