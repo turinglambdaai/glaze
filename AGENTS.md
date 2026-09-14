@@ -26,11 +26,15 @@ Glaze 是 "Tauri-like framework for Racket"——Racket 写后端，Web 技术�
 ## 快速命令
 
 ```bash
-# 安装（本地开发，链接方式）
-raco pkg install --auto --no-docs --link ./glaze-lib ./glaze-cli ./glaze-test
+# 安装（本地开发，链接方式；仓库根即单一包）
+# 注意：--link 的路径末元素必须是包名，"." 不合法，用 "$PWD"
+raco pkg install --auto --no-docs --link "$PWD"
+
+# 拉取更新后刷新链接包
+raco pkg update --link "$PWD"
 
 # 编译
-raco make glaze-lib/main.rkt glaze-cli/cli.rkt
+raco make glaze/main.rkt glaze-cli/cli.rkt
 
 # 测试（macOS 上含 WebView e2e；Linux/Windows 自动跳过 macOS 段）
 raco test glaze-test/
@@ -42,27 +46,43 @@ racket -e '(require glaze/server glaze/webview/main)
   (sleep 30) (webview-close wv) (stop)'
 ```
 
+## 打包规则（单包多集合）
+
+仓库根 = 一个包（`info.rkt`，`collection 'multi`）。包级字段（name/deps/version/raco-commands…）
+在根 `info.rkt`；但 **`scribblings` 和 `raco-commands` 是集合级字段**，必须放对应集合目录的
+`info.rkt`（`glaze-doc/info.rkt`、`glaze-cli/info.rkt`），raco 和 raco setup 只扫集合信息，
+放包根不生效（`raco glaze` 命令会消失）。examples/ 与 scripts/ 带集合级 `compile-omit-paths`，
+setup 不编译示例正文。
+
+- **版本号格式**：Racket `valid-version?` 拒绝尾部 `.0` 分量——写 `"0.5"` 不写 `"0.5.0"`
+- **安装路径**：`raco pkg install --link` 的路径末元素必须是包名，`.`/`./` 不合法，用 `"$PWD"`
+
 ## 项目结构
 
+仓库根目录即**一个**可安装的 Racket 包（根 `info.rkt`，`collection 'multi`），
+每个顶层目录是一个集合（collection）：
+
 ```
-glaze/                # 元包：`raco pkg install glaze` 装齐下列全部
-glaze-lib/
-├── server.rkt        # start-server / stop-server（start-dev-server 是别名）
-├── browser.rkt       # open-browser（跨平台系统浏览器）
-├── api.rkt           # API 路由值（GET/POST/PUT/DELETE + :param 捕获）
-├── api-macros.rkt    # define-api-routes（一处声明 = 过程+路由+JS 客户端）
-├── events.rkt        # 事件总线 → 内置 SSE 端点 /glaze/events
-├── assets.rkt        # public/ 目录解析、MIME
-├── build.rkt         # raco exe + distribute 封装
-├── update.rkt        # 更新检查（check-update / newer-version?）
-├── app.rkt           # run-app：服务+窗口+生命周期一键入口
-├── sys/              # 系统集成：剪贴板/通知/open/reveal/单实例（main 调度 + 平台后端）
-├── tray/             # 托盘：main.rkt 调度 + tray-{windows,macos,linux,stub}.rkt
-└── webview/          # WebView：main.rkt 调度 + webview-{windows,macos,linux,stub}.rkt
-glaze-cli/            # raco glaze init / dev / build
-glaze-doc/            # scribble 文档
-glaze-test/           # rackunit 套件（main + webview + api + events + hardening + sys）
-examples/             # showcase / hello / counter / agent-verify / tray-demo / webview-demo
+glaze/                # 仓库根 = `glaze` 包：一次安装装齐下列全部
+├── info.rkt          # 包元数据（deps / version / raco-commands）
+├── glaze/            # 核心库（collection "glaze"）
+│   ├── server.rkt    # start-server / stop-server（start-dev-server 是别名）
+│   ├── browser.rkt   # open-browser（跨平台系统浏览器）
+│   ├── api.rkt       # API 路由值（GET/POST/PUT/DELETE + :param 捕获）
+│   ├── api-macros.rkt # define-api-routes（一处声明 = 过程+路由+JS 客户端）
+│   ├── events.rkt    # 事件总线 → 内置 SSE 端点 /glaze/events
+│   ├── assets.rkt    # public/ 目录解析、MIME
+│   ├── build.rkt     # raco exe + distribute 封装
+│   ├── update.rkt    # 更新检查（check-update / newer-version?）
+│   ├── app.rkt       # run-app：服务+窗口+生命周期一键入口
+│   ├── sys/          # 系统集成：剪贴板/通知/open/reveal/单实例（main 调度 + 平台后端）
+│   ├── tray/         # 托盘：main.rkt 调度 + tray-{windows,macos,linux,stub}.rkt
+│   └── webview/      # WebView：main.rkt 调度 + webview-{windows,macos,linux,stub}.rkt
+├── glaze-cli/        # raco glaze init / dev / build
+├── glaze-doc/        # scribble 文档（scribblings 声明在其集合级 info.rkt）
+├── glaze-test/       # rackunit 套件（main + webview + api + events + hardening + sys）
+├── examples/         # showcase / hello / counter / agent-verify / tray-demo / webview-demo（不参与 setup 编译）
+└── scripts/          # webview-e2e.rkt（CI 用）
 ```
 
 ## 系统集成（glaze/sys）
@@ -136,8 +156,8 @@ JSON 对象键解析为 symbol（`hash-ref body 'delta`，不是 `"delta"`）—
 
 两个后端文件的头部注释沉淀了全部平台级 FFI 结论，改 FFI 前必读：
 
-- `glaze-lib/webview/webview-windows.rkt`：COM vtable 调用形式、out 参数两箭头形式、回调内对象生命周期
-- `glaze-lib/webview/webview-macos.rkt`：`_double` 拒绝精确整数、结构体传参必须 `#:type`、`runMode:beforeDate:` vs `nextEventMatchingMask:`（后者不服务 RunLoop 源）、泵线程必须让出调度器
+- `glaze/webview/webview-windows.rkt`：COM vtable 调用形式、out 参数两箭头形式、回调内对象生命周期
+- `glaze/webview/webview-macos.rkt`：`_double` 拒绝精确整数、结构体传参必须 `#:type`、`runMode:beforeDate:` vs `nextEventMatchingMask:`（后者不服务 RunLoop 源）、泵线程必须让出调度器
 
 ## 不要破坏的契约
 

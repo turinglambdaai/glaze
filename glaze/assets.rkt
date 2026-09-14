@@ -24,7 +24,7 @@
 ;; The default embedded public assets directory. Declaring it here with
 ;; `define-runtime-path` means `raco distribute` copies it next to the
 ;; executable; packaged apps then serve from this directory at runtime.
-;; The path is relative to this source file, so it points at glaze-lib/public
+;; The path is relative to this source file, so it points at glaze/public
 ;; (an empty placeholder kept for library-level embedding; per-app embedded
 ;; assets come from the app's own `define-runtime-path` declaration).
 (define-runtime-path embedded-public-dir "public")

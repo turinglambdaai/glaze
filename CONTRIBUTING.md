@@ -5,11 +5,13 @@
 ```bash
 git clone https://github.com/turinglambdaai/glaze.git
 cd glaze
-raco pkg install --auto --link ./glaze-lib ./glaze-cli ./glaze-doc ./glaze-test
+raco pkg install --auto --link "$PWD"
 ```
 
-(End users don't need any of this — `raco pkg install --auto glaze` from the
-Racket package catalog installs everything, via the `glaze` metapackage.)
+(The repo root is one single Racket package — this installs the library,
+the `raco glaze` CLI, and the docs in one step. `"$PWD"` is needed because
+`raco pkg install` requires the source path to end in the package name.
+After pulling changes, refresh with `raco pkg update --link "$PWD"`.)
 
 ## Running Tests
 
@@ -34,12 +36,13 @@ raco test glaze-test/
 
 ## Package Structure
 
-Glaze follows the standard Racket multi-package layout:
+The repo root is a single installable package; each top-level directory is a
+Racket collection:
 
-| Package | Purpose |
-|---------|---------|
-| `glaze` | Metapackage |
-| `glaze-lib` | Core implementation |
-| `glaze-cli` | `raco glaze` commands |
-| `glaze-doc` | Scribble documentation |
-| `glaze-test` | Tests |
+| Directory | Purpose |
+|-----------|---------|
+| `glaze/` | Core implementation (collection `glaze`) |
+| `glaze-cli/` | `raco glaze` commands |
+| `glaze-doc/` | Scribble documentation |
+| `glaze-test/` | Tests |
+| `examples/` | Runnable examples (not compiled by setup) |

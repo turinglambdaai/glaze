@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-15
+
+### Changed
+- **Single-package layout**: the repository root is now one installable
+  `glaze` package (`info.rkt` with `collection 'multi`); the former
+  `glaze` metapackage, `glaze-lib`, `glaze-cli`, `glaze-doc`, and
+  `glaze-test` packages are now collections inside it. One install, one
+  version, one catalog entry:
+  - `raco pkg install glaze` (catalog) or `raco pkg install --link .`
+    (checkout) installs everything — library, `raco glaze` CLI, docs,
+    tests.
+  - All public module paths are unchanged (`glaze`, `glaze/server`,
+    `glaze/webview/main`, ...); nothing to migrate for app code.
+  - `glaze-lib/` was renamed to `glaze/` and the test suite flattened
+    from `glaze-test/glaze/test/` to `glaze-test/`.
+  - `examples/` and `scripts/` carry collection-level `info.rkt` files
+    so `raco setup` never compiles them.
+
 ## [0.4.0] - 2026-08-30
 
 ### Added

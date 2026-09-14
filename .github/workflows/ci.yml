@@ -23,22 +23,15 @@ jobs:
         with:
           version: ${{ matrix.racket-version }}
 
-      - name: Install Glaze packages
-        run: |
-          raco pkg install --no-docs --link ./glaze-lib
-          raco pkg install --no-docs --link ./glaze-cli
-          raco pkg install --no-docs --link ./glaze-doc
-          raco pkg install --no-docs --link ./glaze-test
-          # The umbrella must stay installable: its deps resolve against the
-          # four linked packages above. This is the exact check whose absence
-          # let the catalog entry go stale (2026-08 restructure).
-          raco pkg install --no-docs --link ./glaze
+      - name: Install Glaze package
+        shell: bash
+        run: raco pkg install --auto --no-docs --link "$PWD"
 
       - name: Run tests
         run: raco test glaze-test/
 
       - name: Check formatting
-        run: raco fmt --check glaze-lib/ glaze-cli/ glaze-test/
+        run: raco fmt --check glaze/ glaze-cli/ glaze-test/
         continue-on-error: true
 
   webview-e2e:
@@ -61,9 +54,9 @@ jobs:
         with:
           version: ${{ matrix.racket-version }}
 
-      - name: Install Glaze packages
-        run: |
-          raco pkg install --no-docs --link ./glaze-lib
+      - name: Install Glaze package
+        shell: bash
+        run: raco pkg install --auto --no-docs --link "$PWD"
 
       - name: Install webview deps (Linux)
         if: runner.os == 'Linux'
@@ -104,10 +97,9 @@ jobs:
         with:
           version: ${{ matrix.racket-version }}
 
-      - name: Install Glaze packages
-        run: |
-          raco pkg install --no-docs --link ./glaze-lib
-          raco pkg install --no-docs --link ./glaze-cli
+      - name: Install Glaze package
+        shell: bash
+        run: raco pkg install --auto --no-docs --link "$PWD"
 
       - name: Install installer toolchain (Linux)
         if: runner.os == 'Linux'

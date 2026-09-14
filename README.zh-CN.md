@@ -2,7 +2,7 @@
 
 用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.4.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.5.0-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
 
@@ -60,7 +60,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 raco pkg install --auto glaze
 ```
 
-从 Racket 官方包索引安装，会一并装好核心库、`raco glaze` CLI 和文档（之后可用 `raco docs` 浏览）。
+单个 Racket 包：一次安装即包含 `glaze` 库、`raco glaze` CLI 和文档（之后可用 `raco docs` 浏览）。
 
 ### 2. 创建新项目
 
@@ -81,7 +81,7 @@ racket main.rkt
 > ```bash
 > git clone https://github.com/turinglambdaai/glaze.git
 > cd glaze
-> raco pkg install --auto --link ./glaze-lib ./glaze-cli ./glaze-doc
+> raco pkg install --auto --link "$PWD"
 > ```
 > 想参与 Glaze 开发，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
@@ -140,13 +140,16 @@ myapp/
 
 ## 仓库结构
 
+仓库根目录即一个可安装的 Racket 包，每个顶层目录对应一个集合（collection）：
+
 ```
-glaze/
-├── glaze/            # Umbrella 包（安装 `glaze` 即包含全部组件）
-├── glaze-lib/        # 核心库（服务器、API、浏览器启动、资源管理）
-├── glaze-cli/        # CLI 工具（raco glaze init / dev）
+glaze/                # 仓库根 = `glaze` 包（info.rkt）
+├── glaze/            # 核心库：服务器、API 桥、webview、托盘、系统集成、打包
+├── glaze-cli/        # CLI 工具（raco glaze init / dev / build）
 ├── glaze-doc/        # 文档（Scribble）
-└── glaze-test/       # 测试
+├── glaze-test/       # 测试套件
+├── examples/         # 可运行示例
+└── scripts/          # CI 辅助脚本（webview e2e）
 ```
 
 ## API

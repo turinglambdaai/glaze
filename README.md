@@ -2,7 +2,7 @@
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.4.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.5.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -60,7 +60,7 @@ Without a native backend, `run-app` / `open-window` automatically fall back to t
 raco pkg install --auto glaze
 ```
 
-Installing from the Racket package catalog pulls in the library, the `raco glaze` CLI, and the documentation (browse it later with `raco docs`).
+A single Racket package: this installs the `glaze` library, the `raco glaze` CLI, and the documentation (browse it later with `raco docs`).
 
 ### 2. Create a new project
 
@@ -81,7 +81,7 @@ A native window opens showing your app served from a local HTTP server; without 
 > ```bash
 > git clone https://github.com/turinglambdaai/glaze.git
 > cd glaze
-> raco pkg install --auto --link ./glaze-lib ./glaze-cli ./glaze-doc
+> raco pkg install --auto --link "$PWD"
 > ```
 > To work on Glaze itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -138,15 +138,18 @@ myapp/
   (sync never-evt))
 ```
 
-## Monorepo Structure
+## Repository Structure
+
+One installable package at the repo root; each top-level directory is a Racket collection:
 
 ```
-glaze/
-├── glaze/            # Umbrella package (install `glaze` to get everything)
-├── glaze-lib/        # Core library (server, API, browser launcher, assets)
+glaze/                # repo root = the `glaze` package (info.rkt)
+├── glaze/            # Library: server, API bridge, webview, tray, sys, build, app
 ├── glaze-cli/        # CLI tool (raco glaze init / dev / build)
 ├── glaze-doc/        # Documentation (Scribble)
-└── glaze-test/       # Tests
+├── glaze-test/       # Test suite
+├── examples/         # Runnable examples
+└── scripts/          # CI helper scripts (webview e2e)
 ```
 
 ## API
