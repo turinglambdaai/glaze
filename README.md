@@ -2,7 +2,7 @@
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.6.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.7.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -366,6 +366,41 @@ If a platform's native libraries aren't available at runtime, the tray silently 
 ```
 
 > **macOS note:** a pure menu-bar app (no Dock icon) requires building as an `.app` bundle with `LSUIElement` set — `raco glaze build` configures this for you.
+
+## App Platform APIs
+
+Beyond the server/webview core, Glaze ships the desktop-app odds and ends commercial apps need:
+
+```racket
+(require glaze)
+
+;; ---- native file dialogs (NSOpenPanel / comdlg32 / zenity-kdialog) ----
+(define f (pick-file #:title "Open report" #:filters '(("Reports" "*.rep" "*.csv"))))
+(define dir (pick-folder #:title "Where?"))
+(define out (save-file-dialog #:title "Save as" #:default-name "out.rep"))
+;; #f = cancelled; check (dialog-supported?) for a graceful path.
+
+;; ---- menu bar (declarative, three platforms) ----
+(webview-set-menu! wv
+  (list (make-menu "File"
+                   (list (make-menu-item "Open…" #:accel "CmdOrCtrl+O"
+                                         #:action open-doc)
+                         menu-separator
+                         (make-menu-item "Quit" #:action (lambda () (exit 0)))))))
+;; macOS accelerators really fire; Windows/Linux show them (v1).
+
+;; ---- deep links (myapp://...) ----
+(ensure-url-scheme! "myapp")            ; Windows registry / Linux xdg;
+                                        ; macOS via build --url-scheme
+
+;; ---- launch at login ----
+(auto-launch-set! "MyApp" #t)
+(auto-launch-enabled? "MyApp")
+
+;; ---- multi-window ----
+(for ([w (all-webviews)]) (webview-focus! w))
+(wait-for-webviews)                      ; block until every window closes
+```
 
 ## Examples
 

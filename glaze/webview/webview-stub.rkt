@@ -14,7 +14,9 @@
          set-title!
          set-size!
          set-fullscreen!
-         focus!)
+         focus!
+         set-menu!
+         closed?)
 
 (define (supported?)
   #f)
@@ -43,3 +45,8 @@
 (define (set-fullscreen! h on?) (void))
 
 (define (focus! h) (void))
+
+;; Menu bar and liveness: the stub has no window — everything is closed,
+;; menus are a no-op.
+(define (set-menu! h menus) (void))
+(define (closed? h) #t)

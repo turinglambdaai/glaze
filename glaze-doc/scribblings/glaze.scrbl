@@ -376,6 +376,98 @@ Days until an @litchar{"YYYY-MM-DD"} date (expiry day inclusive); negative
 when past. Raises on a malformed date.
 }
 
+@section[#:tag "dialogs"]{File Dialogs}
+
+@defmodule[glaze/dialogs]
+
+Native open/save dialogs: @racket[NSOpenPanel]/@racket[NSSavePanel]
+(macOS), @racket[GetOpenFileNameW]/@racket[GetSaveFileNameW] (Windows),
+@exec{zenity}/@exec{kdialog} (Linux). Dialogs block the calling thread.
+
+@defproc[(pick-file [#:title title (or/c #f string?) #f]
+                    [#:directory directory (or/c #f path-string?) #f]
+                    [#:filters filters list? '()])
+         (or/c #f path?)]{
+Opens one file. @racket[filters] is a list of
+@racket[(list "Human name" "*.txt" "*.md")]. @racket[#f] = cancelled.
+}
+
+@defproc[(pick-files [#:title title (or/c #f string?) #f]
+                     [#:directory directory (or/c #f path-string?) #f]
+                     [#:filters filters list? '()])
+         (listof path?)]{
+Multi-select; empty list = cancelled.
+}
+
+@defproc[(pick-folder [#:title title (or/c #f string?) #f]
+                      [#:directory directory (or/c #f path-string?) #f])
+         (or/c #f path?)]{}
+
+@defproc[(save-file-dialog [#:title title (or/c #f string?) #f]
+                           [#:default-name default-name (or/c #f string?) #f]
+                           [#:directory directory (or/c #f path-string?) #f]
+                           [#:filters filters list? '()])
+         (or/c #f path?)]{
+The overwrite prompt is the dialog's; no file is created here.
+}
+
+@defproc[(dialog-supported?) boolean?]{@racket[#f] when no dialog backend
+exists on this platform (open/save then raise).}
+
+@section[#:tag "menus"]{Menu Bar}
+
+@defmodule[glaze/webview]
+
+@defproc[(webview-set-menu! [wv webview?] [menus (listof menu?)]) void?]{
+Replaces the custom section of the application menu bar. Menus are
+declared with the tray protocol vocabulary:
+@racket[(list (make-menu "File" (list (make-menu-item "Open…" #:accel
+"CmdOrCtrl+O" #:action open-doc) menu-separator)))]. Accelerator
+keystrokes fire for real on macOS; on Windows/Linux they are displayed
+next to the label (v1). The platform-standard menus (Edit/Window on macOS)
+are preserved.
+}
+
+@defproc[(webview-closed? [wv webview?]) boolean?]{True once the window is
+closed — by @racket[webview-close] or the OS chrome.}
+
+@defproc[(all-webviews) (listof webview?)]{Every window this process
+opened that is not yet garbage collected.}
+
+@defproc[(close-all-webviews!) void?]{Closes every open window (each
+delivers its @racket[#:on-close]).}
+
+@defproc[(wait-for-webviews [timeout-secs (or/c #f real?) #f]) boolean?]{
+Blocks until every open window closes; @racket[#f] on timeout.
+}
+
+@section[#:tag "deeplink-autolaunch"]{Deep Links & Launch at Login}
+
+@defmodule[glaze/deeplink]
+
+@defproc[(ensure-url-scheme! [scheme string?]
+                             [#:app-name app-name string? scheme])
+         symbol?]{
+Registers @racket[scheme]:// for this executable, idempotently. Windows:
+HKCU registry entries. Linux: a desktop entry plus @exec{xdg-mime default}.
+macOS: handlers are declared in the packaged Info.plist — pass
+@racket[#:url-schemes] to @racket[build-app] (or
+@exec{raco glaze build --url-scheme}); the runtime call returns
+@racket['build-time]. Receiving the URL is the established
+single-instance + argv pattern: the OS launches the executable with the
+URL as an argument.
+}
+
+@defmodule[glaze/autolaunch]
+
+@defproc[(auto-launch-set! [name string?] [enabled? boolean?]) void?]{}
+
+@defproc[(auto-launch-enabled? [name string?])
+         (or/c boolean? 'requires-approval 'not-registered)]{
+macOS uses SMAppService (macOS 13+, packaged .app, no permission prompt);
+Windows the HKCU Run key; Linux autostart desktop entries.
+}
+
 @section[#:tag "signing"]{Code Signing & Notarization}
 
 Unsigned apps are blocked by macOS Gatekeeper and Windows SmartScreen.

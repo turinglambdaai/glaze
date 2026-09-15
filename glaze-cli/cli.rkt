@@ -95,55 +95,60 @@
              [entitlements #f]
              [no-hardened #f]
              [ts-url #f]
-             [notarize #f])
+             [notarize #f]
+             [schemes '()])
     (cond
       [(null? args)
        (values name version icon entry out embed installer
-               sign entitlements no-hardened ts-url notarize)]
+               sign entitlements no-hardened ts-url notarize (reverse schemes))]
       [(and (equal? (car args) "--name") (pair? (cdr args)))
        (loop (cddr args) (cadr args) version icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize)]
+             sign entitlements no-hardened ts-url notarize schemes)]
       [(and (equal? (car args) "--version") (pair? (cdr args)))
        (loop (cddr args) name (cadr args) icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize)]
+             sign entitlements no-hardened ts-url notarize schemes)]
       [(and (equal? (car args) "--icon") (pair? (cdr args)))
        (loop (cddr args) name version (cadr args) entry out embed installer
-             sign entitlements no-hardened ts-url notarize)]
+             sign entitlements no-hardened ts-url notarize schemes)]
       [(and (equal? (car args) "--entry") (pair? (cdr args)))
        (loop (cddr args) name version icon (cadr args) out embed installer
-             sign entitlements no-hardened ts-url notarize)]
+             sign entitlements no-hardened ts-url notarize schemes)]
       [(and (equal? (car args) "--out") (pair? (cdr args)))
        (loop (cddr args) name version icon entry (cadr args) embed installer
-             sign entitlements no-hardened ts-url notarize)]
+             sign entitlements no-hardened ts-url notarize schemes)]
       [(equal? (car args) "--embed-dlls")
        (loop (cdr args) name version icon entry out #t installer
-             sign entitlements no-hardened ts-url notarize)]
+             sign entitlements no-hardened ts-url notarize schemes)]
       [(equal? (car args) "--installer")
        (loop (cdr args) name version icon entry out embed #t
-             sign entitlements no-hardened ts-url notarize)]
+             sign entitlements no-hardened ts-url notarize schemes)]
       [(and (equal? (car args) "--sign") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
-             (cadr args) entitlements no-hardened ts-url notarize)]
+             (cadr args) entitlements no-hardened ts-url notarize schemes)]
       [(and (equal? (car args) "--entitlements") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
-             sign (cadr args) no-hardened ts-url notarize)]
+             sign (cadr args) no-hardened ts-url notarize schemes)]
       [(equal? (car args) "--no-hardened-runtime")
        (loop (cdr args) name version icon entry out embed installer
-             sign entitlements #t ts-url notarize)]
+             sign entitlements #t ts-url notarize schemes)]
       [(and (equal? (car args) "--timestamp-url") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
              sign entitlements no-hardened (cadr args) notarize)]
       [(and (equal? (car args) "--notarize") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
-             sign entitlements no-hardened ts-url (cadr args))]
+             sign entitlements no-hardened ts-url (cadr args) schemes)]
+      [(and (equal? (car args) "--url-scheme") (pair? (cdr args)))
+       (loop (cddr args) name version icon entry out embed installer
+             sign entitlements no-hardened ts-url notarize
+             (cons (cadr args) schemes))]
       [else
        (printf "Warning: ignoring unknown build argument: ~a\n" (car args))
        (loop (cdr args) name version icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize)])))
+             sign entitlements no-hardened ts-url notarize schemes)])))
 
 (define (build-command rest)
   (define-values (name version icon entry out embed installer
-                 sign entitlements no-hardened ts-url notarize)
+                 sign entitlements no-hardened ts-url notarize schemes)
     (parse-build-opts rest))
   (printf "Building Glaze app (entry=~a, name=~a)...\n" entry (or name "<project dir>"))
   (define dist-path
@@ -158,7 +163,8 @@
                #:entitlements entitlements
                #:no-hardened-runtime? no-hardened
                #:timestamp-url ts-url
-               #:notarize-profile notarize))
+               #:notarize-profile notarize
+               #:url-schemes schemes))
   (printf "Done. Distribution in: ~a\n" dist-path))
 
 (define (print-help)
@@ -186,7 +192,11 @@
   (displayln "  --entitlements <p>   macOS: .entitlements plist for codesign")
   (displayln "  --no-hardened-runtime  macOS: skip hardened runtime (notarization needs it)")
   (displayln "  --timestamp-url <u>  Windows: RFC-3161 timestamp server for signtool")
-  (displayln "  --notarize <profile> macOS: notarize + staple via notarytool keychain profile"))
+  (displayln "  --notarize <profile> macOS: notarize + staple via notarytool keychain profile")
+  (displayln "  --url-scheme <name>  Deep-link URL scheme (repeatable): macOS gets")
+  (displayln "                       Info.plist entries; call (ensure-url-scheme! ...)")
+  (displayln "                       at app start on Windows/Linux)"))
+
 
 (define (write-file path content)
   (call-with-output-file path (lambda (out) (display content out)) #:exists 'replace))

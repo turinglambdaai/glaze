@@ -2,7 +2,7 @@
 
 用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.6.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.7.0-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
 
@@ -357,6 +357,41 @@ Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜�
 ```
 
 > **macOS 注意**：纯菜单栏应用（不显示 Dock 图标）需要构建为 `.app` bundle 并设置 `LSUIElement`——`raco glaze build` 会为你配置好。
+
+## 应用平台 API
+
+除服务器/webview 核心外，Glaze 内置商业桌面应用所需的周边能力：
+
+```racket
+(require glaze)
+
+;; ---- 原生文件对话框（NSOpenPanel / comdlg32 / zenity-kdialog）----
+(define f (pick-file #:title "打开报告" #:filters '(("报告" "*.rep" "*.csv"))))
+(define dir (pick-folder #:title "选择目录"))
+(define out (save-file-dialog #:title "另存为" #:default-name "out.rep"))
+;; #f = 用户取消；可先用 (dialog-supported?) 做优雅降级判断。
+
+;; ---- 菜单栏（声明式，三平台）----
+(webview-set-menu! wv
+  (list (make-menu "文件"
+                   (list (make-menu-item "打开…" #:accel "CmdOrCtrl+O"
+                                         #:action open-doc)
+                         menu-separator
+                         (make-menu-item "退出" #:action (lambda () (exit 0)))))))
+;; macOS 快捷键真实生效；Windows/Linux 目前仅展示（v1）。
+
+;; ---- 深度链接（myapp://…）----
+(ensure-url-scheme! "myapp")            ; Windows 注册表 / Linux xdg；
+                                        ; macOS 在构建时 --url-scheme 声明
+
+;; ---- 开机自启 ----
+(auto-launch-set! "MyApp" #t)
+(auto-launch-enabled? "MyApp")
+
+;; ---- 多窗口 ----
+(for ([w (all-webviews)]) (webview-focus! w))
+(wait-for-webviews)                      ; 阻塞直到所有窗口关闭
+```
 
 ## 示例
 

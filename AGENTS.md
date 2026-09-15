@@ -25,6 +25,21 @@ Glaze 是 "Tauri-like framework for Racket"——Racket 写后端，Web 技术�
 
 ## 商业化层（签名 / 许可证 / 更新校验）
 
+- **菜单派发（`webview-set-menu!`）**：声明式 spec 复用 tray-protocol（`make-menu` +
+  `make-menu-item`，`#:accel`）。macOS 是 NSApp 主菜单上追加自定义段（标准 Edit/Window
+  只装一次——`ensure-app!` 重装会冲掉自定义菜单）；macOS 用 target+tag 派发（`GlazeMenuTarget`
+  单例），Windows 用 WM_COMMAND 的 LOWORD(wParam)，Linux 用 "activate" 信号。
+  **两个已踩坑**：① menu-sema 不能在重建菜单的整个过程中持有（build 内部还要申请 tag → 自锁）；
+  注册和派发必须查同一张表（id-allocator 的表，别另开 hash）。② 加速键在 macOS 真实生效，
+  Win/Linux 仅展示（v1 限制，写进文档）
+- **测试菜单派发**：`performActionForItemAtIndex:` 对 objc-target 菜单项是静默 no-op；
+  用 `NSApp sendAction: (item action) to: (item target) from: item` 才是真点击路径
+- **文件对话框**：macos NSSavePanel（AppKit 显式 ffi-lib 加载）；Windows comdlg32（UTF-16
+  编解码用 bytes-open-converter "UTF-8"/"UTF-16LE"，platform-* 名字在 macOS 不存在）；
+  Linux zenity/kdialog 子进程。#f=取消，后端缺失 RAISE
+- **开机自启**：macOS SMAppService（13+、需打包 .app、无 TCC 弹窗）；Windows HKCU Run 键
+  （reg.exe 子进程）；Linux ~/.config/autostart 桌面条目（测试用 XDG_CONFIG_HOME 覆盖）
+
 - `glaze/license`：RSA-2048/SHA-256 离线许可证，签名走**系统 openssl CLI 子进程**（三平台
   开箱即有），不引入 crypto 包。`machine-id` = IOPlatformUUID(macOS)/
   /etc/machine-id(Linux)/MachineGuid(Win) 的 SHA-256 摘要。`validate-license` 的失败
@@ -141,10 +156,10 @@ JSON 对象键解析为 symbol（`hash-ref body 'delta`，不是 `"delta"`）—
 
 ## 后端契约（webview 与 tray 同构）
 
-每个 webview 后端模块必须导出同名 11 个过程，调度层按 `(system-type 'os)` 动态加载：
+每个 webview 后端模块必须导出同名 13 个过程，调度层按 `(system-type 'os)` 动态加载：
 
 `open-webview` / `supported?` / `close` / `navigate` / `title` / `url` / `capture!` /
-`set-title!` / `set-size!` / `set-fullscreen!` / `focus!`
+`set-title!` / `set-size!` / `set-fullscreen!` / `focus!` / `set-menu!` / `closed?`
 
 约定：
 

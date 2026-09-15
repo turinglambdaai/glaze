@@ -27,7 +27,8 @@
 (require ffi/unsafe
          racket/file
          racket/path
-         racket/string)
+         racket/string
+         "../tray/tray-protocol.rkt")
 
 (provide open-webview
          supported?
@@ -298,5 +299,76 @@
       (gtk_window_unfullscreen (lin:webview-window wv))))
 
 (define gtk_window_present
-  (maybe-bind gtk-lib "gtk_window_present" (_fun _pointer -> _void)))
+  (maybe-bind gtk-lib "gtk_window_present" (_fun _pointer -> _pointer)))
 (define (focus! wv) (gtk_window_present (lin:webview-window wv)))
+
+;; ---- menu bar ----
+;; GTK layout change: the webview leaves the window, a vertical GtkBox with
+;; a GtkMenuBar on top takes its place. All GTK calls stay on the Racket
+;; thread (same discipline as window creation); item activations arrive via
+;; the "activate" signal through function pointers kept alive in
+;; callback-ptrs.
+
+(define gtk_box_new
+  (maybe-bind gtk-lib "gtk_box_new" (_fun _int _int -> _pointer)))
+(define gtk_box_pack_start
+  (maybe-bind gtk-lib "gtk_box_pack_start" (_fun _pointer _pointer _bool _bool _int -> _void)))
+(define gtk_menu_bar_new
+  (maybe-bind gtk-lib "gtk_menu_bar_new" (_fun -> _pointer)))
+(define gtk_menu_new
+  (maybe-bind gtk-lib "gtk_menu_new" (_fun -> _pointer)))
+(define gtk_menu_item_new_with_label
+  (maybe-bind gtk-lib "gtk_menu_item_new_with_label" (_fun _string -> _pointer)))
+(define gtk_separator_menu_item_new
+  (maybe-bind gtk-lib "gtk_separator_menu_item_new" (_fun -> _pointer)))
+(define gtk_menu_item_set_submenu
+  (maybe-bind gtk-lib "gtk_menu_item_set_submenu" (_fun _pointer _pointer -> _void)))
+(define gtk_menu_shell_append
+  (maybe-bind gtk-lib "gtk_menu_shell_append" (_fun _pointer _pointer -> _void)))
+(define gtk_container_remove
+  (maybe-bind gtk-lib "gtk_container_remove" (_fun _pointer _pointer -> _void)))
+
+(define menu-callbacks-sema (make-semaphore 1))
+(define lin-menu-allocator (make-id-allocator))
+
+(define (set-menu! wv menus)
+  (unless (and gtk_box_new gtk_menu_bar_new gtk_menu_item_new_with_label
+               gtk_menu_shell_append gtk_menu_item_set_submenu
+               gtk_container_remove gtk_box_pack_start)
+    (error 'set-menu! "GTK menu API unavailable"))
+  (define window (lin:webview-window wv))
+  (define webview-widget (lin:webview-webview wv))
+  (define vbox (gtk_box_new 1 0)) ; GTK_ORIENTATION_VERTICAL = 1
+  (define bar (gtk_menu_bar_new))
+  (for ([m (in-list menus)])
+    (unless (menu? m)
+      (error 'set-menu! "expected a menu? value, got: ~a" m))
+    (define top (gtk_menu_item_new_with_label (menu-title m)))
+    (define submenu (gtk_menu_new))
+    (for ([e (in-list (menu-items m))])
+      (cond
+        [(menu-separator? e)
+         (gtk_menu_shell_append submenu (gtk_separator_menu_item_new))]
+        [else
+         (define item (gtk_menu_item_new_with_label
+                       (if (menu-item-accel e)
+                           (format "~a  (~a)" (menu-item-label e) (menu-item-accel e))
+                           (menu-item-label e))))
+         (define thunk (menu-item-action e))
+         (define (fire widget data) (thunk))
+         (define cptr (function-ptr fire (_fun _pointer _pointer -> _void)))
+         (set! callback-ptrs (cons cptr callback-ptrs))
+         (g_signal_connect_data item "activate" cptr #f #f 0)
+         (gtk_menu_shell_append submenu item)]))
+    (gtk_menu_item_set_submenu top submenu)
+    (gtk_menu_shell_append bar top))
+  ;; Re-layout: menubar above the (re-parented) webview.
+  (gtk_container_remove window webview-widget)
+  (gtk_box_pack_start vbox bar #f #f 0)
+  (gtk_box_pack_start vbox webview-widget #t #t 0)
+  (gtk_container_add window vbox)
+  (gtk_widget_show_all vbox)
+  (void))
+
+(define (closed? wv)
+  (unbox (lin:webview-closed?-box wv)))

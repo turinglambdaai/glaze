@@ -53,7 +53,10 @@
 
 (require ffi/unsafe
          ffi/unsafe/objc
-         racket/file)
+         racket/file
+         racket/list
+         racket/string
+         "../tray/tray-protocol.rkt")
 
 (provide open-webview
          supported?
@@ -66,6 +69,8 @@
          set-size!
          set-fullscreen!
          focus!
+         set-menu!
+         closed?
          mac:webview?
          mac:webview-window
          mac:webview-webview
@@ -163,17 +168,153 @@
                         (callback-remove! window)
                         (proc))))
 
+;; ---- menu bar ----
+;; Custom menus ride on the standard NSApp main menu (the Edit/Window menus
+;; installed by ensure-app! stay: WKWebView's copy/paste first-responder
+;; chain depends on them). Each user item gets a target+tag; selecting it in
+;; the menubar invokes menuAction: on the shared GlazeMenuTarget, which
+;; dispatches through the tag table to the Racket thunk.
+
+(define menu-sema (make-semaphore 1))
+(define menu-allocator (make-id-allocator))
+;; NSMenuItems we appended to the main menu, so set-menu! can replace them.
+(define custom-menu-items '())
+
+(define-objc-class GlazeMenuTarget
+                   NSObject
+                   ()
+                   (- _void
+                      (menuAction: [_id sender])
+                      (define tag (tell #:type _intptr sender tag))
+                      (define thunk
+                        (call-with-semaphore menu-sema
+                          (lambda () (id-allocator-lookup menu-allocator tag))))
+                      (when (procedure? thunk)
+                        (thunk))))
+
+(define menu-target #f)
+(define (ensure-menu-target!)
+  (unless menu-target
+    (set! menu-target (tell (tell GlazeMenuTarget alloc) init)))
+  menu-target)
+
+;; NSEventModifierFlag* values.
+(define NSModCommand 1048576)  ; 1 << 20
+(define NSModOption 524288)    ; 1 << 19
+(define NSModControl 262144)   ; 1 << 18
+(define NSModShift 131072)     ; 1 << 17
+
+;; "Cmd+Shift+O" / "Ctrl+Alt+T" / "F5" -> (values keyEquivalent mask).
+;; "Cmd"/"CmdOrCtrl"/"Meta" map to Command, "Ctrl" to the literal Control
+;; key, "Alt"/"Opt" to Option, "Shift" to Shift. The last segment is the key
+;; (single character or F<n>).
+(define (parse-accel s)
+  (if (and s (non-empty-string? s))
+      (let* ([parts (string-split s "+")]
+             [mods (take parts (max 0 (sub1 (length parts))))])
+        (define key (last parts))
+        (define mask
+          (for/sum ([m (in-list mods)])
+            (case (string-downcase m)
+              [("cmd" "command" "cmdorctrl" "meta") NSModCommand]
+              [("ctrl" "control") NSModControl]
+              [("alt" "option" "opt") NSModOption]
+              [("shift") NSModShift]
+              [else 0])))
+        (define key-eq
+          (cond
+            ;; #px: {n} quantifiers and (?i:) groups need Perl-style syntax
+            [(regexp-match? #px"^(?i:f[1-9]|f1[0-9])$" key) (string-downcase key)]
+            [(= 1 (string-length key)) (string-downcase key)]
+            [else ""]))
+        (values key-eq mask))
+      (values "" 0)))
+
+(define (build-menu-entry! e)
+  (cond
+    [(menu-separator? e) (tell NSMenuItem separatorItem)]
+    [else
+     (define tag
+       (call-with-semaphore menu-sema
+         (lambda () (id-allocator-register! menu-allocator (menu-item-action e)))))
+     (define-values (key mask) (parse-accel (menu-item-accel e)))
+     (define item
+       (tell (tell NSMenuItem alloc)
+             initWithTitle:
+             (->nsstring (menu-item-label e))
+             action:
+             #:type _SEL
+             (selector menuAction:)
+             keyEquivalent:
+             (->nsstring key)))
+     (tellv item setTarget: #:type _id (ensure-menu-target!))
+     (tellv item setTag: #:type _int tag)
+     (unless (zero? mask)
+       (tellv item setKeyEquivalentModifierMask: #:type _uint mask))
+     (unless (menu-item-enabled? e)
+       (tellv item setEnabled: #:type _bool #f))
+     item]))
+
+(define (build-top-menu! m)
+  (define submenu (tell (tell NSMenu alloc) initWithTitle: (->nsstring (menu-title m))))
+  (for ([e (in-list (menu-items m))])
+    (tellv submenu addItem: #:type _id (build-menu-entry! e)))
+  (define item
+    (tell (tell NSMenuItem alloc)
+          initWithTitle:
+          (->nsstring (menu-title m))
+          action:
+          #:type _SEL
+          #f
+          keyEquivalent:
+          (->nsstring "")))
+  (tellv item setSubmenu: #:type _id submenu)
+  item)
+
+;; Replace the custom section of the main menu with `menus` (a list of
+;; menu? values from glaze/tray/tray-protocol). The standard Edit/Window
+;; menus stay first.
+(define (set-menu! wv menus)
+  (define app (ensure-app!))
+  (define main-menu (tell #:type _id app mainMenu))
+  (define olds
+    (call-with-semaphore menu-sema
+      (lambda ()
+        (begin0 custom-menu-items
+          (set! custom-menu-items '())))))
+  (for ([old (in-list olds)])
+    (tellv main-menu removeItem: #:type _id old))
+  (for ([m (in-list menus)])
+    (unless (menu? m)
+      (error 'set-menu! "expected a menu? value, got: ~a" m))
+    (define item (build-top-menu! m))
+    (tellv main-menu addItem: #:type _id item)
+    (call-with-semaphore menu-sema
+      (lambda ()
+        (set! custom-menu-items (cons item custom-menu-items)))))
+  (call-with-semaphore menu-sema
+    (lambda ()
+      (set! custom-menu-items (reverse custom-menu-items)))))
+
+(define (closed? wv)
+  (unbox (mac:webview-closed?-box wv)))
+
 ;; One-time NSApplication setup: a non-bundled CLI process has no app object
 ;; yet, and without Regular activation policy the window never reaches the
 ;; foreground on modern macOS.
 (define app-init-sema (make-semaphore 1))
+;; Standard menus install once; re-running install-standard-menus! would
+;; replace the main menu and wipe any custom menus set-menu! appended.
+(define standard-menus-installed? #f)
 (define (ensure-app!)
   (call-with-semaphore
    app-init-sema
    (lambda ()
      (define app (tell NSApplication sharedApplication))
      (tellv app setActivationPolicy: #:type _int NSApplicationActivationPolicyRegular)
-     (install-standard-menus! app)
+     (unless standard-menus-installed?
+       (install-standard-menus! app)
+       (set! standard-menus-installed? #t))
      ;; macOS 14+ deprecates activateIgnoringOtherApps: in favor of -activate.
      (if (tell app respondsToSelector: #:type _SEL (selector activate))
          (tellv app activate)

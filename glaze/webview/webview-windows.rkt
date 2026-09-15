@@ -44,7 +44,8 @@
          racket/file
          racket/string
          racket/system
-         racket/runtime-path)
+         racket/runtime-path
+         "../tray/tray-protocol.rkt")
 
 (provide open-webview
          supported?
@@ -56,6 +57,9 @@
          set-title!
          set-size!
          set-fullscreen!
+         focus!
+         set-menu!
+         closed?
          win:webview?)
 
 (define-runtime-path here ".")
@@ -255,6 +259,7 @@
 (define WM_CLOSE 16)
 (define WM_SIZE 5)
 (define WM_QUIT 18)
+(define WM_COMMAND 273)
 (define WS_OVERLAPPEDWINDOW #x00CF0000)
 (define CW_USEDEFAULT -2147483648)
 (define SW_SHOW 5)
@@ -297,6 +302,12 @@
        [(= msg WM_SIZE)
         (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
         (when wv (resize-controller! wv hwnd))
+        0]
+       [(= msg WM_COMMAND)
+        ;; Menu bar selection: LOWORD(wParam) is the menu id.
+        (define id (bitwise-and w #xFFFF))
+        (define thunk (menu-action-lookup id))
+        (when thunk (thunk))
         0]
        [(= msg WM_CLOSE)
         (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
@@ -625,3 +636,70 @@
 (define (focus! wv)
   (define hwnd (unbox (win:webview-hwnd-box wv)))
   (and hwnd SetForegroundWindow (SetForegroundWindow hwnd)))
+
+;; ---- menu bar ----
+;; A Win32 HMENU attached with SetMenu; selections arrive as WM_COMMAND with
+;; the menu id in LOWORD(wParam), dispatched through the id-allocator to the
+;; Racket thunk. Accelerators are display-only here ("Ctrl+O" shows
+;; right-aligned in the item; wiring real keys needs an accelerator table +
+;; TranslateAccelerator in the pump — documented v1 limitation).
+
+(define menu-sema (make-semaphore 1))
+(define menu-allocator (make-id-allocator))
+
+(define (menu-action-lookup id)
+  (call-with-semaphore menu-sema
+    (lambda () (id-allocator-lookup menu-allocator id))))
+
+(define MF_STRING   #x00000000)
+(define MF_SEPARATOR #x00000800)
+(define MF_POPUP    #x00000010)
+
+(define CreateMenu
+  (and user32 (get-ffi-obj "CreateMenu" user32 (_fun -> _pointer) (lambda () #f))))
+(define DestroyMenu
+  (and user32 (get-ffi-obj "DestroyMenu" user32 (_fun _pointer -> _bool) (lambda () #f))))
+(define AppendMenuW
+  (and user32 (get-ffi-obj "AppendMenuW" user32
+                           (_fun _pointer _uint _uintptr _pointer -> _bool)
+                           (lambda () #f))))
+(define SetMenuW
+  (and user32 (get-ffi-obj "SetMenu" user32 (_fun _pointer _pointer -> _bool)
+                           (lambda () #f))))
+(define DrawMenuBar
+  (and user32 (get-ffi-obj "DrawMenuBar" user32 (_fun _pointer -> _bool)
+                           (lambda () #f))))
+
+(define (win-build-menu! m)
+  (define hmenu (CreateMenu))
+  (for ([e (in-list (menu-items m))])
+    (cond
+      [(menu-separator? e)
+       (AppendMenuW hmenu MF_SEPARATOR 0 #f)]
+      [else
+       (define id
+         (call-with-semaphore menu-sema
+           (lambda () (id-allocator-register! menu-allocator (menu-item-action e)))))
+       (define label
+         (if (menu-item-accel e)
+             (format "~a\t~a" (menu-item-label e) (menu-item-accel e))
+             (menu-item-label e)))
+       (AppendMenuW hmenu MF_STRING id (wstr label))]))
+  hmenu)
+
+(define (set-menu! wv menus)
+  (define hwnd (unbox (win:webview-hwnd-box wv)))
+  (unless (and hwnd CreateMenu AppendMenuW SetMenuW)
+    (error 'set-menu! "Win32 menu API unavailable"))
+  (define menubar (CreateMenu))
+  (for ([m (in-list menus)])
+    (unless (menu? m)
+      (error 'set-menu! "expected a menu? value, got: ~a" m))
+    (define hsub (win-build-menu! m))
+    (AppendMenuW menubar MF_POPUP (cast hsub _pointer _uintptr) (wstr (menu-title m))))
+  (unless (and (SetMenuW hwnd menubar) (DrawMenuBar hwnd))
+    (error 'set-menu! "SetMenu failed"))
+  (void))
+
+(define (closed? wv)
+  (unbox (win:webview-closed?-box wv)))

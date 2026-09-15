@@ -28,12 +28,22 @@
          webview-set-title!
          webview-set-size!
          webview-set-fullscreen!
-         webview-focus!)
+         webview-focus!
+         webview-set-menu!
+         webview-closed?
+         all-webviews
+         close-all-webviews!
+         wait-for-webviews)
 
-(require (only-in "../browser.rkt" open-browser))
+(require (only-in "../browser.rkt" open-browser)
+         (only-in "../tray/tray-protocol.rkt" menu?))
 
 ;; A webview handle wraps the backend-specific handle + the backend tag.
 (struct webview (backend handle) #:transparent)
+
+;; Every successfully opened window, weakly held: closed + collected windows
+;; disappear from all-webviews on their own.
+(define open-registry (make-weak-hasheq))
 
 ;; Pick the backend module path for the current OS.
 (define (backend-module-path)
@@ -50,7 +60,8 @@
     (set! backend-procs (make-hash))
     (define mod (backend-module-path))
     (for ([name (in-list '(open-webview supported? close navigate title url capture!
-                             set-title! set-size! set-fullscreen! focus!))])
+                             set-title! set-size! set-fullscreen! focus!
+                             set-menu! closed?))])
       (hash-set! backend-procs name (dynamic-require mod name))))
   backend-procs)
 
@@ -102,7 +113,9 @@
         #:devtools? devtools?
         #:on-close on-close)))
   (cond
-    [h (webview (detected-backend) h)]
+    [h (define wv (webview (detected-backend) h))
+       (hash-set! open-registry wv #t)
+       wv]
     [fallback? (open-browser url) #f]
     [else #f]))
 
@@ -147,3 +160,41 @@
   ((ref 'set-fullscreen!) (webview-handle wv) on?))
 
 (define (webview-focus! wv) ((ref 'focus!) (webview-handle wv)))
+
+;; ---- menu bar ----
+;; Replace the app's custom menus with `menus` — a list of menu? values
+;; (glaze/tray/tray-protocol: make-menu + make-menu-item / menu-separator,
+;; with #:action thunks and optional #:accel like "Cmd+O"). Real keystroke
+;; accelerators on macOS; display-only hints on Windows/Linux (v1).
+(define (webview-set-menu! wv menus)
+  ((ref 'set-menu!) (webview-handle wv) menus))
+
+;; ---- multi-window ----
+
+;; True once the window is closed (either webview-close or the OS chrome).
+(define (webview-closed? wv)
+  ((ref 'closed?) (webview-handle wv)))
+
+;; All windows this process opened that have not been garbage collected.
+;; Closed-but-uncollected handles report webview-closed? = #t.
+(define (all-webviews)
+  (for/list ([(wv _) (in-hash open-registry)]) wv))
+
+;; Close every open window (delivers #:on-close for each).
+(define (close-all-webviews!)
+  (for ([wv (in-list (all-webviews))] #:unless (webview-closed? wv))
+    (webview-close wv)))
+
+;; Block until every open window is closed (OS chrome closes included), or
+;; until timeout-secs elapse. Returns #t when all closed, #f on timeout.
+(define (wait-for-webviews [timeout-secs #f])
+  (define deadline
+    (and timeout-secs (+ (current-inexact-milliseconds) (* timeout-secs 1000))))
+  (let loop ()
+    (define open (for/list ([wv (in-list (all-webviews))]
+                            #:unless (webview-closed? wv))
+                   wv))
+    (cond
+      [(null? open) #t]
+      [(and deadline (>= (current-inexact-milliseconds) deadline)) #f]
+      [else (sleep 0.05) (loop)])))

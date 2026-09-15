@@ -10,8 +10,10 @@
 ;; directory.
 
 (require racket/file
+         racket/list
          racket/path
          racket/port
+         racket/string
          racket/system
          "assets.rkt")
 
@@ -44,6 +46,10 @@
 ;;   #:notarize-profile — macOS only: a `notarytool` keychain profile name;
 ;;                  submits the built dmg (or a zip of the .app) for
 ;;                  notarization and staples the result
+;;   #:url-schemes — list of URL scheme names ("myapp"); macOS gets
+;;                  CFBundleURLTypes in the bundle's Info.plist; on
+;;                  Windows/Linux call (ensure-url-scheme! ...) at app
+;;                  start to register the handler
 ;;
 ;; Returns the path to the produced distribution directory.
 (define (build-app #:entry [entry "main.rkt"]
@@ -57,7 +63,8 @@
                    #:entitlements [entitlements #f]
                    #:no-hardened-runtime? [no-hardened-runtime? #f]
                    #:timestamp-url [timestamp-url #f]
-                   #:notarize-profile [notarize-profile #f])
+                   #:notarize-profile [notarize-profile #f]
+                   #:url-schemes [url-schemes '()])
   (define entry-path
     (if (path? entry)
         entry
@@ -142,7 +149,7 @@
   ;; .app bundle ourselves so Info.plist versioning, icons, dmg, and code
   ;; signing all have a bundle to work with.
   (when (eq? os 'macosx)
-    (assemble-macos-bundle out-dir-path app-name (or version "0.0.0")))
+    (assemble-macos-bundle out-dir-path app-name (or version "0.0.0") url-schemes))
 
   ;; Bundle the project's public/ next to the distribution so the packaged
   ;; app can serve its frontend. On macOS the assets go inside the .app bundle
@@ -418,7 +425,7 @@ NSI
 ;; resolution either way. Also writes the base Info.plist (name, bundle id,
 ;; executable, versions) and PkgInfo; the icon and remaining plist keys are
 ;; patched afterwards by post-process-macos-bundle.
-(define (assemble-macos-bundle out-dir app-name version)
+(define (assemble-macos-bundle out-dir app-name version [url-schemes '()])
   (define dist (path->complete-path out-dir))
   (define dist-bin (build-path dist "bin"))
   (define dist-lib (build-path dist "lib"))
@@ -441,10 +448,10 @@ NSI
                          (lambda (o) (display "APPL????" o))
                          #:exists 'replace)
   (call-with-output-file (build-path contents "Info.plist")
-                         (lambda (o) (display (macos-info-plist app-name version) o))
+                         (lambda (o) (display (macos-info-plist app-name version url-schemes) o))
                          #:exists 'replace))
 
-(define (macos-info-plist app-name version)
+(define (macos-info-plist app-name version [url-schemes '()])
   (format #<<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -458,12 +465,24 @@ NSI
   <key>CFBundleShortVersionString</key><string>~a</string>
   <key>CFBundleVersion</key><string>~a</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>LSMinimumSystemVersion</key><string>10.13</string>
+  <key>LSMinimumSystemVersion</key><string>10.13</string>~a
 </dict>
 </plist>
 PLIST
-          app-name app-name app-name app-name version version))
-
+          app-name app-name app-name app-name version version
+          (if (null? url-schemes)
+              ""
+              (string-append
+               "\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n"
+               "      <key>CFBundleURLName</key><string>io.glaze."
+               app-name
+               "</string>\n"
+               "      <key>CFBundleURLSchemes</key>\n      <array>\n"
+               (string-join
+                (for/list ([sc (in-list url-schemes)])
+                  (format "        <string>~a</string>\n" sc))
+                "")
+               "      </array>\n    </dict>\n  </array>"))))
 ;; Copy the project's public/ into the distribution next to the executable.
 ;; On macOS, assets live in <app>.app/Contents/Resources/public; elsewhere in
 ;; <dist>/public. The generated entry sets current-directory to the exe's dir
