@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-15
+
+### Added
+- **Code signing & notarization** in `raco glaze build` / `build-app`:
+  `--sign` drives `codesign` (macOS identity, `-` = ad-hoc) or `signtool`
+  (Windows SHA-1 thumbprint or subject, RFC-3161 timestamped by default);
+  `--entitlements`, `--no-hardened-runtime`, `--timestamp-url`,
+  `--notarize <profile>` (notarytool submit + stapler) complete the
+  pipeline. Signing failures abort the build; a missing toolchain degrades
+  with a loud warning. macOS now assembles a canonical `.app` bundle
+  (Contents/MacOS + lib + Info.plist + PkgInfo) from `raco distribute`'s
+  flat output, so signing, dmg, and version metadata always have a bundle
+  to work with; nested code is signed before the bundle itself (one
+  `--deep` pass produces Team-ID-mismatched signatures on Apple Silicon),
+  and the hardened-runtime option is skipped under an ad-hoc identity
+  (its library validation would reject the app's own framework).
+- **Licensing (`glaze/license`)**: offline RSA-2048/SHA-256 license files —
+  `issue-license` / `validate-license` / `license-valid?` with stable
+  failure reasons (`signature`, `expired`, `machine`, `product`, ...),
+  `(machine-id)` machine binding (digest of IOPlatformUUID /
+  /etc/machine-id / MachineGuid), and expiry math (`days-until-expiry`).
+  Signatures are computed by the system `openssl` CLI — no crypto package.
+  CLI: `raco glaze keygen`, `raco glaze license sign|verify`.
+- **Update integrity**: update manifests may carry a `"sha256"` field
+  (passed through by `check-update`); new `verify-file-sha256` checks a
+  downloaded artifact before the app swaps it in.
+- `build-app`/`build` gained `#:version` — stamped into the macOS
+  Info.plist (`CFBundleShortVersionString` / `CFBundleVersion`) and the
+  WiX MSI `ProductVersion`.
+- `raco distribute` hardening: the read-only launcher `raco exe` emits no
+  longer breaks `distribute`'s segment patching (EACCES on Racket 9.3).
+
+### Changed
+- macOS packaged apps resolve their `public/` directory from
+  `Contents/Resources/public` (the generated entry checks the exe dir,
+  then `../Resources`).
+
 ## [0.5.0] - 2026-09-15
 
 ### Changed

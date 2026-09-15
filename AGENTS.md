@@ -23,6 +23,26 @@ Glaze 是 "Tauri-like framework for Racket"——Racket 写后端，Web 技术�
 | Windows | ✅ CI e2e | 历史上卡在"COM apartment"——真相是 `get_CoreWebView2` vtable 索引错（25 被写成 3）。vtable 顺序已对官方 SDK 头文件核对，详见 `webview-windows.rkt` 头注释 |
 | Linux | ✅ CI e2e（Xvfb） | 泵 + destroy 回调 + title/url/capture（gdk_pixbuf）；注意 ffi-lib 需要 multiarch 绝对路径兜底 |
 
+## 商业化层（签名 / 许可证 / 更新校验）
+
+- `glaze/license`：RSA-2048/SHA-256 离线许可证，签名走**系统 openssl CLI 子进程**（三平台
+  开箱即有），不引入 crypto 包。`machine-id` = IOPlatformUUID(macOS)/
+  /etc/machine-id(Linux)/MachineGuid(Win) 的 SHA-256 摘要。`validate-license` 的失败
+  reason 是稳定标签（signature/expired/machine/product/...），改语义先改测试
+- **macOS 打包布局**：`raco distribute` 产出的是扁平 bin/+lib/（各版本形状不一），build-app
+  自己组装 `.app`（Contents/MacOS + lib + Info.plist + PkgInfo）。launcher 的
+  `@executable_path/../lib` 在 MacOS/ 下深度不变，搬移安全；homebrew CS 版的 framework
+  引用是绝对路径（不可重定位），官方发行版才是可分发的——发布用官方 Racket 构建
+- **codesign 顺序陷阱**：嵌套代码（framework dylib）先签、bundle 后签；一把 `--deep` 在
+  Apple Silicon 会产出 Team-ID 不匹配的签名（dyld 拒绝映射）。adhoc 身份（`-`）下必须跳过
+  `--options runtime`——hardened runtime 的 library validation 会拒绝 adhoc 的自身 framework
+- `raco exe` 产出的 launcher 是只读的，`raco distribute` 写段会 EACCES（9.3 实测），build-app
+  里已 chmod u+w；codesign 前同样要保证主 exe 可写
+- 签名失败**中止构建**（假装签好的产物比失败更糟）；工具链缺失降级响亮告警——与 installer
+  的降级语义不同，别搞混
+- 更新 manifest 的可选 `"sha256"` 由 `verify-file-sha256` 校验；`#f` 返回值 = "无法校验"，
+  永远不当成"校验通过"
+
 ## 快速命令
 
 ```bash

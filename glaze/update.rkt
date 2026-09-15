@@ -7,20 +7,25 @@
 ;; an "update-available" event means.
 ;;
 ;; Manifest format (JSON):
-;;   {"version": "1.2.0", "url": "https://.../releases/1.2.0", "notes": "..."}
+;;   {"version": "1.2.0", "url": "https://.../releases/1.2.0", "notes": "...",
+;;    "sha256": "<hex digest of the artifact at url>"}   ; optional but
+;;   recommended for paid distribution: verify the download with
+;;   (verify-file-sha256 artifact sha256) before swapping it in.
 ;;
 ;;   (check-update "https://example.com/app/manifest.json"
 ;;                 #:current-version "1.0.0")
-;;   => (hasheq 'version "1.2.0" 'url "..." 'notes "...") or #f
+;;   => (hasheq 'version "1.2.0" 'url "..." 'notes "..." 'sha256 "...") or #f
 
 (require json
          racket/list
          racket/port
          racket/string
+         racket/system
          net/http-client)
 
 (provide check-update
-         newer-version?)
+         newer-version?
+         verify-file-sha256)
 
 (define manifest-timeout-secs 5)
 
@@ -61,7 +66,24 @@
                      (newer-version? v current)
                      (hasheq 'version v
                              'url (hash-ref data 'url #f)
-                             'notes (hash-ref data 'notes #f))))))))
+                             'notes (hash-ref data 'notes #f)
+                             'sha256 (hash-ref data 'sha256 #f))))))))
+
+;; True when the file at `path` has the given SHA-256 hex digest
+;; (case-insensitive). #f when openssl is missing or the file is unreadable
+;; — treat #f as "cannot verify", never as "verified".
+(define (verify-file-sha256 path expected-hex)
+  (define exe (find-executable-path "openssl" #f))
+  (and exe
+       (string? expected-hex)
+       (file-exists? path)
+       (with-handlers ([exn:fail? (lambda (e) #f)])
+         (define out (open-output-string))
+         (parameterize ([current-output-port out])
+           (system*/exit-code exe "dgst" "-sha256" "-r" (path->string path)))
+         (define m (regexp-match #px"^([0-9a-fA-F]{64})\\b" (get-output-string out)))
+         (and m
+              (string-ci=? (second m) (string-trim expected-hex))))))
 
 ;; Numeric dotted comparison: "1.10.0" > "1.9.2"; missing segments count 0.
 (define (newer-version? candidate current)

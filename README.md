@@ -2,7 +2,7 @@
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.5.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.6.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -88,24 +88,81 @@ A native window opens showing your app served from a local HTTP server; without 
 ## CLI Commands
 
 ```bash
-raco glaze init <name>   # Create a new Glaze project
-raco glaze dev           # Start dev server with auto-open browser
-raco glaze build         # Build a distributable (exe + bundled assets)
-raco glaze help          # Show help
+raco glaze init <name>       # Create a new Glaze project
+raco glaze dev               # Start dev server with auto-open browser
+raco glaze build             # Build a distributable (exe + bundled assets)
+raco glaze keygen            # Create an RSA keypair for license signing
+raco glaze license           # Sign or verify offline license files
+raco glaze help              # Show help
 ```
 
 ### `build`
 
-Package a Glaze project into a platform distribution (`raco exe` + `raco distribute`) with the frontend assets bundled alongside the executable.
+Package a Glaze project into a platform distribution (`raco exe` + `raco distribute`) with the frontend assets bundled alongside the executable. On macOS the distribution is a proper `.app` bundle with your `--version` stamped into `Info.plist`.
 
 ```bash
 raco glaze build --name myapp              # produces dist/myapp(.exe) + dist/lib + dist/public
-raco glaze build --name myapp --installer  # also produce msi / dmg / AppImage (or zip/tar.gz fallback)
+raco glaze build --name myapp --version 1.2.0 --installer  # + msi / dmg / AppImage (zip/tar.gz fallback)
 ```
 
-Options: `--name`, `--icon <.ico/.icns>`, `--entry <path>` (default `main.rkt`), `--out <dir>` (default `dist`), `--embed-dlls` (Windows: single-file exe), `--installer`.
+Options: `--name`, `--version`, `--icon <.ico/.icns>`, `--entry <path>` (default `main.rkt`), `--out <dir>` (default `dist`), `--embed-dlls` (Windows: single-file exe), `--installer`.
 
 > The installer step probes for the native toolchain (WiX / NSIS on Windows, `create-dmg` / `hdiutil` on macOS, `appimagetool` / `linuxdeploy` on Linux) and **degrades gracefully** to a `.zip` / `.tar.gz` when it's absent, printing a warning naming what to install.
+
+### Code signing & notarization
+
+Unsigned apps get blocked by macOS Gatekeeper and Windows SmartScreen. `build` drives the platform signer for you:
+
+```bash
+# macOS — Developer ID identity, hardened runtime, notarize + staple:
+raco glaze build --name myapp \
+  --sign "Developer ID Application: Acme Inc (TEAMID)" \
+  --notarize acme-notary --installer
+
+# macOS — ad-hoc (no cert; for local testing / CI):
+raco glaze build --name myapp --sign -
+
+# Windows — signtool with a certificate thumbprint (RFC-3161 timestamped):
+raco glaze build --name myapp --sign 40HEXCHARS --installer
+```
+
+Details: `--sign` takes a codesign identity (macOS) or a SHA-1 thumbprint / subject name for `signtool` (Windows). Hardened runtime is applied automatically on macOS unless `--no-hardened-runtime` is passed (and is skipped for ad-hoc, where its library validation would reject the app's own framework). `--notarize <keychain-profile>` submits the built dmg via `notarytool`, waits, and staples the ticket. `--entitlements <file>`, `--timestamp-url <url>` round it out. Signing failures abort the build; a *missing toolchain* degrades with a loud warning.
+
+### Licensing (paid apps)
+
+`glaze/license` ships an offline license-key scheme with zero native dependencies — RSA-2048/SHA-256 signatures via the system `openssl` CLI, present on every platform:
+
+```bash
+# vendor side — once:
+raco glaze keygen --out keys                # keys/private.pem + keys/public.pem
+# per customer (optionally expiry- and machine-bound):
+raco glaze license sign --key keys/private.pem --product "MyApp" \
+  --subject "customer@example.com" --expiry 2027-12-31 --out app.license
+raco glaze license verify --pub keys/public.pem --product "MyApp" app.license
+```
+
+```racket
+(require glaze/license)
+
+(define r (validate-license "app.license" #:public-key "keys/public.pem" #:product "MyApp"))
+(unless (hash-ref r 'valid)
+  (error 'myapp "license invalid: ~a" (hash-ref r 'reason)))   ; expired / machine / signature ...
+
+;; machine binding: a stable per-machine digest of the OS machine id
+(issue-license ... #:machine-id (machine-id))
+```
+
+Failure reasons are stable tags (`missing-file`, `malformed`, `signature`, `product`, `expired`, `machine`, `openssl-unavailable`) suitable for UI messages. Honest scope: this defends against casual license sharing — a local attacker can always patch a binary; it is not tamper resistance.
+
+### Update integrity
+
+`check-update` passes through an optional `"sha256"` manifest field; verify a downloaded artifact before swapping it in:
+
+```racket
+(define info (check-update manifest-url #:current-version "1.0.0"))
+;; app downloads (hash-ref info 'url) ... then:
+(verify-file-sha256 artifact (hash-ref info 'sha256))   ; #t / #f (#f = cannot verify)
+```
 
 ## Project Structure
 

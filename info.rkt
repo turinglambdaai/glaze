@@ -23,8 +23,8 @@
 ;; they live in glaze-cli/info.rkt and glaze-doc/info.rkt respectively.
 
 ;; NOTE: Racket's `valid-version?` rejects a trailing ".0" component
-;; ("0.5.0" is invalid; "0.5" is the same release).
-(define version "0.5")
+;; ("0.6.0" is invalid; "0.6" is the same release).
+(define version "0.6")
 (define pkg-desc "Build desktop apps with Racket backend and web frontend — a Tauri-like framework for Racket")
 (define pkg-authors '(turinglambdaai))
 (define license 'MIT)

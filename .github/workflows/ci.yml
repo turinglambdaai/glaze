@@ -122,7 +122,15 @@ jobs:
         run: |
           raco glaze init sampleapp
           cd sampleapp
-          raco glaze build --name sampleapp --out dist --installer
+          # --sign - exercises the signing pipeline everywhere: macOS signs
+          # the bundle ad-hoc (verifiable without a cert); Windows/Linux
+          # degrade with a loud warning when no signing toolchain exists.
+          raco glaze build --name sampleapp --version 0.0.1 --out dist --installer --sign -
+      - name: Verify macOS bundle signature
+        if: runner.os == 'macOS'
+        run: |
+          codesign --verify --strict sampleapp/dist/sampleapp.app
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" sampleapp/dist/sampleapp.app/Contents/Info.plist | grep -qx "0.0.1"
 
       - name: Upload distribution
         uses: actions/upload-artifact@v4

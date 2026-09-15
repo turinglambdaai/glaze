@@ -2,7 +2,7 @@
 
 用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.5.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.6.0-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
 
@@ -91,21 +91,78 @@ racket main.rkt
 raco glaze init <name>   # 创建新的 Glaze 项目
 raco glaze dev           # 启动开发服务器并自动打开浏览器
 raco glaze build         # 构建可分发包（exe + 内置资源）
+raco glaze keygen        # 生成用于许可证签名的 RSA 密钥对
+raco glaze license       # 签发 / 校验离线许可证文件
 raco glaze help          # 显示帮助
 ```
 
 ### `build`
 
-把 Glaze 项目打包为平台分发产物（`raco exe` + `raco distribute`），前端资源随可执行文件一起分发。
+把 Glaze 项目打包为平台分发产物（`raco exe` + `raco distribute`），前端资源随可执行文件一起分发。macOS 产出标准 `.app` bundle，`--version` 会写入 `Info.plist`。
 
 ```bash
-raco glaze build --name myapp              # 产出 dist/myapp(.exe) + dist/lib + dist/public
-raco glaze build --name myapp --installer  # 额外产出 msi / dmg / AppImage（缺失工具链时回落为 zip/tar.gz）
+raco glaze build --name myapp                              # 产出 dist/myapp(.exe) + dist/lib + dist/public
+raco glaze build --name myapp --version 1.2.0 --installer  # 额外产出 msi / dmg / AppImage（缺失工具链时回落为 zip/tar.gz）
 ```
 
-选项：`--name`、`--icon <.ico/.icns>`、`--entry <path>`（默认 `main.rkt`）、`--out <dir>`（默认 `dist`）、`--embed-dlls`（Windows：单文件 exe）、`--installer`。
+选项：`--name`、`--version`、`--icon <.ico/.icns>`、`--entry <path>`（默认 `main.rkt`）、`--out <dir>`（默认 `dist`）、`--embed-dlls`（Windows：单文件 exe）、`--installer`。
 
 > installer 步骤会探测本机的打包工具链（Windows 的 WiX / NSIS，macOS 的 `create-dmg` / `hdiutil`，Linux 的 `appimagetool` / `linuxdeploy`），**缺失时优雅降级**为 `.zip` / `.tar.gz` 并打印提示告知需要安装什么。
+
+### 代码签名与公证
+
+未签名的应用会被 macOS Gatekeeper 和 Windows SmartScreen 拦截。`build` 内置了平台签名器：
+
+```bash
+# macOS —— Developer ID 身份 + hardened runtime + 公证：
+raco glaze build --name myapp \
+  --sign "Developer ID Application: Acme Inc (TEAMID)" \
+  --notarize acme-notary --installer
+
+# macOS —— ad-hoc 签名（无证书，本地测试 / CI 用）：
+raco glaze build --name myapp --sign -
+
+# Windows —— signtool 按证书 SHA-1 指纹签名（带 RFC-3161 时间戳）：
+raco glaze build --name myapp --sign 40HEXCHARS --installer
+```
+
+说明：`--sign` 在 macOS 接受 codesign 身份，在 Windows 接受 `signtool` 的证书 SHA-1 指纹（40 位十六进制）或主题名。macOS 默认启用 hardened runtime（`--no-hardened-runtime` 可关；ad-hoc 身份下自动跳过——其 library validation 会拒绝应用自身的 framework）。`--notarize <keychain-profile>` 会把构建出的 dmg 提交 `notarytool` 公证并钉上票据。`--entitlements <file>`、`--timestamp-url <url>` 补齐其余场景。**签名失败会中止构建**；工具链缺失则响亮地降级并告警。
+
+### 许可证（收费应用）
+
+`glaze/license` 提供零原生依赖的离线许可证方案——RSA-2048/SHA-256 签名走系统 `openssl` CLI（三平台开箱即有）：
+
+```bash
+# 开发者侧 —— 一次性：
+raco glaze keygen --out keys               # keys/private.pem + keys/public.pem
+# 按客户签发（可选有效期与机器绑定）：
+raco glaze license sign --key keys/private.pem --product "MyApp" \
+  --subject "customer@example.com" --expiry 2027-12-31 --out app.license
+raco glaze license verify --pub keys/public.pem --product "MyApp" app.license
+```
+
+```racket
+(require glaze/license)
+
+(define r (validate-license "app.license" #:public-key "keys/public.pem" #:product "MyApp"))
+(unless (hash-ref r 'valid)
+  (error 'myapp "许可证无效：~a" (hash-ref r 'reason)))   ; expired / machine / signature ...
+
+;; 机器绑定：对系统机器标识做稳定摘要
+(issue-license ... #:machine-id (machine-id))
+```
+
+校验失败原因 (`reason`) 是稳定的标签（`missing-file`、`malformed`、`signature`、`product`、`expired`、`machine`、`openssl-unavailable`），可直接用于界面提示。诚实边界：这套方案防的是随手共享许可证——本地攻击者总能给二进制打补丁，它不是防篡改机制。
+
+### 更新包完整性
+
+`check-update` 会透传 manifest 里可选的 `"sha256"` 字段；下载完更新包后先校验再替换：
+
+```racket
+(define info (check-update manifest-url #:current-version "1.0.0"))
+;; 应用自行下载 (hash-ref info 'url) ... 然后：
+(verify-file-sha256 artifact (hash-ref info 'sha256))   ; #t / #f（#f = 无法校验）
+```
 
 ## 项目结构
 

@@ -1,10 +1,14 @@
 #lang racket/base
 
-(require racket/match
+(require racket/list
+         racket/match
          racket/file
+         racket/string
+         racket/system
          glaze/server
          glaze/browser
-         glaze/build)
+         glaze/build
+         glaze/license)
 
 (define (init-project name)
   (printf "Creating Glaze project: ~a\n" name)
@@ -62,45 +66,99 @@
     (sync never-evt)))
 
 ;; Parse the rest args for `build`. Recognized flags:
-;;   --name <name>      app/bundle name (default: project dir name)
-;;   --icon <path>      .ico (Windows) / .icns (macOS)
-;;   --entry <path>     entry file (default: main.rkt)
-;;   --out <dir>        output directory (default: dist)
-;;   --embed-dlls       Windows: embed DLLs into a single .exe
+;;   --name <name>        app/bundle name (default: project dir name)
+;;   --version <v>        app version (Info.plist / MSI ProductVersion)
+;;   --icon <path>        .ico (Windows) / .icns (macOS)
+;;   --entry <path>       entry file (default: main.rkt)
+;;   --out <dir>          output directory (default: dist)
+;;   --embed-dlls         Windows: embed DLLs into a single .exe
+;;   --installer          also build a platform installer
+;;   --sign <id>          code-signing identity (macOS: codesign identity,
+;;                        "-" = ad-hoc; Windows: cert SHA-1 thumbprint or
+;;                        subject name for signtool)
+;;   --entitlements <p>   macOS: .entitlements plist for codesign
+;;   --no-hardened-runtime  macOS: disable hardened runtime (notarization
+;;                        needs it; leave it on unless you know better)
+;;   --timestamp-url <u>  Windows: RFC-3161 timestamp server for signtool
+;;   --notarize <profile> macOS: notarytool keychain profile; submits the
+;;                        dmg/app for notarization and staples it
 (define (parse-build-opts rest)
   (let loop ([args rest]
              [name #f]
+             [version #f]
              [icon #f]
              [entry "main.rkt"]
              [out "dist"]
              [embed #f]
-             [installer #f])
+             [installer #f]
+             [sign #f]
+             [entitlements #f]
+             [no-hardened #f]
+             [ts-url #f]
+             [notarize #f])
     (cond
-      [(null? args) (values name icon entry out embed installer)]
+      [(null? args)
+       (values name version icon entry out embed installer
+               sign entitlements no-hardened ts-url notarize)]
       [(and (equal? (car args) "--name") (pair? (cdr args)))
-       (loop (cddr args) (cadr args) icon entry out embed installer)]
+       (loop (cddr args) (cadr args) version icon entry out embed installer
+             sign entitlements no-hardened ts-url notarize)]
+      [(and (equal? (car args) "--version") (pair? (cdr args)))
+       (loop (cddr args) name (cadr args) icon entry out embed installer
+             sign entitlements no-hardened ts-url notarize)]
       [(and (equal? (car args) "--icon") (pair? (cdr args)))
-       (loop (cddr args) name (cadr args) entry out embed installer)]
+       (loop (cddr args) name version (cadr args) entry out embed installer
+             sign entitlements no-hardened ts-url notarize)]
       [(and (equal? (car args) "--entry") (pair? (cdr args)))
-       (loop (cddr args) name icon (cadr args) out embed installer)]
+       (loop (cddr args) name version icon (cadr args) out embed installer
+             sign entitlements no-hardened ts-url notarize)]
       [(and (equal? (car args) "--out") (pair? (cdr args)))
-       (loop (cddr args) name icon entry (cadr args) embed installer)]
-      [(equal? (car args) "--embed-dlls") (loop (cdr args) name icon entry out #t installer)]
-      [(equal? (car args) "--installer") (loop (cdr args) name icon entry out embed #t)]
+       (loop (cddr args) name version icon entry (cadr args) embed installer
+             sign entitlements no-hardened ts-url notarize)]
+      [(equal? (car args) "--embed-dlls")
+       (loop (cdr args) name version icon entry out #t installer
+             sign entitlements no-hardened ts-url notarize)]
+      [(equal? (car args) "--installer")
+       (loop (cdr args) name version icon entry out embed #t
+             sign entitlements no-hardened ts-url notarize)]
+      [(and (equal? (car args) "--sign") (pair? (cdr args)))
+       (loop (cddr args) name version icon entry out embed installer
+             (cadr args) entitlements no-hardened ts-url notarize)]
+      [(and (equal? (car args) "--entitlements") (pair? (cdr args)))
+       (loop (cddr args) name version icon entry out embed installer
+             sign (cadr args) no-hardened ts-url notarize)]
+      [(equal? (car args) "--no-hardened-runtime")
+       (loop (cdr args) name version icon entry out embed installer
+             sign entitlements #t ts-url notarize)]
+      [(and (equal? (car args) "--timestamp-url") (pair? (cdr args)))
+       (loop (cddr args) name version icon entry out embed installer
+             sign entitlements no-hardened (cadr args) notarize)]
+      [(and (equal? (car args) "--notarize") (pair? (cdr args)))
+       (loop (cddr args) name version icon entry out embed installer
+             sign entitlements no-hardened ts-url (cadr args))]
       [else
        (printf "Warning: ignoring unknown build argument: ~a\n" (car args))
-       (loop (cdr args) name icon entry out embed installer)])))
+       (loop (cdr args) name version icon entry out embed installer
+             sign entitlements no-hardened ts-url notarize)])))
 
 (define (build-command rest)
-  (define-values (name icon entry out embed installer) (parse-build-opts rest))
+  (define-values (name version icon entry out embed installer
+                 sign entitlements no-hardened ts-url notarize)
+    (parse-build-opts rest))
   (printf "Building Glaze app (entry=~a, name=~a)...\n" entry (or name "<project dir>"))
   (define dist-path
     (build-app #:entry entry
                #:name name
+               #:version version
                #:icon icon
                #:out-dir out
                #:embed-dlls? embed
-               #:installer? installer))
+               #:installer? installer
+               #:sign sign
+               #:entitlements entitlements
+               #:no-hardened-runtime? no-hardened
+               #:timestamp-url ts-url
+               #:notarize-profile notarize))
   (printf "Done. Distribution in: ~a\n" dist-path))
 
 (define (print-help)
@@ -110,19 +168,123 @@
   (displayln "  init <name>   Create a new Glaze project")
   (displayln "  dev           Start dev server with auto-open browser")
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
+  (displayln "  keygen        Create an RSA keypair for license signing")
+  (displayln "  license       Sign or verify offline license files")
   (displayln "  help          Show this help")
   (displayln "")
   (displayln "build options:")
-  (displayln "  --name <name>      app/bundle name (default: project dir)")
-  (displayln "  --icon <path>      .ico (Windows) / .icns (macOS)")
-  (displayln "  --entry <path>     entry file (default: main.rkt)")
-  (displayln "  --out <dir>        output directory (default: dist)")
-  (displayln "  --embed-dlls       Windows: embed DLLs into a single .exe")
-  (displayln "  --installer        Also build a platform installer (msi/dmg/AppImage);")
-  (displayln "                     falls back to zip/tar.gz when the toolchain is absent"))
+  (displayln "  --name <name>        app/bundle name (default: project dir)")
+  (displayln "  --version <v>        app version (Info.plist / MSI metadata)")
+  (displayln "  --icon <path>        .ico (Windows) / .icns (macOS)")
+  (displayln "  --entry <path>       entry file (default: main.rkt)")
+  (displayln "  --out <dir>          output directory (default: dist)")
+  (displayln "  --embed-dlls         Windows: embed DLLs into a single .exe")
+  (displayln "  --installer          Also build a platform installer (msi/dmg/AppImage);")
+  (displayln "                       falls back to zip/tar.gz when the toolchain is absent")
+  (displayln "  --sign <id>          Code-sign the app (macOS: codesign identity, \"-\" =")
+  (displayln "                       ad-hoc; Windows: signtool cert SHA-1 or subject)")
+  (displayln "  --entitlements <p>   macOS: .entitlements plist for codesign")
+  (displayln "  --no-hardened-runtime  macOS: skip hardened runtime (notarization needs it)")
+  (displayln "  --timestamp-url <u>  Windows: RFC-3161 timestamp server for signtool")
+  (displayln "  --notarize <profile> macOS: notarize + staple via notarytool keychain profile"))
 
 (define (write-file path content)
   (call-with-output-file path (lambda (out) (display content out)) #:exists 'replace))
+
+;; ---- keygen: create an RSA keypair for license signing ----
+
+;;   raco glaze keygen [--out <dir>]     ; writes private.pem + public.pem
+(define (parse-keygen-opts rest)
+  (let loop ([args rest] [out "keys"])
+    (cond
+      [(null? args) out]
+      [(and (equal? (car args) "--out") (pair? (cdr args)))
+       (loop (cddr args) (cadr args))]
+      [else (loop (cdr args) out)])))
+
+(define (keygen-command rest)
+  (define out (parse-keygen-opts rest))
+  (define openssl (find-executable-path "openssl" #f))
+  (unless openssl
+    (error 'keygen "openssl not found on PATH"))
+  (make-directory* out)
+  (define priv (build-path out "private.pem"))
+  (define pub (build-path out "public.pem"))
+  (printf "Generating RSA-2048 keypair in ~a/...\n" out)
+  (unless (zero? (system*/exit-code openssl "genpkey" "-algorithm" "RSA"
+                                     "-pkeyopt" "rsa_keygen_bits:2048"
+                                     "-out" (path->string priv)))
+    (error 'keygen "openssl genpkey failed"))
+  (unless (zero? (system*/exit-code openssl "pkey" "-in" (path->string priv)
+                                     "-pubout" "-out" (path->string pub)))
+    (error 'keygen "openssl pkey -pubout failed"))
+  (printf "Done.\n  private: ~a  (keep secret — signs licenses)\n  public:  ~a  (ship with the app — verifies licenses)\n"
+          priv pub))
+
+;; ---- license: sign / verify license files ----
+
+(define (parse-license-opts rest)
+  (let loop ([args rest]
+             [sub #f]
+             [key #f] [pub #f] [product #f] [subject #f]
+             [expiry #f] [machine #f] [out "app.license"]
+             [positional '()])
+    (cond
+      [(null? args)
+       (values sub key pub product subject expiry machine out (reverse positional))]
+      [(and (null? sub) (member (car args) '("sign" "verify")))
+       (loop (cdr args) (car args) key pub product subject expiry machine out positional)]
+      [(and (equal? (car args) "--key") (pair? (cdr args)))
+       (loop (cddr args) sub (cadr args) pub product subject expiry machine out positional)]
+      [(and (equal? (car args) "--pub") (pair? (cdr args)))
+       (loop (cddr args) sub key (cadr args) product subject expiry machine out positional)]
+      [(and (equal? (car args) "--product") (pair? (cdr args)))
+       (loop (cddr args) sub key pub (cadr args) subject expiry machine out positional)]
+      [(and (equal? (car args) "--subject") (pair? (cdr args)))
+       (loop (cddr args) sub key pub product (cadr args) expiry machine out positional)]
+      [(and (equal? (car args) "--expiry") (pair? (cdr args)))
+       (loop (cddr args) sub key pub product subject (cadr args) machine out positional)]
+      [(and (equal? (car args) "--machine-id") (pair? (cdr args)))
+       (loop (cddr args) sub key pub product subject expiry (cadr args) out positional)]
+      [(equal? (car args) "--machine-id")
+       (loop (cdr args) sub key pub product subject expiry (machine-id) out positional)]
+      [(and (equal? (car args) "--out") (pair? (cdr args)))
+       (loop (cddr args) sub key pub product subject expiry machine (cadr args) positional)]
+      [else
+       (loop (cdr args) sub key pub product subject expiry machine out
+             (cons (car args) positional))])))
+
+(define (license-command rest)
+  (define-values (sub key pub product subject expiry machine out positional)
+    (parse-license-opts rest))
+  (case sub
+    [("sign")
+     (unless (and key product subject)
+       (error 'license "usage: raco glaze license sign --key <private.pem> --product <name> --subject <who> [--expiry YYYY-MM-DD] [--machine-id] --out <file>"))
+     (issue-license #:private-key key
+                    #:product product
+                    #:subject subject
+                    #:expiry expiry
+                    #:machine-id machine
+                    #:out out)
+     (printf "License written: ~a\n" out)]
+    [("verify")
+     (unless (and pub product (pair? positional))
+       (error 'license "usage: raco glaze license verify --pub <public.pem> --product <name> <file.license>"))
+     (define r (validate-license (last positional) #:public-key pub #:product product))
+     (if (hash-ref r 'valid)
+         (begin
+           (printf "VALID\n  subject: ~a\n  expiry: ~a\n  machine-id: ~a\n"
+                   (hash-ref r 'subject)
+                   (or (hash-ref r 'expiry) "(no expiry)")
+                   (or (hash-ref r 'machine-id) "(not machine-bound)")))
+         (printf "INVALID (reason: ~a)\n" (hash-ref r 'reason)))
+     (unless (hash-ref r 'valid) (exit 1))]
+    [else
+     (displayln "usage: raco glaze license sign|verify [options]")
+     (displayln "  sign:   --key <private.pem> --product <name> --subject <who>")
+     (displayln "          [--expiry YYYY-MM-DD] [--machine-id | --machine-id <hex>] --out <file>")
+     (displayln "  verify: --pub <public.pem> --product <name> <file.license>")]))
 
 ;; Dispatch CLI commands
 (define args (vector->list (current-command-line-arguments)))
@@ -138,6 +300,8 @@
                         (car rest)))]
      ["dev" (dev-server)]
      ["build" (build-command rest)]
+     ["keygen" (keygen-command rest)]
+     ["license" (license-command rest)]
      ["help" (print-help)]
      [_
       (printf "Unknown command: ~a\n" cmd)

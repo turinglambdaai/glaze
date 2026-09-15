@@ -296,16 +296,106 @@ event means.
 Fetches a JSON manifest @litchar|{{"version","url","notes"}}| (5s timeout;
 HTTPS needs the @racket[openssl] collection) and compares versions
 numerically (@litchar{"1.10"} > @litchar{"1.9"}). Returns
-@racket[(hasheq 'version _ 'url _ 'notes _)] when a newer version exists,
-@racket[#f] otherwise.
+@racket[(hasheq 'version _ 'url _ 'notes _ 'sha256 _)] when a newer version
+exists, @racket[#f] otherwise. The manifest may carry an optional
+@litchar{"sha256"} field (hex digest of the artifact at @racket[_url]);
+it is passed through untouched.
 }
 
 @defproc[(newer-version? [candidate string?] [current string?]) boolean?]{}
+
+@defproc[(verify-file-sha256 [path (or/c string? path?)] [expected-hex string?]) boolean?]{
+True when the file at @racket[path] has the given SHA-256 digest
+(case-insensitive). @racket[#f] means @emph{cannot verify} (missing
+openssl, unreadable file) — never treat @racket[#f] as verified. Use it
+after downloading an update artifact, before swapping it in.
+}
 
 @racket[run-app]'s @racket[#:check-update] and @racket[#:current-version]
 wire this up: the result is printed to stderr and broadcast as
 @litchar{update-available} on the event bus (when @racket[#:events] is
 given).
+
+@section[#:tag "licensing"]{Licensing (Paid Apps)}
+
+@defmodule[glaze/license]
+
+An offline license-key scheme with zero native dependencies: RSA-2048 /
+SHA-256 signatures computed by the system @racket[openssl] CLI (present on
+macOS and Linux out of the box; Git for Windows ships it too). A license
+file is JSON claims (@racket[product], @racket[subject], optional
+@racket[expiry] and @racket[machine-id]) plus a base64 @racket[signature].
+
+Vendor workflow:
+
+@verbatim{
+ $ raco glaze keygen --out keys          ; once: private.pem + public.pem
+ $ raco glaze license sign --key keys/private.pem --product "MyApp" \\
+     --subject "Acme Corp" --expiry 2027-12-31 --out app.license
+ $ raco glaze license verify --pub keys/public.pem --product "MyApp" app.license
+}
+
+@defproc[(issue-license [#:private-key private-key path-string?]
+                        [#:product product string?]
+                        [#:subject subject string?]
+                        [#:expiry expiry (or/c #f string?) #f]
+                        [#:machine-id machine (or/c #f string?) #f]
+                        [#:out out (or/c string? path?) "app.license"])
+         path?]{
+Signs and writes a license file; returns its path.
+}
+
+@defproc[(validate-license [license-file (or/c string? path?)]
+                           [#:public-key public-key path-string?]
+                           [#:product product string?]
+                           [#:machine-id machine string? (machine-id)])
+         hash?]{
+Returns @racket[(hasheq 'valid #t 'subject _ 'expiry _ 'machine-id _)] on
+success, or @racket[(hasheq 'valid #f 'reason _)] with a stable reason tag:
+@racket["missing-file"], @racket["malformed"], @racket["signature"],
+@racket["product"], @racket["expired"], @racket["machine"],
+@racket["openssl-unavailable"].
+}
+
+@defproc[(license-valid? [license-file (or/c string? path?)]
+                         [#:public-key public-key path-string?]
+                         [#:product product string?]
+                         [#:machine-id machine string? (machine-id)])
+         boolean?]{}
+
+@defproc[(machine-id) string?]{
+A stable per-machine digest (64 lowercase hex chars) of the OS machine
+identifier — IOPlatformUUID (macOS), @filepath{/etc/machine-id} (Linux),
+MachineGuid (Windows) — with a username+hostname fallback. The raw OS
+identifier never leaves the function. Honest scope: machine binding is a
+courtesy check against casual license sharing, not tamper resistance.
+}
+
+@defproc[(days-until-expiry [expiry string?]) exact-integer?]{
+Days until an @litchar{"YYYY-MM-DD"} date (expiry day inclusive); negative
+when past. Raises on a malformed date.
+}
+
+@section[#:tag "signing"]{Code Signing & Notarization}
+
+Unsigned apps are blocked by macOS Gatekeeper and Windows SmartScreen.
+@racket[build-app] and @racket[raco glaze build] drive the platform
+signer:
+
+@itemlist[
+ @item{macOS: @exec{codesign} with an identity (@litchar{"-"} = ad-hoc);
+   nested code (the bundled Racket framework) is signed first, then the
+   bundle. @racket[#:notarize-profile] submits the built dmg via
+   @exec{xcrun notarytool}, waits, and staples the ticket.}
+ @item{Windows: @exec{signtool} with a SHA-1 thumbprint or subject name,
+   RFC-3161 timestamped by default so signatures outlive the certificate.}
+]
+
+Signing @emph{failures} abort the build; a @emph{missing toolchain}
+degrades with a loud warning. On macOS, hardened runtime
+(@racket[#:no-hardened-runtime?] disables it) is applied unless the
+identity is ad-hoc — its library validation would reject the app's own
+ad-hoc-signed framework.
 
 @section{System Tray}
 
@@ -438,23 +528,37 @@ memory — full local-process isolation is not achievable over plain HTTP.
 @defproc[(build-app
           [#:entry entry (or/c string? path?) "main.rkt"]
           [#:name name (or/c #f string?) #f]
+          [#:version version (or/c #f string?) #f]
           [#:icon icon (or/c #f path?) #f]
           [#:out-dir out-dir (or/c string? path?) "dist"]
           [#:embed-dlls? embed-dlls? boolean? #f]
-          [#:installer? installer? boolean? #f])
+          [#:installer? installer? boolean? #f]
+          [#:sign sign (or/c #f string?) #f]
+          [#:entitlements entitlements (or/c #f path?) #f]
+          [#:no-hardened-runtime? no-hardened-runtime? boolean? #f]
+          [#:timestamp-url timestamp-url (or/c #f string?) #f]
+          [#:notarize-profile notarize-profile (or/c #f string?) #f])
          path?]{
-Builds a Glaze project into a distributable directory via @racket[raco exe]
-+ @racket[raco distribute], bundling the project's @racket[public/] next to
-the executable. On macOS, post-processes the resulting @tt{.app} bundle's
-@tt{Info.plist}. When @racket[installer?] is true, also produces a platform
-installer (msi / dmg / AppImage), falling back to a zip / tar.gz when the
-native toolchain is absent.
+Builds a Glaze project into a distributable via @racket[raco exe] +
+@racket[raco distribute], bundling the project's @racket[public/] with the
+executable. On macOS assembles a canonical @tt{.app} bundle (with
+@racket[version] stamped into @tt{Info.plist}) and, when
+@racket[installer?] is true, produces a dmg (msi on Windows, AppImage on
+Linux), falling back to a zip / tar.gz when the native toolchain is
+absent. @racket[sign] is a codesign identity on macOS (@litchar{"-"} =
+ad-hoc) or a signtool certificate SHA-1 thumbprint / subject on Windows;
+@racket[notarize-profile] adds notarization + stapling. See
+@secref["signing"]. Signing failures abort the build; a missing toolchain
+degrades with a warning.
 }
 
 @section{CLI Commands}
 
 @verbatim{
- raco glaze init <name>   Create a new project
- raco glaze dev           Start dev server
- raco glaze build         Build a distributable (+ optional installer)
+ raco glaze init <name>                Create a new project
+ raco glaze dev                        Start dev server
+ raco glaze build                      Build a distributable (+ optional
+                                       installer, signing, notarization)
+ raco glaze keygen [--out <dir>]       Create an RSA keypair for licenses
+ raco glaze license sign|verify        Sign or verify license files
 }
