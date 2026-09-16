@@ -89,6 +89,7 @@
 
 (import-class NSString NSNull
               NSApplication
+              NSProcessInfo
               NSMenu
               NSMenuItem
               NSWindow
@@ -306,6 +307,27 @@
 ;; Standard menus install once; re-running install-standard-menus! would
 ;; replace the main menu and wipe any custom menus set-menu! appended.
 (define standard-menus-installed? #f)
+(define app-nap-disabled? #f)
+
+;; App Nap exemption. macOS throttles/suspends "idle" apps whose windows are
+;; fully occluded, which freezes monitoring-style Glaze UIs (live charts,
+;; log tails, streaming views) the moment another window covers them. Decla-
+;; ring user-initiated activity for the process lifetime keeps the WebView
+;; live in the background; a Glaze app with an open window IS user-initiated
+;; work, so the token is intentionally never ended. Options value:
+;; NSActivityUserInitiated = 0x00FFFFFF (mask includes the IdleSystemSleep
+;; bit; per NSProcessInfo.h).
+(define (disable-app-nap!)
+  (unless app-nap-disabled?
+    (set! app-nap-disabled? #t)
+    (with-handlers ([exn:fail? (lambda (_) (void))])
+      (define pi (tell NSProcessInfo processInfo))
+      (define token
+        (tell #:type _id pi beginActivityWithOptions: #:type _uint64 16777215
+              reason: #:type _id (->nsstring "Glaze UI running")))
+      ;; token kept forever; no endActivity counterpart by design
+      (void token))))
+
 (define (ensure-app!)
   (call-with-semaphore
    app-init-sema
@@ -315,6 +337,7 @@
      (unless standard-menus-installed?
        (install-standard-menus! app)
        (set! standard-menus-installed? #t))
+     (disable-app-nap!)
      ;; macOS 14+ deprecates activateIgnoringOtherApps: in favor of -activate.
      (if (tell app respondsToSelector: #:type _SEL (selector activate))
          (tellv app activate)
