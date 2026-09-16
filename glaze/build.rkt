@@ -396,6 +396,13 @@ NSI
 ;; executable's own directory first, then falls back to the original CWD if
 ;; that directory does not contain a public/ (covering launchers that report
 ;; a wrapper path).
+;;
+;; Running the user program must mirror `racket main.rkt`: instantiate the
+;; (module+ main) submodule when the user entry declares one, otherwise the
+;; module body itself. A static (require "main.rkt") here loads the module
+;; as a plain library — its main submodule would never run and the packaged
+;; app would exit 0 without executing anything (the entry wrapper itself has
+;; no main submodule either).
 (define (entry-module-source user-entry)
   (define entry-filename
     (let ([p (if (complete-path? user-entry)
@@ -416,7 +423,16 @@ NSI
    "               (and c (directory-exists? (build-path c \"public\")) c))])\n"
    "  (when (and pick (not (directory-exists? (build-path (current-directory) \"public\"))))\n"
    "    (current-directory pick)))\n"
-   (format "(require \"~a\")\n" entry-filename)))
+   ;; Static require: embeds the user module and its full dependency closure
+   ;; (raco exe cannot see dynamic-requires), and runs top-level code once.
+   (format "(require \"~a\")\n" entry-filename)
+   ";; Run the user entry the way `racket main.rkt` would: the (module+ main)\n"
+   ";; submodule when declared, else the module body. The static require above\n"
+   ";; embeds the full dependency closure and runs top-level code once; the\n"
+   ";; main submodule itself is only instantiated for the program's top module,\n"
+   ";; which is this wrapper — so run it explicitly here.\n"
+   "(when (module-declared? '(submod \"" entry-filename "\" main) #t)\n"
+   "  (dynamic-require '(submod \"" entry-filename "\" main) 0))\n"))
 
 ;; Assemble a canonical macOS .app bundle from whatever `raco distribute`
 ;; produced. Current versions lay out <dist>/bin/<name> + <dist>/lib/; older
