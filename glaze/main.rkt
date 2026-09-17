@@ -1,5 +1,15 @@
 #lang racket/base
 
+;; Public application facade.
+;;
+;; New applications should normally `(require glaze)` rather than depend on
+;; platform backend modules or the repository's internal layout.  The facade
+;; remains deliberately broad during the 0.x stabilization period so existing
+;; focused imports and exported bindings keep working while public/internal
+;; boundaries are documented and tested.
+;;
+;; See docs/architecture.md for the dependency and stability rules.
+
 (require "server.rkt"
          "api.rkt"
          "api-macros.rkt"
