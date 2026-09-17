@@ -51,6 +51,29 @@
                     #:events event-bus
                     #:api-token api-token))))
 
+;; Serialize shutdown and execute the underlying server shutdown at most once.
+;; The previous implementation used call-with-semaphore but did not remember
+;; completion, so every later call invoked raw-shutdown again despite the
+;; documented idempotent contract.
+(define (make-idempotent-shutdown raw-shutdown)
+  (define lock (make-semaphore 1))
+  (define stopped? #f)
+  (lambda ()
+    (call-with-semaphore
+     lock
+     (lambda ()
+       (unless stopped?
+         (raw-shutdown)
+         (set! stopped? #t))))))
+
+;; Close a window during exceptional unwinding without replacing the original
+;; exception with a secondary native-backend error.
+(define (close-webview/safely wv)
+  (when wv
+    (with-handlers ([exn? void])
+      (unless (webview-closed? wv)
+        (webview-close wv)))))
+
 (define (run-app #:public-dir [public-dir "public"]
                  #:api [api-routes '()]
                  #:port [port #f]
@@ -88,46 +111,62 @@
   ;; longer hands it out); programmatic clients use the X-Glaze-Token header.
   (define open-url
     (if token (format "~a?glaze-token=~a" url token) url))
-  ;; Once-guard so callers may always call shutdown, even after run-app
-  ;; already stopped the server on window close.
-  (define once (make-semaphore 1))
-  (define (shutdown)
-    (call-with-semaphore once (lambda () (raw-shutdown))))
+  (define shutdown (make-idempotent-shutdown raw-shutdown))
   (define closed (make-semaphore 0))
-  (parameterize ([current-api-token (or token "")]
-                 [current-glaze-error-reporter
-                  (or on-error (current-glaze-error-reporter))])
-    (when check-update
-      (define info (do-check-update check-update
-                                       #:current-version current-version))
-      (when info
-        (printf "[glaze] update available: ~a (current ~a) — ~a~n"
-                (hash-ref info 'version #f)
-                current-version
-                (hash-ref info 'url #f))
-        (when event-bus
-          (bus-broadcast! event-bus 'update-available info))))
-    (define wv
-      (open-window open-url
-                   #:title title
-                   #:width width
-                   #:height height
-                   #:on-close (lambda ()
-                                (user-on-close)
-                                (semaphore-post closed))
-                   #:fallback-browser? fallback?))
-    (cond
-      [wv
-       (on-ready wv url)
-       (sync closed)
-       (shutdown)
-       (values 'webview shutdown)]
-      [else
-       ;; Browser fallback: no window to wait on. Leave the server running so
-       ;; the browser keeps working; caller decides when to exit.
-       (on-ready #f url)
-       (printf "[glaze] app served at ~a (system-browser fallback)~n" open-url)
-       (when token
-         (printf "[glaze] api token (X-Glaze-Token header): ~a~n" token))
-       (printf "[glaze] call the returned shutdown procedure or exit to stop~n")
-       (values 'browser shutdown)])))
+  (define active-wv #f)
+
+  ;; Once the server exists, every exceptional exit from setup/runtime must
+  ;; release it. If a native window was already created, close that too.
+  (with-handlers ([exn?
+                   (lambda (e)
+                     (close-webview/safely active-wv)
+                     (with-handlers ([exn? void]) (shutdown))
+                     (raise e))])
+    (parameterize ([current-api-token (or token "")]
+                   [current-glaze-error-reporter
+                    (or on-error (current-glaze-error-reporter))])
+      (when check-update
+        (define info (do-check-update check-update
+                                      #:current-version current-version))
+        (when info
+          (printf "[glaze] update available: ~a (current ~a) — ~a~n"
+                  (hash-ref info 'version #f)
+                  current-version
+                  (hash-ref info 'url #f))
+          (when event-bus
+            (bus-broadcast! event-bus 'update-available info))))
+      (define wv
+        (open-window open-url
+                     #:title title
+                     #:width width
+                     #:height height
+                     #:on-close
+                     (lambda ()
+                       ;; A user callback must not be able to prevent the
+                       ;; lifecycle semaphore from being posted. Preserve the
+                       ;; callback's exception while guaranteeing progress.
+                       (dynamic-wind
+                         void
+                         user-on-close
+                         (lambda () (semaphore-post closed))))
+                     #:fallback-browser? fallback?))
+      (set! active-wv wv)
+      (cond
+        [wv
+         (on-ready wv url)
+         (sync closed)
+         (shutdown)
+         (values 'webview shutdown)]
+        [else
+         ;; Browser fallback: no window to wait on. Leave the server running so
+         ;; the browser keeps working; caller decides when to exit.
+         (on-ready #f url)
+         (printf "[glaze] app served at ~a (system-browser fallback)~n" url)
+         ;; Do not print the capability token. It remains available to trusted
+         ;; application callbacks through current-api-token, while the browser
+         ;; receives it only through the one-time bootstrap URL.
+         (printf "[glaze] call the returned shutdown procedure or exit to stop~n")
+         (values 'browser shutdown)]))))
+
+(module+ test-support
+  (provide make-idempotent-shutdown))
