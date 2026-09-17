@@ -6,7 +6,8 @@
 ;; as glaze/tray and glaze/webview.
 
 (require racket/file
-         racket/system)
+         racket/system
+         racket/tcp)
 
 (provide sys-supported?
          clipboard-set!
@@ -78,18 +79,45 @@
 
 ;; ---- single instance ----
 
+;; Keep every successful listener and its custodian strongly reachable for the
+;; process lifetime. Discarding the listener made the old implementation rely
+;; on GC/resource retention even though the public contract promised a
+;; process-lifetime lock.
+(define instance-locks (make-hash))
+(define instance-locks-sema (make-semaphore 1))
+
+;; A deterministic FNV-1a hash is used instead of equal-hash-code: the lock
+;; needs the same port in independent processes, while equal-hash-code is an
+;; implementation hash and is not an appropriate cross-process protocol.
+(define (app-id->lock-port app-id)
+  (define h
+    (for/fold ([h 2166136261])
+              ([b (in-bytes (string->bytes/utf-8 app-id))])
+      (bitwise-and (* (bitwise-xor h b) 16777619) #xffffffff)))
+  (+ 49152 (modulo h 16384)))
+
 ;; Adjudicate "am I the first instance of app-id?" without leaving files
 ;; behind: derive a deterministic TCP port from the id and hold a listener
 ;; on it for the process lifetime. The second instance's bind fails.
-;; Returns #t for the first instance, #f if another process already holds
-;; the lock. (A firewall prompt is possible on first run on some systems.)
+;; Returns #t for the first instance, #f if another process (including this
+;; process) already holds the lock. A firewall prompt is possible on some
+;; systems even though the listener is bound only to loopback.
 (define (single-instance? app-id)
-  (define h (equal-hash-code app-id))
-  (define port (+ 49152 (modulo h 16384)))
-  (with-handlers ([exn:fail:network? (lambda (e) #f)])
-    (define cust (make-custodian))
-    (parameterize ([current-custodian cust])
-      (tcp-listen port 1 #f "127.0.0.1"))
-    #t))
-
-(require racket/tcp)
+  (unless (string? app-id)
+    (raise-argument-error 'single-instance? "string?" app-id))
+  (call-with-semaphore
+   instance-locks-sema
+   (lambda ()
+     (cond
+       [(hash-has-key? instance-locks app-id) #f]
+       [else
+        (define cust (make-custodian))
+        (with-handlers ([exn:fail:network?
+                         (lambda (e)
+                           (custodian-shutdown-all cust)
+                           #f)])
+          (define listener
+            (parameterize ([current-custodian cust])
+              (tcp-listen (app-id->lock-port app-id) 1 #f "127.0.0.1")))
+          (hash-set! instance-locks app-id (cons cust listener))
+          #t)]))))
