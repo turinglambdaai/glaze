@@ -66,7 +66,9 @@
   (when (and api-token (not (string? api-token)))
     (raise-argument-error 'start-server "(or/c #f string?)" api-token))
   (define dispatcher
-    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))  (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
+    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))
+  (define shutdown-server
+    (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
   ;; only "connection refused" much later. Prove the listener is accepting
@@ -106,20 +108,32 @@
 
 ;; ---- Host-header validation (DNS-rebinding guard) ----
 
-(define (host-allowed? req port)
-  (define h (headers-assq #"Host" (request-headers/raw req)))
-  (cond
-    ;; No Host header (ancient clients, raw sockets): nothing was spoofed.
-    [(not h) #t]
-    [else
-     (define host (bytes->string/latin-1 (header-value h)))
-     (define bare (if (string-contains? host ":")
-                      (substring host 0 (string-index-of host #\:))
-                      host))
-     (member bare (list "127.0.0.1" "localhost" "[::1]" "::1"))]))
-
 (define (string-index-of s ch)
   (for/or ([c (in-string s)] [i (in-naturals)] #:when (char=? c ch)) i))
+
+;; Parse a Host header without confusing the colons inside a bracketed IPv6
+;; literal with the optional :port separator. Hostnames are case-insensitive.
+(define (host-string-allowed? host)
+  (define s (string-downcase (string-trim host)))
+  (define bare
+    (cond
+      ;; Be liberal for raw clients even though HTTP normally brackets IPv6.
+      [(string=? s "::1") "::1"]
+      [(regexp-match #px"^\\[([^\\]]+)\\](?::[0-9]+)?$" s)
+       => (lambda (m) (second m))]
+      [else
+       (define colon (string-index-of s #\:))
+       (if colon (substring s 0 colon) s)]))
+  (and (member bare '("127.0.0.1" "localhost" "::1")) #t))
+
+(define (host-allowed? req _port)
+  (define h (headers-assq #"Host" (request-headers/raw req)))
+  (cond
+    ;; No Host header (ancient clients, raw sockets): browsers always send one,
+    ;; so this does not weaken the DNS-rebinding boundary for web content.
+    [(not h) #t]
+    [else
+     (host-string-allowed? (bytes->string/latin-1 (header-value h)))]))
 
 ;; ---- dispatcher ----
 
@@ -359,20 +373,47 @@
              [(response? result) result]
              [else (api-response result)])))))
 
+;; Return #t when candidate is at or below root after path normalization.
+;; `find-relative-path` also handles Windows drive boundaries for us.
+(define (path-contained? root candidate)
+  (define rel (find-relative-path root candidate))
+  (and (relative-path? rel)
+       (for/and ([part (in-list (explode-path rel))])
+         (not (eq? part 'up)))))
+
+;; Build a request path below public-dir and prove it cannot escape. Existing
+;; files are normalized through the filesystem as a second check so a symlink
+;; inside public/ cannot expose a file outside the public root.
+(define (safe-public-candidate dir segments)
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (define root (simplify-path (path->complete-path dir) #t))
+    (define candidate
+      (simplify-path (apply build-path root segments) #f))
+    (and (path-contained? root candidate)
+         (cond
+           [(file-exists? candidate)
+            (define resolved (simplify-path candidate #t))
+            (and (path-contained? root resolved) resolved)]
+           [else candidate]))))
+
 (define (serve-static-file dir req)
   (define uri-path (url-path (request-uri req)))
-  (define segments (filter (lambda (s) (not (equal? s ""))) (map path/param-path uri-path)))
+  (define segments
+    (filter (lambda (s) (not (equal? s "")))
+            (map path/param-path uri-path)))
   (define rel
     (if (null? segments)
         '("index.html")
         segments))
-  (define candidate (apply build-path dir rel))
+  (define candidate (safe-public-candidate dir rel))
   (cond
+    [(not candidate)
+     (error-response 403 "path not allowed")]
     [(and (file-exists? candidate) (not (directory-exists? candidate)))
      (make-file-response candidate)]
     [else
-     (define fallback (build-path dir "index.html"))
-     (if (file-exists? fallback)
+     (define fallback (safe-public-candidate dir '("index.html")))
+     (if (and fallback (file-exists? fallback))
          (make-file-response fallback)
          (make-404-response))]))
 
@@ -417,3 +458,7 @@
     [(member ext '(#".mp3")) #"audio/mpeg"]
     [(member ext '(#".map")) #"application/json; charset=utf-8"]
     [else #"application/octet-stream"]))
+
+(module+ test-support
+  (provide host-string-allowed?
+           safe-public-candidate))
