@@ -79,8 +79,13 @@
 ;; open -> set custom menu -> poll page load -> perform the native menu
 ;; action (the same dispatch a real click takes) -> marker file appears ->
 ;; close -> wait-for-webviews.
+;;
+;; This test deliberately uses AppKit/Objective-C calls to synthesize the
+;; native menu click, so it must never run merely because another platform's
+;; WebView backend is available.
 
-(when (webview-supported?)
+(when (and (eq? (system-type 'os) 'macosx)
+           (webview-supported?))
   ;; AppKit is loaded by the backend; register the class binding locally so
   ;; the test can query NSApp for the main menu.
   (import-class NSApplication)
