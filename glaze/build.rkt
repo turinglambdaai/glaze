@@ -93,7 +93,15 @@
       [(windows) (string-append app-name ".exe")]
       [(macosx) app-name] ; --gui produces a .app bundle named app-name
       [else app-name]))
-  (define out-exe-path (build-path project-dir out-exe-name))
+  ;; Build intermediates live in an isolated temporary directory. Older
+  ;; versions wrote <project>/<app-name>(.exe) and deleted it afterwards,
+  ;; which could overwrite a developer-owned file with the same name.
+  (define build-work-dir (make-temporary-file "glaze-build-~a" 'directory))
+  (define out-exe-path (build-path build-work-dir out-exe-name))
+
+  (define (cleanup-build-work!)
+    (when (directory-exists? build-work-dir)
+      (delete-directory/files build-work-dir)))
 
   (define exe-args
     ;; --gui is Windows-only (console-less exe). On macOS --gui would make
@@ -114,6 +122,7 @@
             (list "-o" (path->string out-exe-path) (path->string entry-abs))))
 
   (unless (apply system* (find-racket-bin) exe-args)
+    (cleanup-build-work!)
     (error 'build-app "raco exe failed"))
 
   ;; raco exe emits a read-only launcher; `raco distribute` needs to rewrite
@@ -128,12 +137,11 @@
   ;; produce a consistent layout across platforms.
   (define dist-args (list "distribute" (path->string out-dir-path) (path->string out-exe-path)))
   (unless (apply system* (find-racket-bin) dist-args)
+    (cleanup-build-work!)
     (error 'build-app "raco distribute failed"))
 
-  ;; Clean up the standalone exe copy (distribute has its own copy inside
-  ;; out-dir).
-  (when (file-exists? out-exe-path)
-    (delete-file out-exe-path))
+  ;; Distribute has copied everything it needs; remove isolated intermediates.
+  (cleanup-build-work!)
 
   ;; macOS: `raco distribute` of a bare exe yields a flat bin/+lib/ layout
   ;; (exact shape varies across Racket versions) — assemble the canonical
@@ -672,8 +680,12 @@ PLIST
       (error 'build-app "notarization failed for ~a (profile ~a)" artifact keychain-profile))
     (define staple-target
       (if (file-exists? dmg) dmg bundle))
-    (system*/exit-code xcrun "stapler" "staple" (path->string staple-target))
-    (fprintf (current-error-port) "[glaze] notarized: ~a\n" staple-target)
+    (unless (zero? (system*/exit-code xcrun "stapler" "staple"
+                                      (path->string staple-target)))
+      (error 'build-app "stapling notarization ticket failed for ~a"
+             staple-target))
+    (fprintf (current-error-port) "[glaze] notarized and stapled: ~a\n"
+             staple-target)
     #t))
 
 (define (default-entry-template)
