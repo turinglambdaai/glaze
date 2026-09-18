@@ -20,6 +20,7 @@
 
 ;; ---- token ----
 (define token (make-api-token))
+(define bootstrap (make-api-token))
 (check-true (regexp-match? #px"^[0-9a-f]{32}$" token) "token is 32 hex chars")
 (check-false (string=? (make-api-token) token) "tokens are random")
 
@@ -27,7 +28,8 @@
   (start-server #:port 18995
                 #:public-dir "/tmp"
                 #:api (list (GET "api/ping" (lambda (req) (hasheq 'pong #t))))
-                #:api-token token))
+                #:api-token token
+                #:bootstrap-token bootstrap))
 
 (define (call path #:headers [headers '()] #:port [p 18995])
   (define-values (st h in)
@@ -57,15 +59,20 @@
   (check-false (string-contains? (bytes->string/utf-8 b4) token)
                "api.js body does not contain the token"))
 
-;; one-time bootstrap: ?glaze-token= exchanges the token for an HttpOnly
-;; cookie and redirects to the clean path
-(let*-values ([(_s5 h5 _b5) (call (format "/?glaze-token=~a" token))])
+;; one-time bootstrap: a short-lived nonce distinct from the API token is
+;; exchanged for an HttpOnly API-token cookie and then consumed.
+(let*-values ([(_s5 h5 _b5) (call (format "/?glaze-token=~a" bootstrap))])
   (check-true (string-contains? _s5 "302") "bootstrap redirects")
   (check-true
    (for/or ([hh (in-list h5)])
      (string-contains? (string-downcase (bytes->string/latin-1 hh))
                        (format "glaze_token=~a" token)))
-   "bootstrap sets glaze_token cookie")
+   "bootstrap sets API token cookie, not bootstrap nonce")
+  (check-false
+   (for/or ([hh (in-list h5)])
+     (string-contains? (bytes->string/latin-1 hh)
+                       (format "glaze_token=~a" bootstrap)))
+   "bootstrap nonce is never stored as the capability cookie")
   (check-true
    (for/or ([hh (in-list h5)])
      (define s (string-downcase (bytes->string/latin-1 hh)))
@@ -76,6 +83,27 @@
   (let*-values ([(_s6 _h6 _b6) (call "/api/ping"
                          #:headers (list (format "Cookie: glaze_token=~a" token)))])
     (check-true (string-contains? _s6 "200") "cookie token -> 200")))
+
+;; Bootstrap nonce is consumed: replaying it cannot mint another cookie.
+(let*-values ([(_sr hr _br) (call (format "/?glaze-token=~a" bootstrap))])
+  (check-false
+   (for/or ([hh (in-list hr)])
+     (string-prefix? (string-downcase (bytes->string/latin-1 hh)) "set-cookie:"))
+   "bootstrap nonce cannot be replayed"))
+
+;; Browser-origin capability requests are pinned to this exact local port.
+(let*-values ([(_so _ho _bo)
+               (call "/api/ping"
+                     #:headers
+                     (list (format "X-Glaze-Token: ~a" token)
+                           "Origin: http://127.0.0.1:19999"))])
+  (check-true (string-contains? _so "403") "foreign localhost origin -> 403"))
+(let*-values ([(_ss _hs _bs)
+               (call "/api/ping"
+                     #:headers
+                     (list (format "X-Glaze-Token: ~a" token)
+                           "Origin: http://127.0.0.1:18995"))])
+  (check-true (string-contains? _ss "200") "same-origin API request -> 200"))
 
 ;; wrong token in the query never mints anything
 (let*-values ([(_s7 h7 _b7) (call "/?glaze-token=wrong")])
@@ -104,6 +132,18 @@
   (check-equal? (second reported) "api/boom" "reporter sees the URI")
   (check-true (string-contains? (first reported) "kaboom") "reporter sees the exn")
   (stop2))
+
+;; An events-only server must still enforce the capability token even when it
+;; has zero API routes (regression for a previous `(pair? api-routes)` guard).
+(define sse-bus (make-event-bus))
+(define-values (_sse-port stop-sse)
+  (start-server #:port 18998
+                #:public-dir "/tmp"
+                #:events sse-bus
+                #:api-token token))
+(let*-values ([(_se _he _be) (call "/glaze/events" #:port 18998)])
+  (check-true (string-contains? _se "401") "SSE-only server requires token"))
+(stop-sse)
 
 (shutdown)
 
