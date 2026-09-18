@@ -82,6 +82,7 @@
                      #:width [width 1024]
                      #:height [height 768]
                      #:devtools? [devtools? #f]
+                     #:background-active? [background-active? #f]
                      #:on-close [on-close (lambda () (void))]
                      #:fallback-browser? [fallback? #f])
   (open-webview url
@@ -89,6 +90,7 @@
                 #:width width
                 #:height height
                 #:devtools? devtools?
+                #:background-active? background-active?
                 #:on-close on-close
                 #:fallback-browser? fallback?))
 
@@ -97,6 +99,7 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:background-active? [background-active? #f]
                       #:on-close [on-close (lambda () (void))]
                       #:fallback-browser? [fallback? #f])
   (define h
@@ -111,6 +114,7 @@
         #:width width
         #:height height
         #:devtools? devtools?
+        #:background-active? background-active?
         #:on-close on-close)))
   (cond
     [h (define wv (webview (detected-backend) h))
