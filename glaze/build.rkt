@@ -147,6 +147,15 @@
   ;; could produce an executable that immediately exited with status 0.
   ;; Assemble the raco exe arguments.
   (define os (system-type 'os))
+  (when (and entitlements (not (eq? os 'macosx)))
+    (error 'build-app "#:entitlements is only supported on macOS"))
+  (when notarize-profile
+    (unless (eq? os 'macosx)
+      (error 'build-app "#:notarize-profile is only supported on macOS"))
+    (unless sign
+      (error 'build-app "notarization requires #:sign with a signing identity")))
+  (when (and sign (eq? os 'unix))
+    (error 'build-app "#:sign is not supported for Linux distributions"))
   (define out-exe-name
     (case os
       [(windows) (string-append app-name ".exe")]
@@ -637,30 +646,25 @@ PLIST
 (define (post-process-macos-bundle out-dir app-name icon [version #f])
   (define bundle (build-path out-dir (string-append app-name ".app")))
   (define plist (build-path bundle "Contents" "Info.plist"))
-  (when (file-exists? plist)
-    (define pb (find-executable-path "PlistBuddy" #f))
-    (when pb
-      (define (plist-set key val)
-        (system* pb "-c" (format "Set :~a ~a" key val) plist))
-      (with-handlers ([exn:fail? void])
-        (plist-set "CFBundleName" app-name)
-        (plist-set "CFBundleDisplayName" app-name)
-        (plist-set "CFBundleIdentifier"
-                   (string-append "io.glaze." (bundle-id-component app-name)))
-        (when version
-          (plist-set "CFBundleShortVersionString" version)
-          (plist-set "CFBundleVersion" version)))
-      (when (and icon (file-exists? icon))
-        ;; Copy the icon into Resources and reference it.
-        (define icns-name (path->string (file-name-from-path icon)))
-        (define res-dir (build-path bundle "Contents" "Resources"))
-        (make-directory* res-dir)
-        (call-with-output-file (build-path res-dir icns-name)
-                               (lambda (out)
-                                 (call-with-input-file icon (lambda (in) (copy-port in out))))
-                               #:exists 'replace)
-        (with-handlers ([exn:fail? void])
-          (system* pb "-c" (format "Set :CFBundleIconFile ~a" icns-name) plist))))))
+  ;; Name/id/version are already written by macos-info-plist. This pass only
+  ;; installs the optional icon and makes the plist reference it.
+  (when (and icon (file-exists? icon))
+    (unless (file-exists? plist)
+      (error 'build-app "Info.plist missing from bundle: ~a" plist))
+    (define pb-path (string->path "/usr/libexec/PlistBuddy"))
+    (unless (file-exists? pb-path)
+      (error 'build-app "PlistBuddy not found; cannot install bundle icon"))
+    (define icns-name (path->string (file-name-from-path icon)))
+    (define res-dir (build-path bundle "Contents" "Resources"))
+    (make-directory* res-dir)
+    (copy-file icon (build-path res-dir icns-name) #t)
+    (define set-ok?
+      (system* pb-path "-c" (format "Set :CFBundleIconFile ~a" icns-name) plist))
+    (unless (or set-ok?
+                (system* pb-path "-c"
+                         (format "Add :CFBundleIconFile string ~a" icns-name)
+                         plist))
+      (error 'build-app "could not write CFBundleIconFile to ~a" plist))))
 
 ;; ---- Code signing & notarization ----
 
@@ -678,14 +682,11 @@ PLIST
      (sign-macos-bundle bundle sign entitlements hardened-runtime?)]
     [(windows)
      (define exe-path (build-path out-dir (string-append app-name ".exe")))
-     (if (file-exists? exe-path)
-         (sign-windows-file exe-path sign timestamp-url)
-         (displayln (format "[glaze] cannot sign: exe not found at ~a" exe-path)
-                    (current-error-port)))]
+     (unless (file-exists? exe-path)
+       (error 'build-app "cannot sign: exe not found at ~a" exe-path))
+     (sign-windows-file exe-path sign timestamp-url)]
     [else
-     (displayln "[glaze] --sign is not applicable on this platform (no standard signing "
-                (current-error-port))
-     (displayln "scheme for Linux apps); ignoring." (current-error-port))]))
+     (error 'build-app "#:sign is unsupported on this platform")]))
 
 ;; Sign a macOS .app with `codesign`, then verify. Raises on failure.
 ;;
@@ -748,11 +749,8 @@ PLIST
 (define (sign-windows-file file cert-spec [timestamp-url default-timestamp-url])
   (define signtool (find-tool "signtool.exe" "signtool"))
   (unless signtool
-    (displayln "[glaze] signtool not found (Windows SDK); skipping code signing. "
-               (current-error-port))
-    (displayln "[glaze] Install the Windows SDK Signing Tools to sign for distribution."
-               (current-error-port))
-    #f)
+    (error 'build-app
+           "signtool not found; install Windows SDK Signing Tools before using #:sign"))
   (when signtool
     (define cert-flag
       ;; A 40-hex string is a SHA-1 thumbprint; anything else is a subject name.
