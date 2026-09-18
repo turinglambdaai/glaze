@@ -16,16 +16,12 @@
   (make-directory* (build-path name "public"))
   (write-file (build-path name "main.rkt")
               (string-append "#lang racket/base\n\n"
-                             "(require glaze)\n\n"
-                             "(define-values (port server)\n"
-                             "  (start-dev-server #:public-dir \"public\"))\n\n"
-                             "(printf \"Glaze app running at http://127.0.0.1:~a\\n\" port)\n"
-                             "(open-browser (format \"http://127.0.0.1:~a\" port))\n\n"
-                             "(with-handlers ([exn:break?\n"
-                             "                 (lambda (e)\n"
-                             "                   (stop-server server)\n"
-                             "                   (printf \"Server stopped.\\n\"))])\n"
-                             "  (sync never-evt))\n"))
+                             "(require racket/runtime-path\n"
+                             "         glaze)\n\n"
+                             "(define-runtime-path public \"public\")\n\n"
+                             "(module+ main\n"
+                             "  (run-app #:public-dir public\n"
+                             "           #:title \"Glaze App\"))\n"))
   (write-file
    (build-path name "public" "index.html")
    #"<!DOCTYPE html>
@@ -82,6 +78,7 @@
 ;;   --timestamp-url <u>  Windows: RFC-3161 timestamp server for signtool
 ;;   --notarize <profile> macOS: notarytool keychain profile; submits the
 ;;                        dmg/app for notarization and staples it
+;;   --url-scheme <name>  register a custom URL scheme (repeatable)
 (define (parse-build-opts rest)
   (let loop ([args rest]
              [name #f]
@@ -133,7 +130,7 @@
              sign entitlements #t ts-url notarize schemes)]
       [(and (equal? (car args) "--timestamp-url") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
-             sign entitlements no-hardened (cadr args) notarize)]
+             sign entitlements no-hardened (cadr args) notarize schemes)]
       [(and (equal? (car args) "--notarize") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
              sign entitlements no-hardened ts-url (cadr args) schemes)]
