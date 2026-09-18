@@ -31,9 +31,11 @@
 
 (import-class SMAppService)
 
-;; Status values from SMAppService.Status.
+;; SMAppServiceStatus values (macOS 13+).
+(define SMAppServiceStatusNotRegistered 0)
 (define SMAppServiceStatusEnabled 1)
 (define SMAppServiceStatusRequiresApproval 2)
+(define SMAppServiceStatusNotFound 3)
 
 (define (mac-service)
   (and servicemgmt
@@ -46,26 +48,53 @@
   (and svc
        (let ([s (tell #:type _int svc status)])
          (case s
+           [(0) 'not-registered]
            [(1) #t]
            [(2) 'requires-approval]
-           [(3) 'not-registered]
+           [(3) #f]
            [else #f]))))
 
 (define (mac-set! enabled?)
   (define svc (mac-service))
   (unless svc
-    (error 'auto-launch "SMAppService needs macOS 13+ and a packaged .app (raco glaze build)"))
-  (if enabled?
-      (let ([err (tell #:type _id svc register)])
-        (unless (cast err _id _pointer) ; nil NSError = success
-          (error 'auto-launch "register failed: ~a"
-                 (tell #:type _string err localizedDescription)))
-        (when (eq? (mac-enabled?) 'requires-approval)
-          (error 'auto-launch "registration needs approval in System Settings > General > Login Items")))
-      (let ([err (tell #:type _id svc unregister)])
-        (unless (cast err _id _pointer)
-          (error 'auto-launch "unregister failed: ~a"
-                 (tell #:type _string err localizedDescription))))))
+    (error 'auto-launch
+           "SMAppService needs macOS 13+ and a packaged .app (raco glaze build)"))
+  (define before (mac-enabled?))
+  (cond
+    [enabled?
+     (cond
+       [(eq? before #t) #t]
+       [else
+        ;; NSError** is optional. Passing NULL keeps the FFI surface simple;
+        ;; status is queried afterwards to distinguish approval from failure.
+        (define ok?
+          (tell #:type _bool svc
+                registerAndReturnError:
+                #:type _pointer
+                #f))
+        (define after (mac-enabled?))
+        (cond
+          [(eq? after #t) #t]
+          [(eq? after 'requires-approval)
+           (error 'auto-launch
+                  "registration requires approval in System Settings > General > Login Items")]
+          [ok? #t]
+          [else
+           (error 'auto-launch "SMAppService registration failed")])])]
+    [else
+     (cond
+       [(eq? before 'not-registered) #t]
+       [else
+        (define ok?
+          (tell #:type _bool svc
+                unregisterAndReturnError:
+                #:type _pointer
+                #f))
+        (define after (mac-enabled?))
+        (if (or ok? (eq? after 'not-registered))
+            #t
+            (error 'auto-launch "SMAppService unregistration failed"))])]))
+
 
 ;; ---- Windows (HKCU Run key via reg.exe) ----
 
