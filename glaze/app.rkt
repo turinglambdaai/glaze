@@ -81,6 +81,7 @@
                  #:width [width 1024]
                  #:height [height 768]
                  #:fallback-browser? [fallback? #t]
+                 #:background-active? [background-active? #f]
                  #:events [event-bus #f]
                  #:api-token [api-token #f]
                  #:on-close [user-on-close (lambda () (void))]
@@ -99,6 +100,8 @@
     (raise-argument-error 'run-app "exact-positive-integer?" height))
   (unless (boolean? fallback?)
     (raise-argument-error 'run-app "boolean?" fallback?))
+  (unless (boolean? background-active?)
+    (raise-argument-error 'run-app "boolean?" background-active?))
   (unless (or (eq? api-token #t) (eq? api-token #f) (string? api-token))
     (raise-argument-error 'run-app "(or/c #t #f string?)" api-token))
   (unless (procedure? user-on-close)
@@ -167,6 +170,7 @@
                      #:title title
                      #:width width
                      #:height height
+                     #:background-active? background-active?
                      #:on-close
                      (lambda ()
                        ;; A user callback must not be able to prevent the
