@@ -21,13 +21,13 @@ Build desktop apps with Racket backend and web frontend.
 @defproc[(run-app
           [#:public-dir public-dir (or/c string? path?) "public"]
           [#:api api (listof route?) '()]
-          [#:port port (or/c #f exact-nonnegative-integer?) #f]
+          [#:port port (or/c #f (integer-in 1 65535)) #f]
           [#:title title string? "Glaze"]
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
           [#:fallback-browser? fallback-browser? boolean? #t]
           [#:events events (or/c #f event-bus?) #f]
-          [#:api-token api-token (or/c #f string? #t) #f]
+          [#:api-token api-token (or/c #f string? #t) #t]
           [#:on-close on-close (-> any) (lambda () (void))]
           [#:on-error on-error (or/c #f (exn? string? . -> . any)) #f]
           [#:check-update check-update (or/c #f string?) #f]
@@ -41,8 +41,11 @@ opens the native webview window, and blocks until the window closes.
 @racket[on-ready] receives the webview handle and URL as soon as the window
 is up — the hook agents use for verification. @racket[on-error], when given,
 receives every API-handler failure (the 500 path) for crash reporting.
-When @racket[#:api-token] is @racket[#t], a random token is generated
-(@racket[make-api-token]) and printed in the browser fallback path.
+By default @racket[#:api-token] is @racket[#t], so a random token is generated
+(@racket[make-api-token]). The token is not printed; the WebView/browser receives
+it through the bootstrap URL and trusted Racket callbacks can read it through
+@racket[current-api-token]. Pass @racket[#f] explicitly only when an open local
+API is intended.
 When @racket[#:check-update] is a manifest URL, a background check runs
 (see @secref["update-checks"]).
 
@@ -63,7 +66,7 @@ the API is open).
 @defmodule[glaze/server]
 
 @defproc[(start-server
-          [#:port port exact-nonnegative-integer? 8080]
+          [#:port port (integer-in 1 65535) 8080]
           [#:public-dir public-dir (or/c string? path?) "public"]
           [#:api api (listof route?) '()]
           [#:events events (or/c #f event-bus?) #f]
@@ -270,7 +273,7 @@ Opens a path or URL with the OS default handler.
 Reveals a file in Finder / Explorer / the file manager, selecting it.
 }
 
-@defproc[(single-instance? [app-id any/c]) boolean?]{
+@defproc[(single-instance? [app-id string?]) boolean?]{
 Adjudicates @litchar{"am I the first instance?"} without leaving files
 behind: derives a deterministic TCP port from the id and holds a listener on
 it for the process lifetime. The second instance's bind fails and gets
@@ -293,8 +296,9 @@ event means.
 @defproc[(check-update [manifest-url string?]
                         [#:current-version current string? "0.0.0"])
          (or/c #f hash?)]{
-Fetches a JSON manifest @litchar|{{"version","url","notes"}}| (5s timeout;
-HTTPS needs the @racket[openssl] collection) and compares versions
+Fetches a JSON manifest @litchar|{{"version","url","notes"}}| (5s timeout,
+2xx responses only, 1 MiB maximum body; HTTPS needs the @racket[openssl]
+collection) and compares versions
 numerically (@litchar{"1.10"} > @litchar{"1.9"}). Returns
 @racket[(hasheq 'version _ 'url _ 'notes _ 'sha256 _)] when a newer version
 exists, @racket[#f] otherwise. The manifest may carry an optional
@@ -320,8 +324,8 @@ given).
 
 @defmodule[glaze/license]
 
-An offline license-key scheme with zero native dependencies: RSA-2048 /
-SHA-256 signatures computed by the system @racket[openssl] CLI (present on
+An offline license-key scheme with no bundled native crypto library:
+RSA-2048 / SHA-256 signatures are computed by the system @racket[openssl] CLI (present on
 macOS and Linux out of the box; Git for Windows ships it too). A license
 file is JSON claims (@racket[product], @racket[subject], optional
 @racket[expiry] and @racket[machine-id]) plus a base64 @racket[signature].
@@ -599,15 +603,18 @@ Host-header check: the server must be addressed as @litchar{127.0.0.1} /
 the DNS-rebinding hole where a malicious page resolves its own domain to
 loopback to reach the app's API; hostile origins get 403.
 
-The optional API token (@racket[#:api-token]) guards @emph{capabilities} —
+The API token (@racket[#:api-token]) guards @emph{capabilities} —
 API routes and the SSE stream (401 otherwise) — not resources: static files
 and the api.js bootstrap stay open. @racket[run-app] opens the window at a
 one-time capability URL, @litchar{/?glaze-token=...}: the server exchanges
 the token for an @litchar{HttpOnly} @litchar{glaze_token} cookie and
 redirects to the clean path (EventSource cannot set headers, but
-same-origin requests carry cookies). api.js deliberately hands out nothing,
-so a caller that can only read openly-served endpoints cannot mint
-credentials. Programmatic clients send @litchar{X-Glaze-Token}.
+same-origin requests carry cookies). @racket[run-app] enables a random token
+by default; pass @racket[#f] explicitly to opt out. The lower-level
+@racket[start-server] keeps its historical @racket[#f] default for development
+and custom server composition. api.js deliberately hands out nothing, so a
+caller that can only read openly-served endpoints cannot mint credentials.
+Programmatic clients send @litchar{X-Glaze-Token}.
 
 @bold{Honest scope:} this raises the bar against casual local callers; a
 process running as the same user can still read the token from process
