@@ -4,10 +4,9 @@
 ;; `raco distribute` so a Glaze project becomes a runnable directory (Windows)
 ;; or application bundle (macOS) with its frontend assets bundled.
 ;;
-;; The frontend (public/) is declared via define-runtime-path in the generated
-;; entry module, so raco distribute copies it next to the executable; at
-;; runtime the app resolves the directory without depending on the working
-;; directory.
+;; The user's entry module is compiled directly so normal Racket
+;; `(module+ main ...)` semantics are preserved. Frontend assets are copied
+;; into the distribution and resolved at runtime by glaze/assets.
 
 (require racket/file
          racket/list
@@ -84,14 +83,9 @@
   (define project-dir (path-only entry-abs))
   (define app-name (or name (path->string (file-name-from-path project-dir))))
 
-  ;; Generate an entry wrapper in a temp location that requires the user's
-  ;; main plus glaze, and re-exports nothing. We write it next to the entry so
-  ;; define-runtime-path for public/ resolves relative to the project.
-  (define gen-entry (build-path project-dir "glaze-build-entry.rkt"))
-  (call-with-output-file gen-entry
-                         (lambda (out) (display (entry-module-source entry-path) out))
-                         #:exists 'replace)
-
+  ;; Compile the user's actual entry module. Compiling a wrapper that merely
+  ;; required main.rkt skipped the user's `(module+ main ...)` submodule and
+  ;; could produce an executable that immediately exited with status 0.
   ;; Assemble the raco exe arguments.
   (define os (system-type 'os))
   (define out-exe-name
@@ -117,10 +111,9 @@
                   [(macosx) (list "--icns" (path->string icon-path))]
                   [else '()])
                 '())
-            (list "-o" (path->string out-exe-path) (path->string gen-entry))))
+            (list "-o" (path->string out-exe-path) (path->string entry-abs))))
 
   (unless (apply system* (find-racket-bin) exe-args)
-    (delete-the-generated-entry gen-entry)
     (error 'build-app "raco exe failed"))
 
   ;; raco exe emits a read-only launcher; `raco distribute` needs to rewrite
@@ -135,12 +128,10 @@
   ;; produce a consistent layout across platforms.
   (define dist-args (list "distribute" (path->string out-dir-path) (path->string out-exe-path)))
   (unless (apply system* (find-racket-bin) dist-args)
-    (delete-the-generated-entry gen-entry)
     (error 'build-app "raco distribute failed"))
 
-  ;; Clean up the generated entry and the standalone exe copy (distribute has
-  ;; its own copy inside out-dir).
-  (delete-the-generated-entry gen-entry)
+  ;; Clean up the standalone exe copy (distribute has its own copy inside
+  ;; out-dir).
   (when (file-exists? out-exe-path)
     (delete-file out-exe-path))
 
@@ -153,9 +144,9 @@
 
   ;; Bundle the project's public/ next to the distribution so the packaged
   ;; app can serve its frontend. On macOS the assets go inside the .app bundle
-  ;; Resources; elsewhere they sit beside the executable. The generated entry
-  ;; sets current-directory to the executable's dir at runtime so the user's
-  ;; relative #:public-dir "public" resolves to this copy.
+  ;; Resources; elsewhere they sit beside the executable. glaze/assets
+  ;; resolves a relative #:public-dir against these packaged locations without
+  ;; changing the process current directory.
   (copy-public-into-dist project-dir out-dir-path app-name os)
 
   ;; macOS post-processing: customize the bundle's Info.plist if produced.
