@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require rackunit
+         glaze/app
          (submod glaze/app test-support))
 
 ;; shutdown is part of run-app's returned lifecycle contract: callers are free
@@ -42,3 +43,18 @@
 (check-not-exn retryable-shutdown)
 (retryable-shutdown)
 (check-equal? attempts 2 "successful retry becomes the final shutdown")
+
+
+;; Public lifecycle arguments fail before any server/window side effects.
+(check-exn exn:fail:contract?
+           (lambda () (run-app #:port 0))
+           "port zero is rejected")
+(check-exn exn:fail:contract?
+           (lambda () (run-app #:width 0))
+           "non-positive window width is rejected")
+(check-exn exn:fail:contract?
+           (lambda () (run-app #:api-token 'not-a-token))
+           "invalid api-token mode is rejected")
+(check-exn exn:fail:contract?
+           (lambda () (run-app #:on-ready 42))
+           "on-ready must be a procedure")
