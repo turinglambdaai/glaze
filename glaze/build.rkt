@@ -22,12 +22,17 @@
 
 ;; ---- packaging input hygiene ----
 
+(define invalid-app-name-chars
+  (list #\< #\> #\: #\" #\/ #\\ #\| #\? #\*))
+
 (define (valid-app-name? s)
   (and (string? s)
        (non-empty-string? s)
        (not (member s '("." "..")))
-       (not (regexp-match? #px"[\\x00-\\x1F<>:\"/\\\\|?*]" s))
-       (not (regexp-match? #px"[ .]$" s))))
+       (for/and ([c (in-string s)])
+         (and (>= (char->integer c) 32)
+              (not (member c invalid-app-name-chars))))
+       (not (member (string-ref s (sub1 (string-length s))) '(#\space #\.)))))
 
 (define (valid-url-scheme? s)
   (and (string? s) (regexp-match? #px"^[a-z][a-z0-9+.-]*$" s)))
