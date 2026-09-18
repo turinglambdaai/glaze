@@ -54,6 +54,33 @@
   (check-equal? (ensure-url-scheme! "glaze-test-scheme") 'build-time
                 "macOS defers registration to the packaged Info.plist"))
 
+(when (eq? (system-type 'os) 'unix)
+  (define tmp-data (make-temporary-file "glaze-deeplink-~a" 'directory))
+  (define old-data (getenv "XDG_DATA_HOME"))
+  (define old-path (getenv "PATH"))
+  (dynamic-wind
+    (lambda ()
+      (putenv "XDG_DATA_HOME" (path->string tmp-data))
+      ;; Keep the test a pure file-write exercise; do not let xdg-mime modify
+      ;; the runner's desktop defaults.
+      (putenv "PATH" ""))
+    (lambda ()
+      (check-equal?
+       (ensure-url-scheme! "glaze-test-scheme" #:app-name "Glaze\nInjected=bad")
+       'desktop
+       "Linux deep-link registration follows the documented symbol contract")
+      (define desktop
+        (build-path tmp-data "applications" "glaze-glaze-test-scheme.desktop"))
+      (define text (file->string desktop))
+      (check-true (string-contains? text "Name=Glaze\\nInjected=bad")
+                  "desktop entry escapes newlines in app name")
+      (check-false (string-contains? text (string-append "Name=Glaze" "\n" "Injected=bad"))
+                   "desktop entry contains no injected key"))
+    (lambda ()
+      (putenv "XDG_DATA_HOME" old-data)
+      (putenv "PATH" old-path)
+      (delete-directory/files tmp-data))))
+
 ;; ---- auto-launch state queries ----
 
 (define state (auto-launch-enabled? "glaze-api-test"))
