@@ -292,23 +292,35 @@
 (define (generate-api-client api-routes)
   (define entries
     (for/list ([r (in-list api-routes)])
-      (define method (route-method r))
+      (define method-str (symbol->string (route-method r)))
       (define segments (route-segments r))
+      ;; Generated JavaScript uses positional internal parameter names rather
+      ;; than route parameter text. A route like :user-id must not produce an
+      ;; illegal JS identifier such as `function(user-id, ...)`.
+      (define param-count
+        (for/sum ([seg (in-list segments)]) (if (param? seg) 1 0)))
       (define args
-        (for/list ([seg (in-list segments)] #:when (param? seg))
-          (param-id seg)))
+        (append (for/list ([i (in-range param-count)]) (format "p~a" i))
+                '("body")))
+      (define next-param 0)
+      (define url-pieces
+        (for/list ([seg (in-list segments)])
+          (cond
+            [(param? seg)
+             (define i next-param)
+             (set! next-param (add1 next-param))
+             (format "encodeURIComponent(p~a)" i)]
+            [else
+             ;; jsexpr->string gives us a correctly escaped JS string literal.
+             (jsexpr->string seg)])))
       (define url-expr
-        (string-join
-         (for/list ([seg (in-list segments)])
-           (if (param? seg)
-               (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
-               seg))
-         "/"))
-      (define method-str (symbol->string method))
-      (format "  ~a: function(~a) { return glaze.call('~a', '~a', ~a); },"
-              (route->js-name segments)
-              (string-join (append args '("body")) ", ")
-              method-str
+        (if (null? url-pieces)
+            "\"\""
+            (string-join url-pieces " + '/' + ")))
+      (format "  ~a: function(~a) { return glaze.call(~a, ~a, ~a); },"
+              (jsexpr->string (route->js-name segments))
+              (string-join args ", ")
+              (jsexpr->string method-str)
               url-expr
               (if (string=? method-str "GET") "null" "body"))))
   (string-append
@@ -354,7 +366,7 @@
   (apply string-append
          (for/list ([seg (in-list drop-api)] [i (in-naturals)])
            (cond
-             [(param? seg) (string-titlecase (param-id seg))]
+             [(param? seg) (js-camel (param-id seg) #f)]
              [(zero? i) (js-camel seg #t)]
              [else (js-camel seg #f)]))))
 
