@@ -126,6 +126,30 @@
 
 ;; ---- Linux (autostart desktop entry) ----
 
+(define (desktop-value-escape s)
+  ;; Desktop Entry string values use backslash escapes for control
+  ;; characters. Prevent a user-controlled app name from injecting keys.
+  (apply string-append
+         (for/list ([c (in-string s)])
+           (case c
+             [(#\\) "\\\\"]
+             [(#\newline) "\\n"]
+             [(#\return) "\\r"]
+             [(#\tab) "\\t"]
+             [else (string c)]))))
+
+(define (desktop-exec-quote s)
+  ;; Exec= has its own quoting rules. Inside double quotes, escape characters
+  ;; with special meaning so an executable path remains one literal argv[0].
+  (string-append
+   "\""
+   (apply string-append
+          (for/list ([c (in-string s)])
+            (if (member c '(#\\ #\" #\` #\$))
+                (string #\\ c)
+                (string c))))
+   "\""))
+
 (define (lin-desktop-path name)
   (define config-dir
     (or (getenv "XDG_CONFIG_HOME")
@@ -149,8 +173,10 @@
         (make-directory* (path-only p))
         (call-with-output-file p
           (lambda (o)
-            (fprintf o "[Desktop Entry]\nType=Application\nName=~a\nExec=\"~a\"\nX-GNOME-Autostart-enabled=true\n"
-                     name (path->string (find-system-path 'run-file))))
+            (fprintf o "[Desktop Entry]\nType=Application\nName=~a\nExec=~a\nX-GNOME-Autostart-enabled=true\n"
+                     (desktop-value-escape name)
+                     (desktop-exec-quote
+                      (path->string (find-system-path 'run-file)))))
           #:exists 'replace))
       (when (file-exists? p)
         (delete-file p)))
@@ -162,6 +188,13 @@
 ;; bundle registers itself (name is informational); on Windows `name` is the
 ;; Run-key value name; on Linux it names the autostart entry.
 (define (auto-launch-set! name enabled?)
+  (unless (and (string? name) (non-empty-string? name))
+    (raise-argument-error 'auto-launch-set! "non-empty-string?" name))
+  (unless (boolean? enabled?)
+    (raise-argument-error 'auto-launch-set! "boolean?" enabled?))
+  (when (and (eq? (system-type 'os) 'unix)
+             (zero? (string-length (safe-name name))))
+    (error 'auto-launch-set! "name has no characters usable in a desktop filename"))
   (case (system-type 'os)
     [(macosx) (mac-set! enabled?)]
     [(windows) (win-set! name enabled?)]
@@ -171,6 +204,8 @@
 ;; ('requires-approval on macOS, 'not-registered); #f also when the host
 ;; cannot know (bare-execute on macOS 12-).
 (define (auto-launch-enabled? name)
+  (unless (and (string? name) (non-empty-string? name))
+    (raise-argument-error 'auto-launch-enabled? "non-empty-string?" name))
   (case (system-type 'os)
     [(macosx) (mac-enabled?)]
     [(windows) (win-enabled? name)]
