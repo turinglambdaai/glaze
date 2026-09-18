@@ -117,6 +117,9 @@ jobs:
           dotnet tool install --global wix
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
+      - name: Verify packaged entry executes
+        run: racket scripts/package-entry-smoke.rkt
+
       - name: Scaffold and build a sample app
         shell: bash
         run: |
