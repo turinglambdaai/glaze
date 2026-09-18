@@ -26,6 +26,7 @@ Build desktop apps with Racket backend and web frontend.
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
           [#:fallback-browser? fallback-browser? boolean? #t]
+          [#:background-active? background-active? boolean? #f]
           [#:events events (or/c #f event-bus?) #f]
           [#:api-token api-token (or/c #f string? #t) #t]
           [#:on-close on-close (-> any) (lambda () (void))]
@@ -544,6 +545,7 @@ returns @racket[#f] so callers can fall back to @racket[open-browser].
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
           [#:devtools? devtools? boolean? #f]
+          [#:background-active? background-active? boolean? #f]
           [#:on-close on-close (-> any) (lambda () (void))]
           [#:fallback-browser? fallback-browser? boolean? #f])
          (or/c webview? #f)]{
@@ -551,7 +553,12 @@ Opens the window and loads @racket[url]. @racket[on-close] runs when the
 window closes (programmatic @racket[webview-close] or the user closing it).
 @racket[#:devtools?] opens the platform inspector (macOS: inspectable,
 13+; Windows: @litchar{OpenDevToolsWindow}; Linux: WebKitGTK inspector).
-Returns @racket[#f] when the backend is unavailable; with
+On macOS 14+, WebKit inactive-view suspension is disabled for Glaze windows.
+For monitoring applications that must keep timers active while backgrounded,
+@racket[#:background-active? #t] additionally uses the public
+@racket[NSProcessInfo] activity API to suppress App Nap while the window is
+alive; it is opt-in because it can increase power use. Other backends accept
+the option as a portable no-op. Returns @racket[#f] when the backend is unavailable; with
 @racket[#:fallback-browser?] the system browser is opened instead.
 @racket[open-webview] is a synonym.
 }
