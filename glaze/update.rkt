@@ -134,7 +134,7 @@
          (define m (regexp-match #px"^([0-9a-fA-F]{64})\\b" (get-output-string out)))
          (and (zero? code)
               m
-              (string-ci=? (second m) expected-hex))))))
+              (string-ci=? (second m) expected-hex)))))
 
 ;; Numeric dotted comparison: "1.10.0" > "1.9.2"; missing segments count 0.
 (define (newer-version? candidate current)
