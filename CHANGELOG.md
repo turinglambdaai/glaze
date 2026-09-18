@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `run-app` now enables a random API capability token by default; pass
+  `#:api-token #f` explicitly for an intentionally open local API.
+- Update checks are non-blocking from the application lifecycle and enforce a
+  five-second fetch timeout, 2xx status, and a 1 MiB manifest limit.
+- `raco glaze init` scaffolds the recommended `run-app` / `(require glaze)`
+  entry and refuses to overwrite non-empty project directories.
+
+### Fixed
+- Packaging now compiles the user's real entry module, preserving
+  `(module+ main ...)` execution instead of producing launchers that could
+  exit successfully without running the application.
+- Static-file serving rejects traversal outside `public/`, including resolved
+  symlinks, and Host validation correctly handles bracketed IPv6 loopback.
+- API handler exceptions are reported to the trusted error callback but no
+  longer leak arbitrary exception text in 500 responses.
+- Generated JavaScript API bindings safely escape route segments and no longer
+  use route parameter text as raw JavaScript identifiers.
+- Shutdown is idempotent, single-instance listeners are retained for process
+  lifetime with deterministic cross-process ports, and tray operations dispatch
+  from each tray handle rather than process-global fallback state.
+
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
