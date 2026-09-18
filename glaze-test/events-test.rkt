@@ -113,3 +113,17 @@
 (check-true (string-contains? sse-text "\"msg\":\"world\"") "SSE payload delivered")
 
 (delete-directory/files dir)
+
+
+;; ---- event input hardening ----
+(let ()
+  (define bus (make-event-bus))
+  (check-exn exn:fail:contract?
+             (lambda () (bus-broadcast! bus "bad\nevent" (hasheq 'ok #t)))
+             "SSE event names cannot inject new protocol lines")
+  (check-exn exn:fail:contract?
+             (lambda () (bus-broadcast! bus 'not-json (lambda () #t)))
+             "event payload must be JSON-serializable")
+  (check-exn exn:fail:contract?
+             (lambda () (bus-wait (bus-subscribe! bus) -1))
+             "event wait timeout must be nonnegative"))
