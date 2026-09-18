@@ -38,7 +38,8 @@
 (define (start-server-on-free-port #:public-dir public-dir
                                     #:api api-routes
                                     #:events [event-bus #f]
-                                    #:api-token [api-token #t])
+                                    #:api-token [api-token #f]
+                                    #:bootstrap-token [bootstrap-token #f])
   (let loop ([attempts 0])
     (define candidate (+ 20000 (random 45000)))
     (with-handlers ([exn:fail:network? (lambda (e)
@@ -49,7 +50,8 @@
                     #:public-dir public-dir
                     #:api api-routes
                     #:events event-bus
-                    #:api-token api-token))))
+                    #:api-token api-token
+                    #:bootstrap-token bootstrap-token))))
 
 ;; Serialize shutdown and execute the underlying server shutdown at most once.
 ;; The previous implementation used call-with-semaphore but did not remember
@@ -83,7 +85,7 @@
                  #:fallback-browser? [fallback? #t]
                  #:background-active? [background-active? #f]
                  #:events [event-bus #f]
-                 #:api-token [api-token #f]
+                 #:api-token [api-token #t]
                  #:on-close [user-on-close (lambda () (void))]
                  #:on-error [on-error #f]
                  #:check-update [check-update #f]
@@ -120,24 +122,28 @@
       [(eq? api-token #t) (make-api-token)]
       [(string? api-token) api-token]
       [else #f]))
+  (define bootstrap-token (and token (make-api-token)))
   (define-values (actual-port raw-shutdown)
     (if port
         (start-server #:port port
                       #:public-dir public-dir
                       #:api api-routes
                       #:events event-bus
-                      #:api-token token)
+                      #:api-token token
+                      #:bootstrap-token bootstrap-token)
         (start-server-on-free-port #:public-dir public-dir
                                    #:api api-routes
                                    #:events event-bus
-                                   #:api-token token)))
+                                   #:api-token token
+                                   #:bootstrap-token bootstrap-token)))
   (define url (format "http://127.0.0.1:~a/" actual-port))
-  ;; Capability URL: the one-time ?glaze-token= bootstrap exchanges the token
-  ;; for an HttpOnly cookie and redirects to the clean URL. Without it the
-  ;; page would have no way to receive the token (api.js deliberately no
-  ;; longer hands it out); programmatic clients use the X-Glaze-Token header.
+  ;; A short-lived bootstrap nonce, distinct from the API token, is carried in
+  ;; the initial URL exactly once. The server consumes it and mints the
+  ;; HttpOnly API-token cookie, then redirects to the clean URL.
   (define open-url
-    (if token (format "~a?glaze-token=~a" url token) url))
+    (if bootstrap-token
+        (format "~a?glaze-token=~a" url bootstrap-token)
+        url))
   (define shutdown (make-idempotent-shutdown raw-shutdown))
   (define closed (make-semaphore 0))
   (define active-wv #f)
