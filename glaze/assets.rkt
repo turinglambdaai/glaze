@@ -44,8 +44,15 @@
     [(complete-path? p) (simplify-path p #f)]
     [else
      (or (for/or ([root (in-list (runtime-asset-roots))])
-           (define candidate (simplify-path (build-path root p) #f))
-           (and (directory-exists? candidate) candidate))
+           ;; Windows has root-relative paths such as /tmp: they are not
+           ;; complete paths, but they also cannot be appended to another
+           ;; base path. Treat an incompatible candidate root as a miss and
+           ;; let path->complete-path below resolve it against the current
+           ;; drive instead of leaking build-path's contract exception.
+           (define candidate
+             (with-handlers ([exn:fail? (lambda (e) #f)])
+               (simplify-path (build-path root p) #f)))
+           (and candidate (directory-exists? candidate) candidate))
          (simplify-path (path->complete-path p (current-directory)) #f))]))
 
 ;; The default embedded public assets directory. Declaring it here with
