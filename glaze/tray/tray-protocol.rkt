@@ -1,12 +1,8 @@
 #lang racket/base
 
-;; Platform-agnostic menu/tray protocol: menu data structures and an
-;; id-allocator for mapping native menu ids back to Racket callbacks.
-;; Platform backends translate these structs into native menus (Win32
-;; TrackPopupMenu / menu bar, NSMenu, GtkMenu) and invoke the matching
-;; callback when a menu id fires.
-
-(require racket/contract)
+;; Platform-agnostic menu/tray protocol. Platform backends translate these
+;; values into Win32, AppKit, or GTK menu objects; malformed values therefore
+;; need to be rejected here, before they reach native FFI.
 
 (provide (struct-out menu-item)
          make-menu-item
@@ -21,9 +17,6 @@
          id-allocator-lookup
          id-allocator-clear!)
 
-;; A menu item. Separators have label #f and id #f. Normal items carry a label,
-;; a stable id (string, user-provided for stable dispatch) and an action thunk.
-;; `enabled?` and `checked?` are hints the backend may honor when supported.
 (struct menu-item (label id action enabled? checked? accel) #:transparent)
 
 (define (make-menu-item label
@@ -32,6 +25,18 @@
                         #:enabled? [enabled? #t]
                         #:checked? [checked? #f]
                         #:accel [accel #f])
+  (unless (string? label)
+    (raise-argument-error 'make-menu-item "string?" label))
+  (unless (string? id)
+    (raise-argument-error 'make-menu-item "string?" id))
+  (unless (and (procedure? action) (procedure-arity-includes? action 0))
+    (raise-argument-error 'make-menu-item "procedure accepting zero arguments" action))
+  (unless (boolean? enabled?)
+    (raise-argument-error 'make-menu-item "boolean?" enabled?))
+  (unless (boolean? checked?)
+    (raise-argument-error 'make-menu-item "boolean?" checked?))
+  (unless (or (not accel) (string? accel))
+    (raise-argument-error 'make-menu-item "(or/c #f string?)" accel))
   (menu-item label id action enabled? checked? accel))
 
 (define (menu-separator)
@@ -40,41 +45,57 @@
 (define (menu-separator? mi)
   (and (menu-item? mi) (not (menu-item-label mi))))
 
-;; A top-level menu (menubar title + its entries) for menu bars. `items`
-;; holds menu-item? values; a menu bar is a list of `menu?` values.
 (struct menu (title items) #:transparent)
 
 (define (make-menu title items)
+  (unless (string? title)
+    (raise-argument-error 'make-menu "string?" title))
+  (unless (and (list? items) (andmap menu-item? items))
+    (raise-argument-error 'make-menu "(listof menu-item?)" items))
   (menu title items))
 
-;; Id allocator: assigns increasing positive integers as native menu ids and
-;; keeps a hash from id -> action so the backend's message handler can dispatch.
-;; Backend ids must be positive integers that fit in the native menu id space
-;; (Win32 HMENU uses uintptr; Gtk uses gint; NSMenuItem uses tag NSInteger).
 (struct id-allocator (next-box table-sema table) #:transparent)
 
 (define (make-id-allocator)
   (id-allocator (box 1) (make-semaphore 1) (make-hash)))
 
+(define (check-allocator who a)
+  (unless (id-allocator? a)
+    (raise-argument-error who "id-allocator?" a)))
+
 (define (id-allocator-next! a)
+  (check-allocator 'id-allocator-next! a)
   (define b (id-allocator-next-box a))
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda ()
-                         (begin0 (unbox b)
-                           (set-box! b (add1 (unbox b)))))))
+  (call-with-semaphore
+   (id-allocator-table-sema a)
+   (lambda ()
+     (begin0 (unbox b)
+       (set-box! b (add1 (unbox b)))))))
 
 (define (id-allocator-register! a action)
+  (check-allocator 'id-allocator-register! a)
+  (unless (and (procedure? action) (procedure-arity-includes? action 0))
+    (raise-argument-error 'id-allocator-register!
+                          "procedure accepting zero arguments"
+                          action))
   (define id (id-allocator-next! a))
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda () (hash-set! (id-allocator-table a) id action)))
+  (call-with-semaphore
+   (id-allocator-table-sema a)
+   (lambda () (hash-set! (id-allocator-table a) id action)))
   id)
 
 (define (id-allocator-lookup a id)
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda () (hash-ref (id-allocator-table a) id (lambda () #f)))))
+  (check-allocator 'id-allocator-lookup a)
+  (unless (exact-positive-integer? id)
+    (raise-argument-error 'id-allocator-lookup "exact-positive-integer?" id))
+  (call-with-semaphore
+   (id-allocator-table-sema a)
+   (lambda () (hash-ref (id-allocator-table a) id (lambda () #f)))))
 
 (define (id-allocator-clear! a)
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda ()
-                         (hash-clear! (id-allocator-table a))
-                         (set-box! (id-allocator-next-box a) 1))))
+  (check-allocator 'id-allocator-clear! a)
+  (call-with-semaphore
+   (id-allocator-table-sema a)
+   (lambda ()
+     (hash-clear! (id-allocator-table a))
+     (set-box! (id-allocator-next-box a) 1))))
