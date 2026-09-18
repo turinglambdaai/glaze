@@ -96,7 +96,11 @@
                     #:api (list (GET "api/boom"
                                      (lambda (req) (raise-user-error 'kaboom "x")))))))
   (let*-values ([(_s6 _h6 _b6) (call "/api/boom" #:port 18996)])
-    (check-true (string-contains? _s6 "500") "boom still answers 500"))
+    (check-true (string-contains? _s6 "500") "boom still answers 500")
+    (check-false (string-contains? (bytes->string/utf-8 _b6) "kaboom")
+                 "500 response does not leak handler exception text")
+    (check-true (string-contains? (bytes->string/utf-8 _b6) "internal server error")
+                "500 response uses generic client message"))
   (check-equal? (second reported) "api/boom" "reporter sees the URI")
   (check-true (string-contains? (first reported) "kaboom") "reporter sees the exn")
   (stop2))
@@ -108,6 +112,22 @@
 (check-false (newer-version? "1.0.0" "1.0.0") "equal is not newer")
 (check-true (newer-version? "2.0" "1.9.9") "shorter version pads with zeros")
 (check-false (newer-version? "1.2" "1.2.1") "older is not newer")
+
+;; SHA verification accepts both path and string path inputs and rejects an
+;; invalid digest shape before invoking openssl.
+(define hash-file (make-temporary-file "glaze-sha-test-~a"))
+(call-with-output-file hash-file
+  (lambda (o) (display "abc" o))
+  #:exists 'replace)
+(when (find-executable-path "openssl" #f)
+  (check-true
+   (verify-file-sha256
+    (path->string hash-file)
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+   "sha256 verifier accepts string paths"))
+(check-false (verify-file-sha256 hash-file "not-a-digest")
+             "sha256 verifier rejects malformed digest")
+(delete-file hash-file)
 
 (define dir (make-temporary-file "upd-~a" 'directory))
 (call-with-output-file (build-path dir "manifest.json")
