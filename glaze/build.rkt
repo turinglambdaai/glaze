@@ -372,7 +372,7 @@
          (call-with-output-file (build-path appdir (string-append app-name ".desktop"))
            (lambda (out)
              (fprintf out "[Desktop Entry]\nType=Application\nName=~a\nExec=AppRun\nIcon=glaze-app\nTerminal=false\nCategories=Utility;\n"
-                      (xml-escape app-name)))
+                      app-name))
            #:exists 'replace)
          ;; appimagetool requires an icon named by the Desktop Entry.
          (call-with-output-file (build-path appdir "glaze-app.svg")
@@ -527,9 +527,9 @@ NSI
    "               (and c (directory-exists? (build-path c \"public\")) c))])\n"
    "  (when (and pick (not (directory-exists? (build-path (current-directory) \"public\"))))\n"
    "    (current-directory pick)))\n"
-   (format "(dynamic-require \\"~a\\" #f)\\n" entry-filename)
-   (format "(define main-submod '(submod \\"~a\\" main))\\n" entry-filename)
-   "(when (module-declared? main-submod #t) (dynamic-require main-submod #f))\\n"))
+   (format "(dynamic-require \"~a\" #f)\n" entry-filename)
+   (format "(define main-submod '(submod \"~a\" main))\n" entry-filename)
+   "(when (module-declared? main-submod #t) (dynamic-require main-submod #f))\n"))
 
 ;; Assemble a canonical macOS .app bundle from whatever `raco distribute`
 ;; produced. Current versions lay out <dist>/bin/<name> + <dist>/lib/; older
