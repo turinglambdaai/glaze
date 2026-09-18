@@ -38,7 +38,7 @@
 (define (start-server-on-free-port #:public-dir public-dir
                                     #:api api-routes
                                     #:events [event-bus #f]
-                                    #:api-token [api-token #f])
+                                    #:api-token [api-token #t])
   (let loop ([attempts 0])
     (define candidate (+ 20000 (random 45000)))
     (with-handlers ([exn:fail:network? (lambda (e)
@@ -88,6 +88,30 @@
                  #:check-update [check-update #f]
                  #:current-version [current-version "0.0.0"]
                  #:on-ready [on-ready (lambda (wv url) (void))])
+  (when (and port
+             (not (and (exact-integer? port) (<= 1 port 65535))))
+    (raise-argument-error 'run-app "(or/c #f exact-integer? in [1, 65535])" port))
+  (unless (string? title)
+    (raise-argument-error 'run-app "string?" title))
+  (unless (exact-positive-integer? width)
+    (raise-argument-error 'run-app "exact-positive-integer?" width))
+  (unless (exact-positive-integer? height)
+    (raise-argument-error 'run-app "exact-positive-integer?" height))
+  (unless (boolean? fallback?)
+    (raise-argument-error 'run-app "boolean?" fallback?))
+  (unless (or (eq? api-token #t) (eq? api-token #f) (string? api-token))
+    (raise-argument-error 'run-app "(or/c #t #f string?)" api-token))
+  (unless (procedure? user-on-close)
+    (raise-argument-error 'run-app "procedure?" user-on-close))
+  (unless (or (not on-error) (procedure? on-error))
+    (raise-argument-error 'run-app "(or/c #f procedure?)" on-error))
+  (unless (or (not check-update) (string? check-update))
+    (raise-argument-error 'run-app "(or/c #f string?)" check-update))
+  (unless (string? current-version)
+    (raise-argument-error 'run-app "string?" current-version))
+  (unless (procedure? on-ready)
+    (raise-argument-error 'run-app "procedure?" on-ready))
+
   (define token
     (cond
       [(eq? api-token #t) (make-api-token)]
@@ -125,16 +149,19 @@
     (parameterize ([current-api-token (or token "")]
                    [current-glaze-error-reporter
                     (or on-error (current-glaze-error-reporter))])
-      (when check-update
-        (define info (do-check-update check-update
-                                      #:current-version current-version))
-        (when info
-          (printf "[glaze] update available: ~a (current ~a) — ~a~n"
-                  (hash-ref info 'version #f)
-                  current-version
-                  (hash-ref info 'url #f))
-          (when event-bus
-            (bus-broadcast! event-bus 'update-available info))))
+      (define (start-update-check!)
+        (when check-update
+          (thread
+           (lambda ()
+             (define info
+               (do-check-update check-update #:current-version current-version))
+             (when info
+               (printf "[glaze] update available: ~a (current ~a) — ~a~n"
+                       (hash-ref info 'version #f)
+                       current-version
+                       (hash-ref info 'url #f))
+               (when event-bus
+                 (bus-broadcast! event-bus 'update-available info)))))))
       (define wv
         (open-window open-url
                      #:title title
@@ -154,6 +181,7 @@
       (cond
         [wv
          (on-ready wv url)
+         (start-update-check!)
          (sync closed)
          (shutdown)
          (values 'webview shutdown)]
@@ -161,6 +189,7 @@
          ;; Browser fallback: no window to wait on. Leave the server running so
          ;; the browser keeps working; caller decides when to exit.
          (on-ready #f url)
+         (start-update-check!)
          (printf "[glaze] app served at ~a (system-browser fallback)~n" url)
          ;; Do not print the capability token. It remains available to trusted
          ;; application callbacks through current-api-token, while the browser
