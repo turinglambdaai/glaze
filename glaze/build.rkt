@@ -197,7 +197,6 @@
   (unless (apply system* (find-racket-bin) exe-args)
     (cleanup-build-work!)
     (error 'build-app "raco exe failed"))
-
   ;; raco exe emits a read-only launcher; `raco distribute` needs to rewrite
   ;; the copy it makes (Mach-O/ELF segment patching) and fails with EACCES
   ;; on some Racket versions otherwise.
@@ -403,7 +402,7 @@
              (lambda () (putenv "APPIMAGE_EXTRACT_AND_RUN" "1"))
              (lambda ()
                (run appimagetool (path->string appdir) (path->string appimage-path)))
-             (lambda () (putenv "APPIMAGE_EXTRACT_AND_RUN" old-extract))))
+             (lambda () (putenv "APPIMAGE_EXTRACT_AND_RUN" (or old-extract "")))))
          (unless ok?
            (error 'build-app "appimagetool failed"))
          (unless (file-exists? appimage-path)
