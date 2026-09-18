@@ -40,6 +40,36 @@ jobs:
       - name: Run tests
         run: raco test glaze-test/
 
+  source-package:
+    # Release hygiene: prove the filtered source archive is independently
+    # installable. This job intentionally does not link the checkout first.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: '8.12'
+
+      - name: Create source package
+        shell: bash
+        run: |
+          cd ..
+          raco pkg create --source --format zip glaze
+          test -s glaze.zip
+
+      - name: Install source package archive
+        shell: bash
+        run: raco pkg install --auto --no-docs ../glaze.zip
+
+      - name: Verify installed facade and CLI
+        shell: bash
+        run: |
+          racket -e '(require glaze) (unless (procedure? run-app) (error "missing run-app"))'
+          raco glaze help
+
   webview-e2e:
     # Real-window WebView end-to-end on each OS: open -> load (title
     # commits) -> capture -> navigate -> close -> on-close. Windows needs
