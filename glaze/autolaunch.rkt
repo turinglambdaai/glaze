@@ -1,16 +1,9 @@
 #lang racket/base
 
 ;; Launch-at-login ("auto-launch"), three platforms:
-;;   macOS   — SMAppService mainAppService (macOS 13+; requires a packaged
-;;             .app — registration names the bundle, not the bare exe).
-;;             No permission prompt, modern replacement for the deprecated
-;;             LSSharedFileList.
-;;   Windows — a value in HKCU\Software\Microsoft\Windows\CurrentVersion\Run
-;;             (user scope, no admin).
-;;   Linux   — an autostart .desktop entry in ~/.config/autostart.
-;;
-;;   (auto-launch-set! "MyApp" #t)      ; register
-;;   (auto-launch-enabled? "MyApp")     ; => #t / #f / 'requires-approval
+;;   macOS   — SMAppService mainAppService (macOS 13+; packaged .app)
+;;   Windows — HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+;;   Linux   — ~/.config/autostart desktop entry
 
 (require ffi/unsafe
          ffi/unsafe/objc
@@ -31,7 +24,6 @@
 
 (import-class SMAppService)
 
-;; SMAppServiceStatus values (macOS 13+).
 (define SMAppServiceStatusNotRegistered 0)
 (define SMAppServiceStatusEnabled 1)
 (define SMAppServiceStatusRequiresApproval 2)
@@ -42,7 +34,6 @@
        (let ([svc (tell SMAppService mainAppService)])
          (and (cast svc _id _pointer) svc))))
 
-;; => #t / #f / 'requires-approval / 'not-registered / #f (unavailable host)
 (define (mac-enabled?)
   (define svc (mac-service))
   (and svc
@@ -65,13 +56,8 @@
      (cond
        [(eq? before #t) #t]
        [else
-        ;; NSError** is optional. Passing NULL keeps the FFI surface simple;
-        ;; status is queried afterwards to distinguish approval from failure.
         (define ok?
-          (tell #:type _bool svc
-                registerAndReturnError:
-                #:type _pointer
-                #f))
+          (tell #:type _bool svc registerAndReturnError: #:type _pointer #f))
         (define after (mac-enabled?))
         (cond
           [(eq? after #t) #t]
@@ -79,36 +65,36 @@
            (error 'auto-launch
                   "registration requires approval in System Settings > General > Login Items")]
           [ok? #t]
-          [else
-           (error 'auto-launch "SMAppService registration failed")])])]
+          [else (error 'auto-launch "SMAppService registration failed")])])]
     [else
      (cond
        [(eq? before 'not-registered) #t]
        [else
         (define ok?
-          (tell #:type _bool svc
-                unregisterAndReturnError:
-                #:type _pointer
-                #f))
+          (tell #:type _bool svc unregisterAndReturnError: #:type _pointer #f))
         (define after (mac-enabled?))
         (if (or ok? (eq? after 'not-registered))
             #t
             (error 'auto-launch "SMAppService unregistration failed"))])]))
 
-
 ;; ---- Windows (HKCU Run key via reg.exe) ----
 
 (define win-run-key "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+
+;; Registry queries use the exit status as the API and therefore keep expected
+;; "value not found" diagnostics out of application stderr.
+(define (win-reg-exit-code reg . args)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (parameterize ([current-output-port out]
+                 [current-error-port err])
+    (apply system*/exit-code reg args)))
 
 (define (win-enabled? name)
   (define reg (find-executable-path "reg.exe" #f))
   (and reg
        (with-handlers ([exn:fail? (lambda (e) #f)])
-         (define out (open-output-string))
-         (define code
-           (parameterize ([current-output-port out])
-             (system*/exit-code reg "query" win-run-key "/v" name)))
-         (and (zero? code) #t))))
+         (zero? (win-reg-exit-code reg "query" win-run-key "/v" name)))))
 
 (define (win-set! name enabled?)
   (define reg (find-executable-path "reg.exe" #f))
@@ -120,15 +106,17 @@
                                        "/d" (format "\"~a\"" exe) "/f"))
        (error 'auto-launch "failed to write Run key"))
      #t]
+    [(not (win-enabled? name))
+     ;; Disable is idempotent when no value exists.
+     #t]
     [else
-     (system*/exit-code reg "delete" win-run-key "/v" name "/f")
+     (unless (zero? (system*/exit-code reg "delete" win-run-key "/v" name "/f"))
+       (error 'auto-launch "failed to delete Run key"))
      #t]))
 
 ;; ---- Linux (autostart desktop entry) ----
 
 (define (desktop-value-escape s)
-  ;; Desktop Entry string values use backslash escapes for control
-  ;; characters. Prevent a user-controlled app name from injecting keys.
   (apply string-append
          (for/list ([c (in-string s)])
            (case c
@@ -139,8 +127,6 @@
              [else (string c)]))))
 
 (define (desktop-exec-quote s)
-  ;; Exec= has its own quoting rules. Inside double quotes, escape characters
-  ;; with special meaning so an executable path remains one literal argv[0].
   (string-append
    "\""
    (apply string-append
@@ -184,9 +170,6 @@
 
 ;; ---- public API ----
 
-;; Register / unregister `name` as a launch-at-login item. On macOS the
-;; bundle registers itself (name is informational); on Windows `name` is the
-;; Run-key value name; on Linux it names the autostart entry.
 (define (auto-launch-set! name enabled?)
   (unless (and (string? name) (non-empty-string? name))
     (raise-argument-error 'auto-launch-set! "non-empty-string?" name))
@@ -200,9 +183,6 @@
     [(windows) (win-set! name enabled?)]
     [else (lin-set! name enabled?)]))
 
-;; => #t / #f when the backend knows; other values report nuance
-;; ('requires-approval on macOS, 'not-registered); #f also when the host
-;; cannot know (bare-execute on macOS 12-).
 (define (auto-launch-enabled? name)
   (unless (and (string? name) (non-empty-string? name))
     (raise-argument-error 'auto-launch-enabled? "non-empty-string?" name))
