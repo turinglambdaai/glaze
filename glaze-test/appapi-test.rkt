@@ -19,6 +19,11 @@
          glaze/tray/tray-protocol
          glaze/webview/main)
 
+;; Racket 8.12's putenv contract accepts strings only. Restoring an absent
+;; variable to "" keeps cleanup portable across the supported Racket range.
+(define (restore-env! name old-value)
+  (putenv name (or old-value "")))
+
 ;; ---- menu protocol (shared with the tray) ----
 
 (define mi (make-menu-item "Open…" #:action (lambda () 'opened)
@@ -77,8 +82,8 @@
       (check-false (string-contains? text (string-append "Name=Glaze" "\n" "Injected=bad"))
                    "desktop entry contains no injected key"))
     (lambda ()
-      (putenv "XDG_DATA_HOME" old-data)
-      (putenv "PATH" old-path)
+      (restore-env! "XDG_DATA_HOME" old-data)
+      (restore-env! "PATH" old-path)
       (delete-directory/files tmp-data))))
 
 ;; ---- auto-launch state queries ----
@@ -91,16 +96,22 @@
 ;; overridden XDG_CONFIG_HOME so the test never touches real user state.
 (when (eq? (system-type 'os) 'unix)
   (define tmp-cfg (make-temporary-file "glaze-autostart-~a" 'directory))
-  (putenv "XDG_CONFIG_HOME" (path->string tmp-cfg))
-  (check-false (auto-launch-enabled? "glaze-api-test") "linux: not registered initially")
-  (auto-launch-set! "glaze-api-test" #t)
-  (check-true (auto-launch-enabled? "glaze-api-test") "linux: registered")
-  (check-true (string-contains? (file->string (build-path tmp-cfg "autostart" "glaze-api-test.desktop"))
-                                "X-GNOME-Autostart-enabled=true")
-              "linux: desktop entry written")
-  (auto-launch-set! "glaze-api-test" #f)
-  (check-false (auto-launch-enabled? "glaze-api-test") "linux: unregistered")
-  (delete-directory/files tmp-cfg))
+  (define old-config (getenv "XDG_CONFIG_HOME"))
+  (dynamic-wind
+    (lambda ()
+      (putenv "XDG_CONFIG_HOME" (path->string tmp-cfg)))
+    (lambda ()
+      (check-false (auto-launch-enabled? "glaze-api-test") "linux: not registered initially")
+      (auto-launch-set! "glaze-api-test" #t)
+      (check-true (auto-launch-enabled? "glaze-api-test") "linux: registered")
+      (check-true (string-contains? (file->string (build-path tmp-cfg "autostart" "glaze-api-test.desktop"))
+                                    "X-GNOME-Autostart-enabled=true")
+                  "linux: desktop entry written")
+      (auto-launch-set! "glaze-api-test" #f)
+      (check-false (auto-launch-enabled? "glaze-api-test") "linux: unregistered"))
+    (lambda ()
+      (restore-env! "XDG_CONFIG_HOME" old-config)
+      (delete-directory/files tmp-cfg))))
 
 ;; ---- macOS real-window menu e2e ----
 ;; open -> set custom menu -> poll page load -> perform the native menu
