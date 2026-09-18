@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# A PR can receive many small stabilization commits. Only the newest SHA is
+# useful; cancel stale runs so they do not consume the cross-platform runners
+# or delay feedback for the current head.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
