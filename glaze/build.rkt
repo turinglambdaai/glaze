@@ -353,6 +353,7 @@
      (define appdir (make-temporary-file "glaze-AppDir-~a" 'directory))
      (dynamic-wind
        (lambda ()
+         (when (file-exists? appimage-path) (delete-file appimage-path))
          (define payload (build-path appdir "usr" "share" app-name))
          (make-directory* (path-only payload))
          (copy-directory/files dist payload)
@@ -360,21 +361,18 @@
          (call-with-output-file app-run
            (lambda (out)
              (fprintf out "#!/bin/sh\nset -eu\nHERE=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n")
-             (fprintf out "ROOT=\"$HERE/usr/share/~a\"\n"
-                      (string-replace app-name "\"" "\\\""))
-             (fprintf out "if [ -x \"$ROOT/~a\" ]; then exec \"$ROOT/~a\" \"$@\"; fi\n"
-                      (string-replace app-name "\"" "\\\"")
-                      (string-replace app-name "\"" "\\\""))
-             (fprintf out "exec \"$ROOT/bin/~a\" \"$@\"\n"
-                      (string-replace app-name "\"" "\\\"")))
+             (fprintf out "APP_NAME=~a\n" (shell-single-quote app-name))
+             (display "ROOT=\"$HERE/usr/share/$APP_NAME\"\n" out)
+             (display "if [ -x \"$ROOT/$APP_NAME\" ]; then exec \"$ROOT/$APP_NAME\" \"$@\"; fi\n" out)
+             (display "exec \"$ROOT/bin/$APP_NAME\" \"$@\"\n" out))
            #:exists 'replace)
          (file-or-directory-permissions
           app-run
           (bitwise-ior (file-or-directory-permissions app-run 'bits) #o100))
          (call-with-output-file (build-path appdir (string-append app-name ".desktop"))
            (lambda (out)
-             (fprintf out "[Desktop Entry]\nType=Application\nName=~a\nExec=~a\nIcon=glaze-app\nTerminal=false\nCategories=Utility;\n"
-                      app-name app-name))
+             (fprintf out "[Desktop Entry]\nType=Application\nName=~a\nExec=AppRun\nIcon=glaze-app\nTerminal=false\nCategories=Utility;\n"
+                      (xml-escape app-name)))
            #:exists 'replace)
          ;; appimagetool requires an icon named by the Desktop Entry.
          (call-with-output-file (build-path appdir "glaze-app.svg")
@@ -383,9 +381,16 @@
               "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"256\" height=\"256\" viewBox=\"0 0 256 256\"><rect width=\"256\" height=\"256\" rx=\"48\" fill=\"#202020\"/><circle cx=\"128\" cy=\"128\" r=\"72\" fill=\"#f4f4f4\"/><circle cx=\"128\" cy=\"128\" r=\"38\" fill=\"#202020\"/></svg>"
               out))
            #:exists 'replace)
-         (when (file-exists? appimage-path) (delete-file appimage-path)))
+         (void))
        (lambda ()
-         (unless (run appimagetool (path->string appdir) (path->string appimage-path))
+         (define old-extract (getenv "APPIMAGE_EXTRACT_AND_RUN"))
+         (define ok?
+           (dynamic-wind
+             (lambda () (putenv "APPIMAGE_EXTRACT_AND_RUN" "1"))
+             (lambda ()
+               (run appimagetool (path->string appdir) (path->string appimage-path)))
+             (lambda () (putenv "APPIMAGE_EXTRACT_AND_RUN" old-extract))))
+         (unless ok?
            (error 'build-app "appimagetool failed"))
          (unless (file-exists? appimage-path)
            (error 'build-app "appimagetool reported success but AppImage is missing"))
@@ -461,13 +466,21 @@ NSI
     [(equal? fmt "zip")
      (cond
        [(and (eq? (system-type 'os) 'windows) (find-executable-path "powershell.exe" #f))
-        (and (run (find-executable-path "powershell.exe" #f)
-                  "-NoProfile"
-                  "-Command"
-                  (format "Compress-Archive -Path '~a\\*' -DestinationPath '~a' -Force"
-                          (path->string dist-abs)
-                          (path->string archive-path)))
-             archive-path)]
+        (define script (make-temporary-file "glaze-archive-~a.ps1"))
+        (dynamic-wind
+          (lambda ()
+            (call-with-output-file script
+              (lambda (out)
+                (display "param([string]$Source,[string]$Destination)\nCompress-Archive -Path (Join-Path $Source '*') -DestinationPath $Destination -Force\n" out))
+              #:exists 'replace))
+          (lambda ()
+            (and (run (find-executable-path "powershell.exe" #f)
+                      "-NoProfile" "-NonInteractive" "-File"
+                      (path->string script)
+                      "-Source" (path->string dist-abs)
+                      "-Destination" (path->string archive-path))
+                 archive-path))
+          (lambda () (when (file-exists? script) (delete-file script))))]
        [(find-executable-path "zip" #f)
         (and (parameterize ([current-directory parent])
                (run (find-executable-path "zip" #f) "-r" (path->string archive-path) base))
@@ -514,7 +527,9 @@ NSI
    "               (and c (directory-exists? (build-path c \"public\")) c))])\n"
    "  (when (and pick (not (directory-exists? (build-path (current-directory) \"public\"))))\n"
    "    (current-directory pick)))\n"
-   (format "(require \"~a\")\n" entry-filename)))
+   (format "(dynamic-require \\"~a\\" #f)\\n" entry-filename)
+   (format "(define main-submod '(submod \\"~a\\" main))\\n" entry-filename)
+   "(when (module-declared? main-submod #t) (dynamic-require main-submod #f))\\n"))
 
 ;; Assemble a canonical macOS .app bundle from whatever `raco distribute`
 ;; produced. Current versions lay out <dist>/bin/<name> + <dist>/lib/; older
@@ -567,18 +582,23 @@ NSI
 </dict>
 </plist>
 PLIST
-          app-name app-name app-name app-name version version
+          (xml-escape app-name)
+          (xml-escape app-name)
+          (xml-escape (bundle-id-component app-name))
+          (xml-escape app-name)
+          (xml-escape version)
+          (xml-escape version)
           (if (null? url-schemes)
               ""
               (string-append
                "\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n"
                "      <key>CFBundleURLName</key><string>io.glaze."
-               app-name
+               (xml-escape (bundle-id-component app-name))
                "</string>\n"
                "      <key>CFBundleURLSchemes</key>\n      <array>\n"
                (string-join
                 (for/list ([sc (in-list url-schemes)])
-                  (format "        <string>~a</string>\n" sc))
+                  (format "        <string>~a</string>\n" (xml-escape sc)))
                 "")
                "      </array>\n    </dict>\n  </array>"))))
 ;; Copy the project's public/ into the distribution next to the executable.
@@ -625,7 +645,8 @@ PLIST
       (with-handlers ([exn:fail? void])
         (plist-set "CFBundleName" app-name)
         (plist-set "CFBundleDisplayName" app-name)
-        (plist-set "CFBundleIdentifier" (string-append "io.glaze." app-name))
+        (plist-set "CFBundleIdentifier"
+                   (string-append "io.glaze." (bundle-id-component app-name)))
         (when version
           (plist-set "CFBundleShortVersionString" version)
           (plist-set "CFBundleVersion" version)))
