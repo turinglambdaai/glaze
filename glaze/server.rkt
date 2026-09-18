@@ -110,11 +110,14 @@
         [else (sleep 0.02) (loop)])))
   (unless accepting?
     (shutdown-server)
-    (raise-arguments-error
-     'start-server
-     (format "listener on port ~a did not start accepting within ~as"
-             port listen-wait-secs)
-     "port" port)))
+    ;; Treat a listener that failed to become reachable as a network startup
+    ;; failure so run-app's random-port allocator can retry a race rather than
+    ;; surfacing a misleading argument error.
+    (raise
+     (exn:fail:network
+      (format "start-server: listener on port ~a did not start accepting within ~as"
+              port listen-wait-secs)
+      (current-continuation-marks)))))
 
 ;; ---- Host-header validation (DNS-rebinding guard) ----
 
