@@ -374,10 +374,13 @@
                           (lambda (e) (error-response 400 (exn-message e)))]
                          [exn:fail?
                           (lambda (e)
+                            ;; Preserve diagnostic detail for the trusted
+                            ;; reporter, but never expose arbitrary exception
+                            ;; text to the WebView/browser response.
                             ((current-glaze-error-reporter)
                              e
                              (url-path-string (request-uri req)))
-                            (error-response 500 (exn-message e)))])
+                            (error-response 500 "internal server error"))])
            (define result (apply (route-handler r) req captured))
            (cond
              [(response? result) result]
