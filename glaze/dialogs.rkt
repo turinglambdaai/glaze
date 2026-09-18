@@ -3,9 +3,8 @@
 ;; Native file/folder dialogs, three platforms:
 ;;   macOS   — NSOpenPanel / NSSavePanel via objc FFI (AppKit is loaded
 ;;             explicitly; plain racket only links Foundation).
-;;   Windows — GetOpenFileNameW / GetSaveFileNameW from comdlg32 (present on
-;;             every Windows install; the Vista IFileOpenDialog COM dance
-;;             buys nicer chrome, not capability).
+;;   Windows — GetOpenFileNameW / GetSaveFileNameW from comdlg32 for files,
+;;             and SHBrowseForFolderW for directories.
 ;;   Linux   — zenity or kdialog via subprocess (the dialog front-ends of
 ;;             the desktop environments). When neither exists, opening a
 ;;             dialog RAISES — silent #f would be indistinguishable from
@@ -71,7 +70,7 @@
 (define (dialog-supported?)
   (case (system-type 'os)
     [(macosx) (and appkit #t)]
-    [(windows) (and comdlg32 #t)]
+    [(windows) (and comdlg32 shell32 #t)]
     [else (and (or (find-executable-path "zenity" #f)
                    (find-executable-path "kdialog" #f))
                #t)]))
@@ -182,7 +181,66 @@
 (define OFN_ALLOWMULTISELECT #x00000200)
 (define OFN_EXPLORER        #x00080000)
 (define OFN_OVERWRITEPROMPT #x00000002)
-(define OFN_PICKFOLDERS     #x00000020)
+
+
+;; Folder picking is not an OPENFILENAME flag. SHBrowseForFolderW returns a
+;; PIDL, which SHGetPathFromIDListW converts to a filesystem path. The PIDL is
+;; allocated with the COM task allocator and must be freed with CoTaskMemFree.
+(define shell32
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (ffi-lib "shell32")))
+(define ole32
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (ffi-lib "ole32")))
+
+(define-cstruct _BROWSEINFOW
+  ([hwndOwner _pointer]
+   [pidlRoot _pointer]
+   [pszDisplayName _pointer]
+   [lpszTitle _pointer]
+   [ulFlags _uint32]
+   [lpfn _pointer]
+   [lParam _intptr]
+   [iImage _int]))
+
+(define SHBrowseForFolderW
+  (and shell32
+       (get-ffi-obj "SHBrowseForFolderW" shell32
+                    (_fun _BROWSEINFOW-pointer -> _pointer)
+                    (lambda () #f))))
+(define SHGetPathFromIDListW
+  (and shell32
+       (get-ffi-obj "SHGetPathFromIDListW" shell32
+                    (_fun _pointer _pointer -> _bool)
+                    (lambda () #f))))
+(define CoTaskMemFree
+  (and ole32
+       (get-ffi-obj "CoTaskMemFree" ole32
+                    (_fun _pointer -> _void)
+                    (lambda () #f))))
+
+(define BIF_RETURNONLYFSDIRS #x00000001)
+
+(define (win-pick-folder title _directory)
+  (unless (and SHBrowseForFolderW SHGetPathFromIDListW)
+    (error 'pick-folder "Windows Shell folder dialog unavailable"))
+  ;; BROWSEINFO assumes MAX_PATH-sized output buffers.
+  (define display-buffer (make-bytes (* 2 260)))
+  (define path-buffer (make-bytes (* 2 32768)))
+  (define title-buffer (and title (wstr title)))
+  (define bi
+    (make-BROWSEINFOW #f #f display-buffer title-buffer
+                      BIF_RETURNONLYFSDIRS #f 0 0))
+  (define pidl (SHBrowseForFolderW bi))
+  (and pidl
+       (dynamic-wind
+         void
+         (lambda ()
+           (and (SHGetPathFromIDListW pidl path-buffer)
+                (let ([parts (wstr-parts path-buffer)])
+                  (and (pair? parts) (string->path (first parts))))))
+         (lambda ()
+           (when CoTaskMemFree (CoTaskMemFree pidl))))))
 
 (define GetOpenFileNameW
   (and comdlg32 (get-ffi-obj "GetOpenFileNameW" comdlg32
@@ -225,7 +283,6 @@
      (and directory (wstr (path->string (as-path directory))))
      (and title (wstr title))
      (bitwise-ior (if multiple? (bitwise-ior OFN_ALLOWMULTISELECT OFN_EXPLORER) 0)
-                  (if folder? OFN_PICKFOLDERS 0)
                   (if save? OFN_OVERWRITEPROMPT 0))
      0 0 #f #f #f #f #f 0 0))
   (define ok? (getter ofn))
@@ -297,7 +354,7 @@
                  [save? (list "--getsavefilename" start (kdialog-filter filters))]
                  [multiple? (list "--getopenfilename" start "--multiple" (kdialog-filter filters))]
                  [else (list "--getopenfilename" start (kdialog-filter filters))])
-               (if title (list (format "--title ~a" title)) '())))
+               (if title (list "--title" title) '())))
      (define s (run-dialog-capture kdialog args))
      (and s
           (for/list ([line (in-list (string-split s "\n"))]
@@ -341,7 +398,7 @@
   (check-support!)
   (case (system-type 'os)
     [(macosx) (unwrap-single (mac-pick title directory '() #f #t))]
-    [(windows) (unwrap-single (win-open-dialog! title directory '() #f #t #f #f))]
+    [(windows) (win-pick-folder title directory)]
     [else (unwrap-single (lin-dialog title directory '() #f #t #f #f))]))
 
 ;; Save-as dialog. #f when cancelled. The overwrite prompt is the dialog's;
