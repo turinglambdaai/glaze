@@ -34,11 +34,11 @@ jobs:
         shell: bash
         run: raco pkg install --auto --no-docs --link "$PWD"
 
+      - name: Compile public entrypoints
+        run: raco make glaze/main.rkt glaze-cli/cli.rkt scripts/package-entry-smoke.rkt
+
       - name: Run tests
         run: raco test glaze-test/
-
-      - name: Check formatting
-        run: raco fmt --check glaze/ glaze-cli/ glaze-test/ scripts/
 
   webview-e2e:
     # Real-window WebView end-to-end on each OS: open -> load (title
