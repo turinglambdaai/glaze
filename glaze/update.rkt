@@ -49,7 +49,7 @@
 
 (define (status-success? status-line)
   (and (bytes? status-line)
-       (regexp-match? #rx#"^HTTP/[0-9.]+ 2[0-9][0-9](?: |$)" status-line)))
+       (regexp-match? #px#"^HTTP/[0-9.]+ 2[0-9][0-9](?: |$)" status-line)))
 
 (define (read-limited-body in)
   (define body (read-bytes (add1 max-manifest-bytes) in))
@@ -94,7 +94,7 @@
             (lambda ()
               (and (status-success? status)
                    (read-limited-body in)))
-            (lambda () (close-input-port in))))))))
+            (lambda () (close-input-port in)))))))
 
 (define (check-update manifest-url #:current-version [current "0.0.0"])
   (define body (fetch-manifest manifest-url))
