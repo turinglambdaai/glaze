@@ -11,10 +11,18 @@
          glaze/license)
 
 (define (init-project name)
+  (unless (and (string? name) (non-empty-string? (string-trim name)))
+    (raise-argument-error 'init "non-empty-string?" name))
+  (define target (path->complete-path name))
+  (when (file-exists? target)
+    (error 'init "target exists and is a file: ~a" target))
+  (when (and (directory-exists? target)
+             (pair? (directory-list target)))
+    (error 'init "target directory is not empty: ~a" target))
   (printf "Creating Glaze project: ~a\n" name)
-  (make-directory* name)
-  (make-directory* (build-path name "public"))
-  (write-file (build-path name "main.rkt")
+  (make-directory* target)
+  (make-directory* (build-path target "public"))
+  (write-file (build-path target "main.rkt")
               (string-append "#lang racket/base\n\n"
                              "(require racket/runtime-path\n"
                              "         glaze)\n\n"
@@ -23,7 +31,7 @@
                              "  (run-app #:public-dir public\n"
                              "           #:title \"Glaze App\"))\n"))
   (write-file
-   (build-path name "public" "index.html")
+   (build-path target "public" "index.html")
    #"<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -138,10 +146,13 @@
        (loop (cddr args) name version icon entry out embed installer
              sign entitlements no-hardened ts-url notarize
              (cons (cadr args) schemes))]
+      [(member (car args)
+                '("--name" "--version" "--icon" "--entry" "--out"
+                  "--sign" "--entitlements" "--timestamp-url"
+                  "--notarize" "--url-scheme"))
+       (error 'build "missing value for option: ~a" (car args))]
       [else
-       (printf "Warning: ignoring unknown build argument: ~a\n" (car args))
-       (loop (cdr args) name version icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize schemes)])))
+       (error 'build "unknown build argument: ~a" (car args))])))
 
 (define (build-command rest)
   (define-values (name version icon entry out embed installer
@@ -311,5 +322,6 @@
      ["license" (license-command rest)]
      ["help" (print-help)]
      [_
-      (printf "Unknown command: ~a\n" cmd)
-      (print-help)])])
+      (eprintf "Unknown command: ~a\n" cmd)
+      (print-help)
+      (exit 2)])])
