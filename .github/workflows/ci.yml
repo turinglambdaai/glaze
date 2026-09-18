@@ -31,8 +31,7 @@ jobs:
         run: raco test glaze-test/
 
       - name: Check formatting
-        run: raco fmt --check glaze/ glaze-cli/ glaze-test/
-        continue-on-error: true
+        run: raco fmt --check glaze/ glaze-cli/ glaze-test/ scripts/
 
   webview-e2e:
     # Real-window WebView end-to-end on each OS: open -> load (title
@@ -146,3 +145,24 @@ jobs:
             sampleapp/dist/*.msi
             sampleapp/dist/*.dmg
             sampleapp/dist/*.AppImage
+
+  package-racket-9-3-macos:
+    # Regression coverage for the macOS/Racket 9.3 launcher failure reported
+    # in issue #1. This job executes the final packaged binary, not merely the
+    # build command.
+    runs-on: macOS-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: '9.3'
+
+      - name: Install Glaze package
+        shell: bash
+        run: raco pkg install --auto --no-docs --link "$PWD"
+
+      - name: Verify packaged entry executes
+        run: racket scripts/package-entry-smoke.rkt
