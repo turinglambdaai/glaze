@@ -1,420 +1,213 @@
 # Glaze
 
-用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，打包为桌面应用。
+一个用 Racket 构建现代桌面应用的 Lisp-native 框架。
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.7.0-C15F3C)](CHANGELOG.md)
+Glaze 让应用逻辑继续留在 Racket 中，界面使用普通 Web 技术，并通过统一 API 接入原生 WebView、系统托盘、剪贴板、通知、文件对话框和应用打包等桌面能力。
+
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [English](README.md) · **中文**
 
-<p align="center"><img src="docs/showcase.png" alt="Glaze Showcase —— 全部能力一屏尽览" width="720"></p>
+## 为什么是 Glaze
 
-## 为什么选择 Glaze？
+Racket 已经提供 `racket/gui`，Glaze 面向的是另一类桌面应用：**Web UI + Racket Runtime + 原生桌面能力**。
 
-Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 UI。Glaze 采用不同的思路：从 Racket 启动本地 Web 服务，用系统浏览器（Phase 1）或嵌入式 WebView（Phase 3）展示。
+Glaze 不是 Electron 的复制品。它不内置 Chromium，也不额外引入 Node Runtime。当前设计理念更接近 Tauri：
 
-你将获得：
+```text
+Web UI
+  |
+  | HTTP / JSON / SSE
+  v
+Racket Runtime
+  |
+  +-- WebView
+  +-- Tray
+  +-- System capabilities
+  +-- Packaging helpers
+  |
+Native OS APIs
+```
 
-- **Racket 写逻辑** —— 完整的宏系统、contracts、模式匹配
-- **Web 写界面** —— Tailwind、Svelte、React 或任何 Web 框架
-- **JSON API 桥接** —— 页面用普通 `fetch("/api/...")` 调用 Racket
+当前通过 Racket FFI 使用系统 WebView：
 
-### 横向对比
+- Windows：WebView2
+- macOS：WKWebView
+- Linux：WebKitGTK
 
-| | Glaze | Tauri | Electron | wails |
-|---|---|---|---|---|
-| 后端语言 | Racket | Rust | JS/Node | Go |
-| 原生工具链 | **无需**（纯 FFI） | Rust + cargo | 无 | Go + WebView2 依赖 |
-| 二进制体积 | 极小 | 小 | 100 MB+ | 小 |
-| 前后端桥接 | HTTP JSON 路由（`fetch`） | `invoke()` IPC | Node API | 绑定层 |
-| 无 WebView 时浏览器兜底 | **支持** | 不支持 | 不支持 | 不支持 |
-| Agent 友好的 UI 验证（title/url/截图） | **内置** | 需 WebDriver | 需 CDP | 有限 |
-| WebView 后端 | WebView2 / WKWebView / WebKitGTK | 相同 | 自带 Chromium | WebView2/WKWebView |
-
-三个平台的 WebView 后端均通过真窗口 CI e2e（open、加载、截图、导航、关闭、on-close）。剩余诚实差距：IPC 为纯 JSON 无类型层、Linux 需要桌面会话或 Xvfb。
-
-## 平台支持状态
-
-| 能力 | macOS | Windows | Linux |
-|---|---|---|---|
-| HTTP 服务器 + 浏览器 | ✅ | ✅ | ✅ |
-| 系统托盘 | ✅ | ✅ | ✅（CI 验证） |
-| JSON API 桥接 | ✅ | ✅ | ✅ |
-| 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
-| `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
-| `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
-| `#:devtools?` | ✅（inspectable，macOS 13+） | ✅（`OpenDevToolsWindow`） | ✅（WebKitGTK inspector） |
-
-原生后端不可用时，`run-app` / `open-window` 自动回退系统浏览器 —— 应用在所有平台都能跑。
-
-## 环境要求
-
-| 依赖 | 用途 |
-|------|------|
-| [Racket](https://racket-lang.org/) | 7.0 或更高版本（包含 `raco`） |
+当前前后端桥接有意保持简单：请求使用本地 HTTP JSON API，Racket 向前端推送事件使用 Server-Sent Events。完整 RPC 框架和插件系统还不是当前公共架构的一部分。
 
 ## 快速开始
 
-### 1. 安装
+安装：
 
 ```bash
 raco pkg install --auto glaze
 ```
 
-单个 Racket 包：一次安装即包含 `glaze` 库、`raco glaze` CLI 和文档（之后可用 `raco docs` 浏览）。
-
-### 2. 创建新项目
+开发仓库可以直接 link：
 
 ```bash
-raco glaze init myapp
-cd myapp
+git clone https://github.com/turinglambdaai/glaze.git
+cd glaze
+raco pkg install --auto --no-docs --link "$PWD"
 ```
 
-### 4. 运行
-
-```bash
-racket main.rkt
-```
-
-会打开一个原生窗口展示你的应用（由本地 HTTP 服务器驱动）；无 WebView 后端时自动回退系统浏览器，访问 `http://127.0.0.1:<端口>`。
-
-> 想直接从 GitHub 检出安装而不走包索引？
-> ```bash
-> git clone https://github.com/turinglambdaai/glaze.git
-> cd glaze
-> raco pkg install --auto --link "$PWD"
-> ```
-> 想参与 Glaze 开发，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## CLI 命令
-
-```bash
-raco glaze init <name>   # 创建新的 Glaze 项目
-raco glaze dev           # 启动开发服务器并自动打开浏览器
-raco glaze build         # 构建可分发包（exe + 内置资源）
-raco glaze keygen        # 生成用于许可证签名的 RSA 密钥对
-raco glaze license       # 签发 / 校验离线许可证文件
-raco glaze help          # 显示帮助
-```
-
-### `build`
-
-把 Glaze 项目打包为平台分发产物（`raco exe` + `raco distribute`），前端资源随可执行文件一起分发。macOS 产出标准 `.app` bundle，`--version` 会写入 `Info.plist`。
-
-```bash
-raco glaze build --name myapp                              # 产出 dist/myapp(.exe) + dist/lib + dist/public
-raco glaze build --name myapp --version 1.2.0 --installer  # 额外产出 msi / dmg / AppImage（缺失工具链时回落为 zip/tar.gz）
-```
-
-选项：`--name`、`--version`、`--icon <.ico/.icns>`、`--entry <path>`（默认 `main.rkt`）、`--out <dir>`（默认 `dist`）、`--embed-dlls`（Windows：单文件 exe）、`--installer`。
-
-> installer 步骤会探测本机的打包工具链（Windows 的 WiX / NSIS，macOS 的 `create-dmg` / `hdiutil`，Linux 的 `appimagetool` / `linuxdeploy`），**缺失时优雅降级**为 `.zip` / `.tar.gz` 并打印提示告知需要安装什么。
-
-### 代码签名与公证
-
-未签名的应用会被 macOS Gatekeeper 和 Windows SmartScreen 拦截。`build` 内置了平台签名器：
-
-```bash
-# macOS —— Developer ID 身份 + hardened runtime + 公证：
-raco glaze build --name myapp \
-  --sign "Developer ID Application: Acme Inc (TEAMID)" \
-  --notarize acme-notary --installer
-
-# macOS —— ad-hoc 签名（无证书，本地测试 / CI 用）：
-raco glaze build --name myapp --sign -
-
-# Windows —— signtool 按证书 SHA-1 指纹签名（带 RFC-3161 时间戳）：
-raco glaze build --name myapp --sign 40HEXCHARS --installer
-```
-
-说明：`--sign` 在 macOS 接受 codesign 身份，在 Windows 接受 `signtool` 的证书 SHA-1 指纹（40 位十六进制）或主题名。macOS 默认启用 hardened runtime（`--no-hardened-runtime` 可关；ad-hoc 身份下自动跳过——其 library validation 会拒绝应用自身的 framework）。`--notarize <keychain-profile>` 会把构建出的 dmg 提交 `notarytool` 公证并钉上票据。`--entitlements <file>`、`--timestamp-url <url>` 补齐其余场景。**签名失败会中止构建**；工具链缺失则响亮地降级并告警。
-
-### 许可证（收费应用）
-
-`glaze/license` 提供零原生依赖的离线许可证方案——RSA-2048/SHA-256 签名走系统 `openssl` CLI（三平台开箱即有）：
-
-```bash
-# 开发者侧 —— 一次性：
-raco glaze keygen --out keys               # keys/private.pem + keys/public.pem
-# 按客户签发（可选有效期与机器绑定）：
-raco glaze license sign --key keys/private.pem --product "MyApp" \
-  --subject "customer@example.com" --expiry 2027-12-31 --out app.license
-raco glaze license verify --pub keys/public.pem --product "MyApp" app.license
-```
-
-```racket
-(require glaze/license)
-
-(define r (validate-license "app.license" #:public-key "keys/public.pem" #:product "MyApp"))
-(unless (hash-ref r 'valid)
-  (error 'myapp "许可证无效：~a" (hash-ref r 'reason)))   ; expired / machine / signature ...
-
-;; 机器绑定：对系统机器标识做稳定摘要
-(issue-license ... #:machine-id (machine-id))
-```
-
-校验失败原因 (`reason`) 是稳定的标签（`missing-file`、`malformed`、`signature`、`product`、`expired`、`machine`、`openssl-unavailable`），可直接用于界面提示。诚实边界：这套方案防的是随手共享许可证——本地攻击者总能给二进制打补丁，它不是防篡改机制。
-
-### 更新包完整性
-
-`check-update` 会透传 manifest 里可选的 `"sha256"` 字段；下载完更新包后先校验再替换：
-
-```racket
-(define info (check-update manifest-url #:current-version "1.0.0"))
-;; 应用自行下载 (hash-ref info 'url) ... 然后：
-(verify-file-sha256 artifact (hash-ref info 'sha256))   ; #t / #f（#f = 无法校验）
-```
-
-## 项目结构
-
-一个新的 Glaze 项目结构如下：
-
-```
-myapp/
-├── main.rkt          # Racket 入口
-└── public/
-    └── index.html    # 前端页面
-```
-
-`main.rkt` 启动本地 HTTP 服务器，从 `public/` 目录提供静态文件并打开浏览器：
+最小应用只需要统一公共入口：
 
 ```racket
 #lang racket/base
 
+(require racket/runtime-path
+         glaze)
+
+(define-runtime-path public "public")
+
+(run-app #:public-dir public
+         #:title "Hello Glaze")
+```
+
+在 `public/` 中放置 `index.html` 后运行程序即可。完整最小示例见 [`examples/hello/`](examples/hello/)。
+
+也可以使用 CLI 创建项目：
+
+```bash
+raco glaze init myapp
+cd myapp
+racket main.rkt
+```
+
+## 已实现能力
+
+当前仓库已经包含：
+
+- 原生 WebView 窗口：生命周期、导航、标题/URL 查询、截图、窗口控制和菜单
+- 本地静态文件服务器与 SPA fallback
+- JSON API 路由和自动生成的浏览器客户端
+- Racket → 前端的 SSE 事件推送
+- 系统托盘和菜单
+- 剪贴板、通知、打开/定位文件、单实例能力
+- 文件/目录对话框、Deep Link、开机自启动辅助能力
+- `raco glaze build` 应用打包
+- 更新检查和离线许可证工具
+- 原生 WebView 不可用时的系统浏览器 fallback
+
+Glaze 本身使用 Racket 实现，原生集成主要通过 FFI；核心框架不要求用户安装 C 编译器。
+
+## 平台支持
+
+仓库 CI 使用 Racket 8.12 在 Windows、macOS、Linux 上运行测试，并在三个平台执行真实 WebView 端到端验证。Linux CI 使用 Xvfb + WebKitGTK。
+
+| 能力 | Windows | macOS | Linux |
+|---|---|---|---|
+| 本地 Server / JSON API / SSE | 支持 | 支持 | 支持 |
+| 原生 WebView | WebView2 | WKWebView | WebKitGTK |
+| 系统托盘 | 支持 | 支持 | 支持 |
+| 系统能力封装 | 支持 | 支持 | 支持 |
+| 打包流程 | 支持 | 支持 | 支持 |
+
+部分原生能力依赖操作系统组件或桌面会话。应用层不应该直接 require 某个平台 backend；不支持的能力应通过公共 dispatcher 明确失败或使用框架提供的 fallback。
+
+## 架构
+
+应用推荐只依赖 `(require glaze)`。WebView、Tray、Sys 模块在内部完成平台 backend 分发：
+
+```text
+Application
+    |
+    v
 (require glaze)
-
-(define-values (port server)
-  (start-dev-server #:public-dir "public"))
-
-(printf "Glaze app running at http://127.0.0.1:~a\n" port)
-(open-browser (format "http://127.0.0.1:~a" port))
-
-(with-handlers ([exn:break?
-                 (lambda (e)
-                   (stop-server server)
-                   (printf "Server stopped.\n"))])
-  (sync never-evt))
+Public facade: glaze/main.rkt
+    |
+    +-------------------------------+
+    |               |               |
+    v               v               v
+Runtime          Capabilities     Tooling
+app/server       webview/main     build/update
+api/events       tray/main        CLI
+                 sys/main
+    |               |
+    +-------+-------+
+            v
+Platform backends
+Windows / macOS / Linux / stub
 ```
 
-## 仓库结构
+当前目标不是为了“架构漂亮”而一次性移动全部文件，而是先稳定依赖方向、生命周期和公共 API 合约。
 
-仓库根目录即一个可安装的 Racket 包，每个顶层目录对应一个集合（collection）：
+详细设计见 [`docs/architecture.md`](docs/architecture.md)。
 
-```
-glaze/                # 仓库根 = `glaze` 包（info.rkt）
-├── glaze/            # 核心库：服务器、API 桥、webview、托盘、系统集成、打包
-├── glaze-cli/        # CLI 工具（raco glaze init / dev / build）
-├── glaze-doc/        # 文档（Scribble）
-├── glaze-test/       # 测试套件
-├── examples/         # 可运行示例
-└── scripts/          # CI 辅助脚本（webview e2e）
-```
+## 包与 Collection
 
-## API
+仓库根目录是一个 `collection 'multi` 的可安装 Racket package：
 
-### `run-app`
+- `glaze/` —— 框架核心和公共 facade
+- `glaze-cli/` —— `raco glaze` 命令
+- `glaze-doc/` —— Scribble API 文档
+- `glaze-test/` —— 测试套件
+- `examples/` —— 可运行示例
+- `scripts/` —— CI 和验证脚本
 
-一键入口：自动挑空闲端口、启动服务器（静态 + JSON API）、打开原生 WebView 窗口、阻塞到窗口关闭。
-
-```racket
-(run-app #:public-dir "public"
-         #:api (list (GET "api/ping" ...)))
-;; webview 路径：窗口关闭 -> 服务器停止 -> (values 'webview shutdown)
-;; 浏览器回退（无原生后端）：打开浏览器 -> (values 'browser shutdown)
-```
-
-### `start-server` / `start-dev-server`
-
-启动本地 HTTP 服务器：静态文件 + SPA 回退 + 可选 JSON API 路由。`start-dev-server` 为兼容别名。
-
-```racket
-(start-server #:port 8080
-              #:public-dir "public"
-              #:api (list (GET "api/ping" (lambda (req) (hasheq 'pong #t)))))
-;; 返回 (values port shutdown-proc)；返回前会确认端口已在监听
-```
-
-### `stop-server`
-
-停止服务器。
-
-```racket
-(stop-server shutdown-proc)
-```
-
-### `open-browser`
-
-用系统默认浏览器打开 URL（跨平台：Windows、macOS、Linux）。
-
-```racket
-(open-browser "http://127.0.0.1:8080")
-```
-
-## JavaScript 桥接
-
-前端用普通 `fetch("/api/...")` 调 Racket —— 这是 Glaze 对 Tauri `invoke()` 的回答。同一套代码在嵌入式 WebView、系统浏览器回退、dev 调试（可 curl）下都工作。路由是普通值：
-
-```racket
-(require glaze)
-
-(GET  "api/ping"            (lambda (req) (hasheq 'pong #t)))
-(POST "api/items/:id/bump"  (lambda (req id) (hasheq 'id id 'bumped #t)))
-(POST "api/echo"            (lambda (req)
-                              (define body (request-json-body req))
-                              (hasheq 'echo body)))
-```
-
-- Handler 收到 request 加捕获的 `:param`；返回 jsexpr（自动包装为 JSON 200）或完整 response
-- `request-json-body` 解析 JSON body —— 注意 Racket jsexpr 把 JSON 对象键解析为 **symbol**（`(hash-ref body 'delta)`）
-- handler 抛异常会变成 500 JSON 错误，不会断掉连接
-- 未匹配的请求回落到静态文件（SPA `index.html` 回退）
-
-页面侧：
-
-```js
-const s = await fetch('/api/counter/bump',
-  {method:'POST', headers:{'Content-Type':'application/json'},
-   body: JSON.stringify({delta: 5})}).then(r => r.json());
-```
-
-### 一处声明，三重产物 —— `define-api-routes`
-
-```racket
-(define-api-routes api
-  [(POST "api/counter/bump")
-   (bump [delta exact-nonnegative-integer? 1])   ; 必填+校验，或缺省
-   (hasheq 'count (add1 delta))])
-```
-
-一个子句同时定义：Racket 过程（`bump`）、路由（坏输入 → 报参数名的 400；过程异常 → 500）、
-JS 客户端入口 —— `/glaze/api.js` 自动提供 `glaze.api.counterBump({delta: 5})`、
-`glaze.call(method, path, body)` 和 `glaze.on(name, fn)`。
-
-### 后端 → 前端推送（SSE）
-
-```racket
-(define bus (make-event-bus))
-(start-server ... #:events bus)
-(bus-broadcast! bus 'count-changed (hasheq 'count 42))   ; 任意线程
-```
-
-```js
-glaze.on('count-changed', s => render(s.count));
-```
-
-页面也可以直接 `new EventSource('/glaze/events')`。浏览器回退同样可用 —— 同源、无额外端口。
-
-### 安全
-
-- 仅服务 Host 为 `127.0.0.1` / `localhost` / `[::1]` 的请求（DNS rebinding 防护，恶意源 403）。
-- API handler 永不断连接 —— 参数问题 400 JSON，过程异常 500 JSON（并送达 `run-app` 的
-  `#:on-error`，接崩溃上报钩子）。
-- 可选 API token（`#:api-token`）：保护 API 路由与 SSE 流（否则 401）。应用窗口打开一次性的
-  `?glaze-token=` 引导 URL，把 token 换成 `HttpOnly` cookie（api.js 有意不发放任何凭据）；
-  程序化客户端发 `X-Glaze-Token`。诚实边界：对随手本机调用者提高门槛 —— 同用户进程仍可从
-  进程内存读取 token。
-- 更新检查：`run-app #:check-update <清单url> #:current-version "1.0.0"` 拉取
-  `{"version","url","notes"}`，stderr 提示并广播 `update-available`。自我替换由应用决策。
-
-完整可运行的应用见 [`examples/counter/`](examples/counter/)。
-
-## 系统集成（`glaze/sys`）
-
-```racket
-(require glaze/sys)
-(clipboard-set! "hello")            ; (clipboard-get)
-(notify! "下载完成" "report.pdf 已就绪")
-(open-path "/Users/me/report.pdf")  ; 默认处理器打开
-(reveal-path "/Users/me/report.pdf"); Finder/资源管理器中定位
-(unless (single-instance? "com.me.app") (exit 0))
-```
-
-桌面通知三平台可用（osascript / notify-send / WinRT toast 经 PowerShell）。
-
-窗口控制（`glaze/webview`）：`webview-set-title!`、`webview-set-size!`、
-`webview-set-fullscreen!`。
-
-## 系统托盘
-
-Glaze 提供跨平台的系统托盘，让你的应用驻留在通知区 / 菜单栏，带右键（macOS 为左键）菜单。后端按平台选择——纯 Racket FFI，无需编译任何原生代码：
-
-- **Windows** — 通过 `ffi/unsafe` 调 `Shell_NotifyIconW`
-- **macOS** — 通过 `ffi/unsafe/objc` 调 `NSStatusItem` / `NSMenu`
-- **Linux** — 通过 `ffi/unsafe` 调 `libayatana-appindicator` + `libgtk-3`
-
-运行时若某平台的原生库不可用，托盘会静默降级为空操作，应用的其余部分照常运行。
-
-```racket
-(require glaze)
-
-(define t
-  (make-tray #:icon #f
-             #:tooltip "我的 Glaze 应用"
-             #:menu (list (make-menu-item "退出"
-                                          #:action (lambda () (exit 0))))))
-(tray-set-tooltip! t "运行中")
-;; ...稍后
-(tray-close t)
-```
-
-> **macOS 注意**：纯菜单栏应用（不显示 Dock 图标）需要构建为 `.app` bundle 并设置 `LSUIElement`——`raco glaze build` 会为你配置好。
-
-## 应用平台 API
-
-除服务器/webview 核心外，Glaze 内置商业桌面应用所需的周边能力：
-
-```racket
-(require glaze)
-
-;; ---- 原生文件对话框（NSOpenPanel / comdlg32 / zenity-kdialog）----
-(define f (pick-file #:title "打开报告" #:filters '(("报告" "*.rep" "*.csv"))))
-(define dir (pick-folder #:title "选择目录"))
-(define out (save-file-dialog #:title "另存为" #:default-name "out.rep"))
-;; #f = 用户取消；可先用 (dialog-supported?) 做优雅降级判断。
-
-;; ---- 菜单栏（声明式，三平台）----
-(webview-set-menu! wv
-  (list (make-menu "文件"
-                   (list (make-menu-item "打开…" #:accel "CmdOrCtrl+O"
-                                         #:action open-doc)
-                         menu-separator
-                         (make-menu-item "退出" #:action (lambda () (exit 0)))))))
-;; macOS 快捷键真实生效；Windows/Linux 目前仅展示（v1）。
-
-;; ---- 深度链接（myapp://…）----
-(ensure-url-scheme! "myapp")            ; Windows 注册表 / Linux xdg；
-                                        ; macOS 在构建时 --url-scheme 声明
-
-;; ---- 开机自启 ----
-(auto-launch-set! "MyApp" #t)
-(auto-launch-enabled? "MyApp")
-
-;; ---- 多窗口 ----
-(for ([w (all-webviews)]) (webview-focus! w))
-(wait-for-webviews)                      ; 阻塞直到所有窗口关闭
-```
+`glaze/webview/`、`glaze/tray/`、`glaze/sys/` 内部包含公共 dispatcher 和平台实现。普通应用应优先 `(require glaze)`，而不是依赖 `webview-windows.rkt`、`tray-macos.rkt`、`sys-linux.rkt` 等实现文件。
 
 ## 示例
 
-| 示例 | 展示内容 |
-|---|---|
-| [`examples/showcase/`](examples/showcase/) | **综合演示（推荐先看）** —— 全部能力一屏尽览 |
-| [`examples/hello/`](examples/hello/) | 最小应用 —— 8 行 `run-app` |
-| [`examples/counter/`](examples/counter/) | JS↔Racket 桥接 —— `fetch` 调用 Racket 状态 |
-| [`examples/webview-demo.rkt`](examples/webview-demo.rkt) | WebView 生命周期：加载、导航、关闭、验证 API |
-| [`examples/agent-verify.rkt`](examples/agent-verify.rkt) | Agent 工作流：无人值守断言页面状态 + 截图 |
-| [`examples/tray-demo.rkt`](examples/tray-demo.rkt) | 跨平台系统托盘 + 可用菜单 |
+建议按以下顺序阅读：
 
-## 路线图
+- [`examples/hello/`](examples/hello/) —— 最小 `run-app` 应用
+- [`examples/tray/`](examples/tray/) —— 系统托盘与菜单
+- [`examples/events/`](examples/events/) —— JSON 请求 + SSE 推送
+- [`examples/counter/`](examples/counter/) —— 更完整的 JS/Racket bridge
+- [`examples/showcase/`](examples/showcase/) —— 综合能力展示
+- [`examples/agent-verify.rkt`](examples/agent-verify.rkt) —— 程序化 WebView 验证
+- [`examples/webview-demo.rkt`](examples/webview-demo.rkt) —— 直接 WebView 生命周期示例
 
-- [x] **Phase 1** — 本地 HTTP 服务器 + 系统浏览器
-- [x] **Phase 2** — 前端资源打包、系统托盘、应用打包
-- [x] **Phase 3** — 原生 WebView 嵌入（WebView2 / WKWebView / WebKitGTK）— *完成，三平台 CI e2e 验证*
+## 项目状态
 
-> **Phase 3 完成：** 三个后端（macOS WKWebView、Windows WebView2、Linux WebKitGTK）均通过
-> 真窗口 CI e2e——open、页面加载、`webview-title`/`url` 验证、`webview-capture!` 截图、
-> `webview-navigate`、关闭（编程与系统按钮）、`#:on-close` 回调；三平台均已支持
-> `#:devtools?` 与窗口缩放跟随。全程纯 Racket FFI，无编译器。剩余打磨（非阻塞）：多窗口体验。
+Glaze 当前仍是 pre-1.0 项目（package metadata 为 `0.7`）。跨平台实现、CI、打包链路已经存在，但公共 API 和生命周期仍处于稳定化阶段。
 
-## 许可证
+0.x 阶段优先保持兼容：不会仅仅为了未来目录更漂亮而大规模移动 backend，也不会随意删除已有 API。对于新应用，建议只使用文档化的公共入口。
 
-基于 [MIT 许可证](LICENSE) 授权。
+## 安全边界
+
+Glaze 的本地 HTTP bridge、静态文件服务、打包/签名、更新与原生 FFI 都属于安全敏感边界。安全问题请参考 [`SECURITY.md`](SECURITY.md)，不要在公开 issue 中直接发布利用细节或私钥等敏感信息。
+
+## Roadmap
+
+见 [`ROADMAP.md`](ROADMAP.md)。近期重点是：
+
+- 稳定 application lifecycle
+- 明确 public API
+- 完善跨平台测试与打包验证
+- 文档和示例
+- 收紧安全与错误处理边界
+
+IPC/event 模型的进一步演进、更多系统 capability 会放在后续阶段；插件 SDK、完整 hot reload 不属于当前稳定化工作的范围。
+
+## 文档
+
+- [`docs/architecture.md`](docs/architecture.md) —— 架构与依赖规则
+- [`ROADMAP.md`](ROADMAP.md) —— 分阶段路线图
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 贡献流程
+- [`SECURITY.md`](SECURITY.md) —— 安全报告流程
+- `raco docs glaze` / `glaze-doc` —— API 文档
+
+## 开发
+
+```bash
+raco pkg install --auto --no-docs --link "$PWD"
+raco make glaze/main.rkt glaze-cli/cli.rkt
+raco test glaze-test/
+```
+
+CI 还会在 Windows、macOS 和 Linux 上运行原生 WebView e2e、最终打包产物执行验证和安装器构建，并验证过滤后的 Racket source package 可以独立安装。
+
+## 贡献
+
+欢迎贡献。请优先提交范围清晰、能够单独审查的修改；在可行的情况下保持现有 API 兼容，并为行为修复增加 regression test。平台实现应继续位于公共 dispatcher 后面。
+
+详细流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+
+## License
+
+MIT —— 见 [`LICENSE`](LICENSE)。

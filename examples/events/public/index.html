@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glaze Events</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; }
+    button { font: inherit; padding: .6rem 1rem; }
+    pre { background: #f4f4f4; padding: 1rem; min-height: 3rem; }
+  </style>
+</head>
+<body>
+  <h1>Glaze Events</h1>
+  <p>Click the button to call Racket over HTTP. Racket broadcasts the response back over Server-Sent Events.</p>
+  <button id="ping">Ping Racket</button>
+  <pre id="output">Waiting for an event…</pre>
+
+  <script>
+    const output = document.querySelector('#output');
+    const events = new EventSource('/glaze/events');
+
+    events.addEventListener('pong', (event) => {
+      output.textContent = event.data;
+    });
+
+    document.querySelector('#ping').addEventListener('click', async () => {
+      const response = await fetch('/api/ping', { method: 'POST' });
+      if (!response.ok) output.textContent = `HTTP ${response.status}`;
+    });
+  </script>
+</body>
+</html>

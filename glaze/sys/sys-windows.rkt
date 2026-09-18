@@ -38,26 +38,42 @@
   (get-ffi-obj "GlobalUnlock" kernel32 (_fun _pointer -> _bool)))
 (define GlobalSize
   (get-ffi-obj "GlobalSize" kernel32 (_fun _pointer -> _uintptr)))
+(define GlobalFree
+  (get-ffi-obj "GlobalFree" kernel32 (_fun _pointer -> _pointer)))
 
 (define CF_UNICODETEXT 13)
 (define GMEM_MOVEABLE 2)
 
-;; UTF-16 helpers (bytes-open-converter is one-directional).
-(define conv (bytes-open-converter "platform-UTF-8" "platform-UTF-16"))
-(define (wstr s)
-  (define-values (out _in _status) (bytes-convert conv (string->bytes/utf-8 s)))
-  (define n (bytes-length out))
-  (define p (malloc _uint8 (+ n 2) 'raw))
-  (memcpy p out n)
-  (ptr-set! p _uint16 (quotient n 2) 0)
-  p)
+;; UTF-16 helpers.
+(define (utf16-bytes s)
+  (define cv (bytes-open-converter "UTF-8" "UTF-16LE"))
+  (define in (string->bytes/utf-8 s))
+  (define-values (out consumed status) (bytes-convert cv in))
+  (unless (and (eq? status 'complete) (= consumed (bytes-length in)))
+    (error 'clipboard-set! "UTF-16 conversion failed"))
+  (bytes-append out #"\0\0"))
+
+;; Decode UTF-16 code units, including surrogate pairs. The previous helper
+;; treated each 16-bit unit as a Unicode scalar, corrupting non-BMP text.
 (define (wstr->string p)
   (and p
        (let loop ([i 0] [chars '()])
          (define u (ptr-ref p _uint16 i))
-         (if (zero? u)
-             (list->string (reverse chars))
-             (loop (add1 i) (cons (integer->char u) chars))))))
+         (cond
+           [(zero? u) (list->string (reverse chars))]
+           [(<= #xD800 u #xDBFF)
+            (define v (ptr-ref p _uint16 (add1 i)))
+            (if (<= #xDC00 v #xDFFF)
+                (let ([cp (+ #x10000
+                             (arithmetic-shift (- u #xD800) 10)
+                             (- v #xDC00))])
+                  (loop (+ i 2) (cons (integer->char cp) chars)))
+                (loop (add1 i) (cons #\uFFFD chars)))]
+           [(<= #xDC00 u #xDFFF)
+            (loop (add1 i) (cons #\uFFFD chars))]
+           [else
+            (loop (add1 i) (cons (integer->char u) chars))]))))
+
 
 (define (supported?)
   (and (eq? (system-type 'os) 'windows) #t))
@@ -65,16 +81,24 @@
 (define (clipboard-set! text)
   (and (OpenClipboard #f)
        (dynamic-wind
-         (lambda () (void))
+         void
          (lambda ()
            (EmptyClipboard)
-           (define p (wstr text))
-           (define bytes-n (+ 2 (* 2 (length (string->list text)))))
-           (define h (GlobalAlloc GMEM_MOVEABLE bytes-n))
-           (define dst (GlobalLock h))
-           (memcpy dst p bytes-n)
-           (GlobalUnlock h)
-           (not (zero? (cast (SetClipboardData CF_UNICODETEXT h) _pointer _intptr))))
+           (define data (utf16-bytes text))
+           (define h (GlobalAlloc GMEM_MOVEABLE (bytes-length data)))
+           (and h
+                (let ([dst (GlobalLock h)])
+                  (cond
+                    [(not dst)
+                     (GlobalFree h)
+                     #f]
+                    [else
+                     (memcpy dst data (bytes-length data))
+                     (GlobalUnlock h)
+                     (define result (SetClipboardData CF_UNICODETEXT h))
+                     ;; Ownership transfers to the clipboard only on success.
+                     (unless result (GlobalFree h))
+                     (and result #t)]))))
          (lambda () (CloseClipboard)))))
 
 (define (clipboard-get)

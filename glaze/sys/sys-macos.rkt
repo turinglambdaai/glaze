@@ -50,14 +50,22 @@
              ""))))
 
 (define (notify! title body subtitle)
-  (define script
-    (format "display notification ~s with title ~s~a"
-            body title
-            (if (non-empty-string? subtitle)
-                (format " subtitle ~s" subtitle)
-                "")))
   (define osa (find-executable-path "osascript"))
-  (and osa (system* osa "-e" script)))
+  (define script
+    (string-append
+     "on run argv\n"
+     "  set bodyText to item 1 of argv\n"
+     "  set titleText to item 2 of argv\n"
+     "  set subtitleText to item 3 of argv\n"
+     "  if subtitleText is \"\" then\n"
+     "    display notification bodyText with title titleText\n"
+     "  else\n"
+     "    display notification bodyText with title titleText subtitle subtitleText\n"
+     "  end if\n"
+     "end run"))
+  ;; User-controlled notification text travels as argv, never as AppleScript
+  ;; source, so quotes/backslashes cannot change the script.
+  (and osa (system* osa "-e" script "--" body title subtitle)))
 
 (define (open-path p)
   (define o (find-executable-path "open"))

@@ -19,6 +19,11 @@
          glaze/tray/tray-protocol
          glaze/webview/main)
 
+;; Racket 8.12's putenv contract accepts strings only. Restoring an absent
+;; variable to "" keeps cleanup portable across the supported Racket range.
+(define (restore-env! name old-value)
+  (putenv name (or old-value "")))
+
 ;; ---- menu protocol (shared with the tray) ----
 
 (define mi (make-menu-item "Open…" #:action (lambda () 'opened)
@@ -54,6 +59,33 @@
   (check-equal? (ensure-url-scheme! "glaze-test-scheme") 'build-time
                 "macOS defers registration to the packaged Info.plist"))
 
+(when (eq? (system-type 'os) 'unix)
+  (define tmp-data (make-temporary-file "glaze-deeplink-~a" 'directory))
+  (define old-data (getenv "XDG_DATA_HOME"))
+  (define old-path (getenv "PATH"))
+  (dynamic-wind
+    (lambda ()
+      (putenv "XDG_DATA_HOME" (path->string tmp-data))
+      ;; Keep the test a pure file-write exercise; do not let xdg-mime modify
+      ;; the runner's desktop defaults.
+      (putenv "PATH" ""))
+    (lambda ()
+      (check-equal?
+       (ensure-url-scheme! "glaze-test-scheme" #:app-name "Glaze\nInjected=bad")
+       'desktop
+       "Linux deep-link registration follows the documented symbol contract")
+      (define desktop
+        (build-path tmp-data "applications" "glaze-glaze-test-scheme.desktop"))
+      (define text (file->string desktop))
+      (check-true (string-contains? text "Name=Glaze\\nInjected=bad")
+                  "desktop entry escapes newlines in app name")
+      (check-false (string-contains? text (string-append "Name=Glaze" "\n" "Injected=bad"))
+                   "desktop entry contains no injected key"))
+    (lambda ()
+      (restore-env! "XDG_DATA_HOME" old-data)
+      (restore-env! "PATH" old-path)
+      (delete-directory/files tmp-data))))
+
 ;; ---- auto-launch state queries ----
 
 (define state (auto-launch-enabled? "glaze-api-test"))
@@ -64,23 +96,34 @@
 ;; overridden XDG_CONFIG_HOME so the test never touches real user state.
 (when (eq? (system-type 'os) 'unix)
   (define tmp-cfg (make-temporary-file "glaze-autostart-~a" 'directory))
-  (putenv "XDG_CONFIG_HOME" (path->string tmp-cfg))
-  (check-false (auto-launch-enabled? "glaze-api-test") "linux: not registered initially")
-  (auto-launch-set! "glaze-api-test" #t)
-  (check-true (auto-launch-enabled? "glaze-api-test") "linux: registered")
-  (check-true (string-contains? (file->string (build-path tmp-cfg "autostart" "glaze-api-test.desktop"))
-                                "X-GNOME-Autostart-enabled=true")
-              "linux: desktop entry written")
-  (auto-launch-set! "glaze-api-test" #f)
-  (check-false (auto-launch-enabled? "glaze-api-test") "linux: unregistered")
-  (delete-directory/files tmp-cfg))
+  (define old-config (getenv "XDG_CONFIG_HOME"))
+  (dynamic-wind
+    (lambda ()
+      (putenv "XDG_CONFIG_HOME" (path->string tmp-cfg)))
+    (lambda ()
+      (check-false (auto-launch-enabled? "glaze-api-test") "linux: not registered initially")
+      (auto-launch-set! "glaze-api-test" #t)
+      (check-true (auto-launch-enabled? "glaze-api-test") "linux: registered")
+      (check-true (string-contains? (file->string (build-path tmp-cfg "autostart" "glaze-api-test.desktop"))
+                                    "X-GNOME-Autostart-enabled=true")
+                  "linux: desktop entry written")
+      (auto-launch-set! "glaze-api-test" #f)
+      (check-false (auto-launch-enabled? "glaze-api-test") "linux: unregistered"))
+    (lambda ()
+      (restore-env! "XDG_CONFIG_HOME" old-config)
+      (delete-directory/files tmp-cfg))))
 
 ;; ---- macOS real-window menu e2e ----
 ;; open -> set custom menu -> poll page load -> perform the native menu
 ;; action (the same dispatch a real click takes) -> marker file appears ->
 ;; close -> wait-for-webviews.
+;;
+;; This test deliberately uses AppKit/Objective-C calls to synthesize the
+;; native menu click, so it must never run merely because another platform's
+;; WebView backend is available.
 
-(when (webview-supported?)
+(when (and (eq? (system-type 'os) 'macosx)
+           (webview-supported?))
   ;; AppKit is loaded by the backend; register the class binding locally so
   ;; the test can query NSApp for the main menu.
   (import-class NSApplication)

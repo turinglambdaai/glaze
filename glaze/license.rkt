@@ -155,19 +155,10 @@
     [else (json-string (format "~a" v))]))
 
 (define (json-string s)
-  (string-append
-   "\""
-   (string-join
-    (for/list ([c (in-string s)])
-      (case c
-        [(#\") "\\\""]
-        [(#\\) "\\\\"]
-        [(#\newline) "\\n"]
-        [(#\return) "\\r"]
-        [(#\tab) "\\t"]
-        [else (string c)]))
-    "")
-   "\""))
+  ;; Let the JSON library handle every required escape (including control
+  ;; characters below U+0020) instead of maintaining a partial encoder.
+  (jsexpr->string s))
+
 
 ;; ---- RSA-SHA256 over payload bytes ----
 
@@ -229,6 +220,22 @@
                        #:expiry [expiry #f]
                        #:machine-id [machine #f]
                        #:out [out "app.license"])
+  (unless (path-string? private-key)
+    (raise-argument-error 'issue-license "path-string?" private-key))
+  (unless (and (string? product) (non-empty-string? product))
+    (raise-argument-error 'issue-license "non-empty-string?" product))
+  (unless (and (string? subject) (non-empty-string? subject))
+    (raise-argument-error 'issue-license "non-empty-string?" subject))
+  (when expiry
+    (unless (string? expiry)
+      (raise-argument-error 'issue-license "(or/c #f string?)" expiry))
+    ;; Parse now so malformed dates cannot be signed into a license that every
+    ;; validator will later reject or interpret inconsistently.
+    (days-until-expiry expiry))
+  (when (and machine (not (string? machine)))
+    (raise-argument-error 'issue-license "(or/c #f string?)" machine))
+  (unless (path-string? out)
+    (raise-argument-error 'issue-license "path-string?" out))
   (define claims
     (make-hasheq
      (append (list (cons 'product product)
@@ -309,18 +316,33 @@
 ;; Days until an "YYYY-MM-DD" expiry (expiry day inclusive); negative when
 ;; already past. Raises on a malformed date.
 (define (days-until-expiry expiry)
-  ;; #px, not #rx: {n} quantifiers need Perl-style syntax
+  (unless (string? expiry)
+    (raise-argument-error 'days-until-expiry "string?" expiry))
+  ;; #px, not #rx: {n} quantifiers need Perl-style syntax.
   (define m (regexp-match #px"^([0-9]{4})-([0-9]{2})-([0-9]{2})$" expiry))
   (unless m (error 'days-until-expiry "malformed expiry date: ~a" expiry))
   (define y (string->number (second m)))
   (define mo (string->number (third m)))
   (define d (string->number (fourth m)))
+  (define secs-exp
+    (with-handlers ([exn:fail?
+                     (lambda (e)
+                       (error 'days-until-expiry
+                              "invalid expiry date: ~a" expiry))])
+      ;; Use UTC so daylight-saving transitions cannot turn a calendar day
+      ;; into 23/25 hours and shift the result by one.
+      (find-seconds 0 0 0 d mo y #f)))
+  (define parsed (seconds->date secs-exp #f))
+  (unless (and (= (date-year parsed) y)
+               (= (date-month parsed) mo)
+               (= (date-day parsed) d))
+    (error 'days-until-expiry "invalid expiry date: ~a" expiry))
   (define today (current-date))
-  (define secs-exp (find-seconds 0 0 0 d mo y #f))
-  (define secs-now (find-seconds 0 0 0
-                                 (date-day today) (date-month today)
-                                 (date-year today) #f))
-  (inexact->exact (floor (/ (- secs-exp secs-now) 60 60 24))))
+  (define secs-now
+    (find-seconds 0 0 0
+                  (date-day today) (date-month today)
+                  (date-year today) #f))
+  (quotient (- secs-exp secs-now) 86400))
 
 ;; True when the YYYY-MM-DD date is strictly before today.
 (define (date-passed? ymd)

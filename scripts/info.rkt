@@ -1,6 +1,8 @@
 #lang info
 
-;; Collection-level info inside the single `glaze` package: helper
-;; scripts (CI webview e2e) are run directly, never compiled by setup.
-(define compile-omit-paths '("webview-e2e.rkt"))
+;; CI/helper scripts are executed explicitly by workflows; package setup
+;; should not compile them as library modules.
+(define compile-omit-paths
+  '("webview-e2e.rkt"
+    "package-entry-smoke.rkt"))
 (define test-omit-paths 'all)

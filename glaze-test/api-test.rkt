@@ -36,7 +36,11 @@
                   (define body (request-json-body req))
                   (hasheq 'echo (and (hash? body) (hash-ref body 'x 'miss)))))
           (GET "api/boom" (lambda (req) (raise-user-error 'boom "handler exploded")))
-          (GET "api/raw" (lambda (req) (json-response (hasheq 'raw #t)))))))
+          (GET "api/raw" (lambda (req) (json-response (hasheq 'raw #t))))
+          ;; Non-JavaScript identifier characters in route params/static
+          ;; segments must still produce a valid generated client.
+          (GET "api/users/:user-id" (lambda (req user-id) (hasheq 'id user-id)))
+          (GET "api/o'hare/:id" (lambda (req id) (hasheq 'id id))))))
 
 (define (call method path [data #f])
   (define-values (status headers in)
@@ -74,6 +78,18 @@
 (let-values ([(st body) (call "GET" "/api/raw")])
   (check-true (string-contains? st "200") "raw response passthrough")
   (check-equal? (hash-ref (bytes->jsexpr body) 'raw) #t))
+
+;; Generated client must not embed route parameter names as raw JavaScript
+;; identifiers or static path text as raw single-quoted source.
+(let-values ([(st body) (call "GET" "/glaze/api.js")])
+  (define js (bytes->string/utf-8 body))
+  (check-true (string-contains? st "200") "generated api client served")
+  (check-true (string-contains? js "\"usersUserId\": function(p0, body)")
+              "hyphenated path param uses safe positional JS argument")
+  (check-false (string-contains? js "function(user-id")
+               "raw route parameter is never emitted as JS identifier")
+  (check-true (string-contains? js "\"o'hare\"")
+              "static route segment is emitted as an escaped JS string literal"))
 
 ;; Method mismatch (GET on a POST route) falls through to static SPA fallback.
 (let-values ([(st body) (call "GET" "/api/bump/5")])

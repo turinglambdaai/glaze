@@ -47,12 +47,33 @@
                 "/ve" "/d" (format "\"~a\" \"%1\"" exe-path) "/f")
        #t))
 
+(define (desktop-value-escape s)
+  ;; Desktop Entry string values use backslash escapes for control
+  ;; characters. Prevent a user-controlled app name from injecting keys.
+  (apply string-append
+         (for/list ([c (in-string s)])
+           (case c
+             [(#\\) "\\\\"]
+             [(#\newline) "\\n"]
+             [(#\return) "\\r"]
+             [(#\tab) "\\t"]
+             [else (string c)]))))
+
+(define (desktop-exec-quote s)
+  ;; Exec= has its own quoting rules. Inside double quotes, escape characters
+  ;; with special meaning so an executable path remains one literal argv[0].
+  (string-append
+   "\""
+   (apply string-append
+          (for/list ([c (in-string s)])
+            (if (member c '(#\\ #\" #\` #\$))
+                (string #\\ c)
+                (string c))))
+   "\""))
+
 ;; Linux: a desktop entry advertising the scheme, registered as its default
 ;; handler via xdg-mime when available.
 (define (lin-register! scheme exe-path app-name)
-  (define config-dir
-    (or (getenv "XDG_CONFIG_HOME")
-        (build-path (find-system-path 'home-dir) ".config")))
   (define data-dir
     (or (getenv "XDG_DATA_HOME")
         (build-path (find-system-path 'home-dir) ".local" "share")))
@@ -62,8 +83,10 @@
   (define desktop-path (build-path apps-dir desktop-name))
   (call-with-output-file desktop-path
     (lambda (o)
-      (fprintf o "[Desktop Entry]\nType=Application\nName=~a\nExec=\"~a\" %u\nMimeType=x-scheme-handler/~a;\nNoDisplay=true\n"
-               app-name exe-path scheme))
+      (fprintf o "[Desktop Entry]\nType=Application\nName=~a\nExec=~a %u\nMimeType=x-scheme-handler/~a;\nNoDisplay=true\n"
+               (desktop-value-escape app-name)
+               (desktop-exec-quote exe-path)
+               scheme))
     #:exists 'replace)
   ;; Best-effort: without xdg-mime the entry is in place but may not be
   ;; picked up until the next desktop-environment rescan.
@@ -82,6 +105,8 @@
 ;;   'desktop   — Linux desktop entry (re)written
 ;;   'build-time — macOS: declared in the bundle's Info.plist at build time
 (define (ensure-url-scheme! scheme #:app-name [app-name scheme])
+  (unless (string? app-name)
+    (raise-argument-error 'ensure-url-scheme! "string?" app-name))
   (unless (regexp-match? #rx"^[a-z][a-z0-9+.-]*$" scheme)
     (error 'ensure-url-scheme! "invalid URL scheme: ~a" scheme))
   (case (system-type 'os)
@@ -93,4 +118,5 @@
          (error 'ensure-url-scheme! "failed to write registry entries for ~a" scheme))]
     [else
      (define exe (find-system-path 'run-file))
-     (lin-register! scheme (path->string exe) app-name)]))
+     (lin-register! scheme (path->string exe) app-name)
+     'desktop]))

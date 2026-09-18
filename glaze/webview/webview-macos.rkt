@@ -89,6 +89,7 @@
 
 (import-class NSString NSNull
               NSApplication
+              NSProcessInfo
               NSMenu
               NSMenuItem
               NSWindow
@@ -132,7 +133,18 @@
 (define NSViewHeightSizable 16)
 (define NSApplicationActivationPolicyRegular 0)
 
-(struct mac:webview (window webview delegate closed?-box fullscreen?-box [thread #:mutable])
+;; WKPreferencesInactiveSchedulingPolicyNone (macOS 14+). The setter is
+;; probed dynamically so this source continues to load on older macOS.
+(define WKInactiveSchedulingPolicyNone 2)
+
+;; NSActivityUserInitiatedAllowingIdleSystemSleep. This public ProcessInfo
+;; activity suppresses App Nap / timer throttling for monitoring-style apps
+;; while still allowing normal idle system sleep. It is opt-in and paired with
+;; endActivity: on window close.
+(define NSActivityUserInitiatedAllowingIdleSystemSleep #x00EFFFFF)
+
+(struct mac:webview (window webview delegate closed?-box fullscreen?-box activity-token
+                            [thread #:mutable])
   #:transparent)
 
 (define (supported?)
@@ -422,6 +434,7 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:background-active? [background-active? #f]
                       #:on-close [on-close (lambda () (void))])
   (unless (supported?)
     (error 'open-webview "macOS WebView backend unavailable (WebKit failed to load)"))
@@ -448,8 +461,33 @@
   (tellv window setTitle: (->nsstring title))
   (tellv window setReleasedWhenClosed: #:type _bool #f)
 
-  ;; WKWebView as the content view, tracking window resizes.
+  ;; WKWebView as the content view, tracking window resizes. On macOS 14+,
+  ;; keep WebKit from suspending work merely because the view becomes
+  ;; inactive/detached. This is a public WebKit preference and is independent
+  ;; from the stronger App Nap opt-in below.
   (define config (tell (tell WKWebViewConfiguration alloc) init))
+  (define prefs (tell #:type _id config preferences))
+  (when (and (cast prefs _id _pointer)
+             (tell prefs respondsToSelector:
+                   #:type _SEL
+                   (selector setInactiveSchedulingPolicy:)))
+    (tellv prefs setInactiveSchedulingPolicy:
+           #:type _int
+           WKInactiveSchedulingPolicyNone))
+
+  ;; Monitoring applications can explicitly request process activity while
+  ;; this window is alive. Do not enable it globally: keeping ordinary apps
+  ;; artificially active would waste power.
+  (define activity-token
+    (and background-active?
+         (let ([process-info (tell NSProcessInfo processInfo)])
+           (tell #:type _id process-info
+                 beginActivityWithOptions:
+                 #:type _uintptr
+                 NSActivityUserInitiatedAllowingIdleSystemSleep
+                 reason:
+                 (->nsstring "Glaze background-active WebView")))))
+
   (define webview
     (tell (tell WKWebView alloc)
           initWithFrame:
@@ -477,6 +515,12 @@
                  (lambda ()
                    (set-box! closed? #t)
                    (release-pump!)
+                   (when (and activity-token
+                              (cast activity-token _id _pointer))
+                     (tellv (tell NSProcessInfo processInfo)
+                            endActivity:
+                            #:type _id
+                            activity-token))
                    (on-close)))
 
   (tellv window makeKeyAndOrderFront: #:type _id window)
@@ -491,7 +535,8 @@
       (tellv app activate)
       (tellv app activateIgnoringOtherApps: #:type _bool #t))
 
-  (define wv (mac:webview window webview delegate closed? (box #f) #f))
+  (define wv
+    (mac:webview window webview delegate closed? (box #f) activity-token #f))
   (navigate wv url)
 
   ;; One shared pump services every open window; acquire only after navigate

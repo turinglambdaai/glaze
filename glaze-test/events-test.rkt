@@ -85,11 +85,12 @@
 (let-values ([(_st b) (call "GET" "/glaze/api.js")])
   (define js (bytes->string/utf-8 b))
   (check-true (string-contains? js "glaze.call") "client has call wrapper")
-  (check-true (string-contains? js "counterBump: function(body)") "route -> counterBump()")
-  (check-true (string-contains? js "itemsId:") "path param -> itemsId()")
+  (check-true (string-contains? js "\"counterBump\": function(body)")
+              "route -> counterBump()")
+  (check-true (string-contains? js "\"itemsId\": function(p0, body)")
+              "path param -> itemsId() with safe positional argument")
   (check-true (string-contains? js "EventSource('/glaze/events')") "SSE endpoint"))
 
-;; ---- SSE over HTTP ----
 ;; ---- SSE over HTTP (curl as a real streaming client) ----
 (define out-path (make-temporary-file "sse-out-~a.txt"))
 (define curl-exe (or (find-executable-path "curl.exe" #f)
@@ -113,3 +114,16 @@
 (check-true (string-contains? sse-text "\"msg\":\"world\"") "SSE payload delivered")
 
 (delete-directory/files dir)
+
+;; ---- event input hardening ----
+(let ()
+  (define bus (make-event-bus))
+  (check-exn exn:fail:contract?
+             (lambda () (bus-broadcast! bus "bad\nevent" (hasheq 'ok #t)))
+             "SSE event names cannot inject new protocol lines")
+  (check-exn exn:fail:contract?
+             (lambda () (bus-broadcast! bus 'not-json (lambda () #t)))
+             "event payload must be JSON-serializable")
+  (check-exn exn:fail:contract?
+             (lambda () (bus-wait (bus-subscribe! bus) -1))
+             "event wait timeout must be nonnegative"))

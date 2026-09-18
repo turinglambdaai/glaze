@@ -1,10 +1,8 @@
 #lang info
 
-;; Single installable package: the repository root IS the package. It
-;; provides every collection as a top-level directory — the `glaze`
-;; library, the `raco glaze` CLI, the Scribble documentation, and the
-;; test suite — so one `raco pkg install glaze` (or `--link .` from a
-;; checkout) installs everything.
+;; Single installable multi-collection package. Runtime dependencies belong in
+;; `deps`; test and documentation tooling stays in `build-deps` so a future
+;; binary distribution does not require developer-only libraries.
 
 (define name "glaze")
 (define collection 'multi)
@@ -12,21 +10,26 @@
 (define deps
   '(["base" #:version "8.0"]
     "web-server"
-    "web-server-lib"
-    ;; Tests ship inside this package, so rackunit is a runtime dep.
-    "rackunit-lib"))
+    "web-server-lib"))
+
 (define build-deps
-  '("scribble-lib"
+  '("rackunit-lib"
+    "scribble-lib"
     "racket-doc"))
 
-;; NOTE: `raco-commands` and `scribblings` are collection-level fields:
-;; they live in glaze-cli/info.rkt and glaze-doc/info.rkt respectively.
+;; Glaze is authored and published as Racket source. Catalog/build services may
+;; derive built/binary packages for a specific Racket version afterwards.
+(define distribution-preference 'source)
 
-;; NOTE: Racket's `valid-version?` rejects a trailing ".0" component
-;; ("0.7.0" is invalid; "0.7" is the same release).
+;; `raco-commands` and `scribblings` are collection-level fields in
+;; glaze-cli/info.rkt and glaze-doc/info.rkt.
+
+;; Racket's valid-version? treats "0.7" as the appropriate package version
+;; spelling for this release line.
 (define version "0.7")
 
-(define pkg-desc "Build desktop apps with Racket backend and web frontend — a Tauri-like framework for Racket")
+(define pkg-desc
+  "Lisp-native framework for modern desktop applications with Racket and native WebViews")
 (define pkg-authors '(turinglambdaai))
 (define license 'MIT)
 (define repository "https://github.com/turinglambdaai/glaze")

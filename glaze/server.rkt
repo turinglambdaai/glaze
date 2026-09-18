@@ -26,6 +26,7 @@
          racket/string
          racket/tcp
          "api.rkt"
+         "assets.rkt"
          "events.rkt")
 
 (provide start-dev-server
@@ -60,13 +61,42 @@
                       #:api [api-routes '()]
                       #:events [event-bus #f]
                       #:api-token [api-token #f]
+                      #:bootstrap-token [bootstrap-token api-token]
                       #:serve-api-client? [serve-client? #t])
+  (unless (and (exact-integer? port) (<= 1 port 65535))
+    (raise-argument-error 'start-server "exact-integer? in [1, 65535]" port))
+  (unless (or (path? public-dir) (string? public-dir))
+    (raise-argument-error 'start-server "(or/c path? string?)" public-dir))
+  (unless (and (list? api-routes) (andmap route? api-routes))
+    (raise-argument-error 'start-server "(listof route?)" api-routes))
   (when (and event-bus (not (event-bus? event-bus)))
-    (raise-argument-error 'start-server "event-bus?" event-bus))
-  (when (and api-token (not (string? api-token)))
-    (raise-argument-error 'start-server "(or/c #f string?)" api-token))
+    (raise-argument-error 'start-server "(or/c #f event-bus?)" event-bus))
+  (define (valid-capability-token? v)
+    (and (string? v)
+         (regexp-match? #px"^[A-Za-z0-9._~-]+$" v)))
+  (when (and api-token (not (valid-capability-token? api-token)))
+    (raise-argument-error
+     'start-server
+     "(or/c #f non-empty cookie/header-safe token string)"
+     api-token))
+  (when (and bootstrap-token (not (valid-capability-token? bootstrap-token)))
+    (raise-argument-error
+     'start-server
+     "(or/c #f non-empty cookie/header-safe bootstrap token string)"
+     bootstrap-token))
+  (when (and bootstrap-token (not api-token))
+    (raise-arguments-error
+     'start-server
+     "bootstrap token requires an API token"
+     "bootstrap-token" bootstrap-token))
+  (unless (boolean? serve-client?)
+    (raise-argument-error 'start-server "boolean?" serve-client?))
+  (define resolved-public-dir (resolve-public-dir public-dir))
   (define dispatcher
-    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))  (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
+    (make-dispatcher resolved-public-dir api-routes port event-bus serve-client?
+                     api-token bootstrap-token))
+  (define shutdown-server
+    (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
   ;; only "connection refused" much later. Prove the listener is accepting
@@ -98,52 +128,99 @@
         [else (sleep 0.02) (loop)])))
   (unless accepting?
     (shutdown-server)
-    (raise-arguments-error
-     'start-server
-     (format "listener on port ~a did not start accepting within ~as"
-             port listen-wait-secs)
-     "port" port)))
+    ;; Treat a listener that failed to become reachable as a network startup
+    ;; failure so run-app's random-port allocator can retry a race rather than
+    ;; surfacing a misleading argument error.
+    (raise
+     (exn:fail:network
+      (format "start-server: listener on port ~a did not start accepting within ~as"
+              port listen-wait-secs)
+      (current-continuation-marks)))))
 
 ;; ---- Host-header validation (DNS-rebinding guard) ----
-
-(define (host-allowed? req port)
-  (define h (headers-assq #"Host" (request-headers/raw req)))
-  (cond
-    ;; No Host header (ancient clients, raw sockets): nothing was spoofed.
-    [(not h) #t]
-    [else
-     (define host (bytes->string/latin-1 (header-value h)))
-     (define bare (if (string-contains? host ":")
-                      (substring host 0 (string-index-of host #\:))
-                      host))
-     (member bare (list "127.0.0.1" "localhost" "[::1]" "::1"))]))
 
 (define (string-index-of s ch)
   (for/or ([c (in-string s)] [i (in-naturals)] #:when (char=? c ch)) i))
 
+;; Parse a Host header without confusing the colons inside a bracketed IPv6
+;; literal with the optional :port separator. Hostnames are case-insensitive.
+(define (host-string-allowed? host)
+  (define s (string-downcase (string-trim host)))
+  (define bare
+    (cond
+      ;; Be liberal for raw clients even though HTTP normally brackets IPv6.
+      [(string=? s "::1") "::1"]
+      [(regexp-match #px"^\\[([^\\]]+)\\](?::[0-9]+)?$" s)
+       => (lambda (m) (second m))]
+      [else
+       (define colon (string-index-of s #\:))
+       (if colon (substring s 0 colon) s)]))
+  (and (member bare '("127.0.0.1" "localhost" "::1")) #t))
+
+(define (host-allowed? req _port)
+  (define h (headers-assq #"Host" (request-headers/raw req)))
+  (cond
+    ;; No Host header (ancient clients, raw sockets): browsers always send one,
+    ;; so this does not weaken the DNS-rebinding boundary for web content.
+    [(not h) #t]
+    [else
+     (host-string-allowed? (bytes->string/latin-1 (header-value h)))]))
+
+;; Browser capability calls must originate from this exact local server.
+;; Ports are part of Origin, so another localhost web app cannot reuse the
+;; session cookie to drive Glaze APIs. Programmatic clients without Origin
+;; continue to authenticate with X-Glaze-Token.
+(define (origin-allowed? req port)
+  (define h (headers-assq #"Origin" (request-headers/raw req)))
+  (cond
+    [(not h) #t]
+    [else
+     (define origin
+       (string-downcase
+        (string-trim (bytes->string/latin-1 (header-value h)))))
+     (member origin
+             (list (format "http://127.0.0.1:~a" port)
+                   (format "http://localhost:~a" port)
+                   (format "http://[::1]:~a" port)))]))
+
 ;; ---- dispatcher ----
 
-(define (make-dispatcher public-dir api-routes port event-bus serve-client? api-token)
+(define (make-dispatcher public-dir api-routes port event-bus serve-client?
+                         api-token bootstrap-token)
+  (define bootstrap-lock (make-semaphore 1))
+  (define bootstrap-live? (box (and bootstrap-token #t)))
+
+  (define (consume-bootstrap! req)
+    (and bootstrap-token
+         (call-with-semaphore
+          bootstrap-lock
+          (lambda ()
+            (and (unbox bootstrap-live?)
+                 (bootstrap-request? req bootstrap-token)
+                 (begin
+                   (set-box! bootstrap-live? #f)
+                   #t))))))
+
   (lambda (conn req)
+    (define api-request? (api-matches? api-routes req))
+    (define event-request? (and event-bus (sse-request? req)))
+    (define capability-request? (or api-request? event-request?))
     (define resp
       (cond
-        [(not (host-allowed? req port)) (error-response 403 "host not allowed")]
-        ;; One-time bootstrap: the capability URL (?glaze-token=..., opened by
-        ;; run-app) exchanges the token for an HttpOnly cookie and redirects
-        ;; to the clean path. api.js no longer hands the token out, so a
-        ;; casual local prober that can read openly-served endpoints still
-        ;; cannot mint a cookie.
-        [(and api-token (bootstrap-request? req api-token))
-         (bootstrap-response req)]
-        ;; The token guards capabilities (API routes + the event stream),
-        ;; not resources: static files and the api.js bootstrap stay open —
-        ;; the page received its cookie via the bootstrap redirect above.
-        [(and api-token (pair? api-routes) (not (token-ok? req api-token))
-              (or (api-matches? api-routes req)
-                  (and event-bus (sse-request? req))))
+        [(not (host-allowed? req port))
+         (error-response 403 "host not allowed")]
+        [(and capability-request? (not (origin-allowed? req port)))
+         (error-response 403 "origin not allowed")]
+        ;; The bootstrap nonce is single-use and distinct from the long-lived
+        ;; API token when run-app creates the server. A direct start-server
+        ;; call keeps backward compatibility by defaulting bootstrap-token to
+        ;; api-token, while still consuming it after the first exchange.
+        [(consume-bootstrap! req)
+         (bootstrap-response req api-token)]
+        [(and api-token capability-request? (not (token-ok? req api-token)))
          (error-response 401 "missing or invalid glaze token")]
-        [(find-api-response api-routes req)]
-        [(and event-bus (sse-request? req)) (sse-response event-bus)]
+        [api-request? (find-api-response api-routes req)]
+        [event-request? (sse-response event-bus)]
         [(and serve-client? (api-client-request? req))
          (api-client-response api-routes api-token)]
         [(directory-exists? public-dir) (serve-static-file public-dir req)]
@@ -189,21 +266,20 @@
 ;; 302 back to the same path (query dropped), setting the cookie the page
 ;; will use for API + SSE calls. A wrong token in the query never matches
 ;; and falls through to the normal flow — no cookie is minted.
-(define (bootstrap-response req)
+(define (bootstrap-response req api-token)
   (define target
     (string-append "/" (url-path-string (request-uri req))))
-  (define token
-    (for/or ([kv (in-list (url-query (request-uri req)))]
-             #:when (eq? (car kv) bootstrap-param))
-      (cdr kv)))
-  (response/full 302 #"Found" (current-seconds)
-                 #"text/plain; charset=utf-8"
-                 (list (header #"Location" (string->bytes/latin-1 target))
-                       (header #"Set-Cookie"
-                               (string->bytes/latin-1
-                                (format "glaze_token=~a; Path=/; HttpOnly; SameSite=Strict"
-                                        token))))
-                 (list (string->bytes/utf-8 (format "Redirecting to ~a\n" target)))))
+  (response/full
+   302 #"Found" (current-seconds)
+   #"text/plain; charset=utf-8"
+   (list (header #"Location" (string->bytes/latin-1 target))
+         (header #"Cache-Control" #"no-store")
+         (header #"Referrer-Policy" #"no-referrer")
+         (header #"Set-Cookie"
+                 (string->bytes/latin-1
+                  (format "glaze_token=~a; Path=/; HttpOnly; SameSite=Strict"
+                          api-token))))
+   (list (string->bytes/utf-8 (format "Redirecting to ~a\n" target)))))
 
 (define (sse-request? req)
   (and (bytes=? (request-method req) #"GET")
@@ -268,23 +344,35 @@
 (define (generate-api-client api-routes)
   (define entries
     (for/list ([r (in-list api-routes)])
-      (define method (route-method r))
+      (define method-str (symbol->string (route-method r)))
       (define segments (route-segments r))
+      ;; Generated JavaScript uses positional internal parameter names rather
+      ;; than route parameter text. A route like :user-id must not produce an
+      ;; illegal JS identifier such as `function(user-id, ...)`.
+      (define param-count
+        (for/sum ([seg (in-list segments)]) (if (param? seg) 1 0)))
       (define args
-        (for/list ([seg (in-list segments)] #:when (param? seg))
-          (param-id seg)))
+        (append (for/list ([i (in-range param-count)]) (format "p~a" i))
+                '("body")))
+      (define next-param 0)
+      (define url-pieces
+        (for/list ([seg (in-list segments)])
+          (cond
+            [(param? seg)
+             (define i next-param)
+             (set! next-param (add1 next-param))
+             (format "encodeURIComponent(p~a)" i)]
+            [else
+             ;; jsexpr->string gives us a correctly escaped JS string literal.
+             (jsexpr->string seg)])))
       (define url-expr
-        (string-join
-         (for/list ([seg (in-list segments)])
-           (if (param? seg)
-               (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
-               seg))
-         "/"))
-      (define method-str (symbol->string method))
-      (format "  ~a: function(~a) { return glaze.call('~a', '~a', ~a); },"
-              (route->js-name segments)
-              (string-join (append args '("body")) ", ")
-              method-str
+        (if (null? url-pieces)
+            "\"\""
+            (string-join url-pieces " + '/' + ")))
+      (format "  ~a: function(~a) { return glaze.call(~a, ~a, ~a); },"
+              (jsexpr->string (route->js-name segments))
+              (string-join args ", ")
+              (jsexpr->string method-str)
               url-expr
               (if (string=? method-str "GET") "null" "body"))))
   (string-append
@@ -330,7 +418,7 @@
   (apply string-append
          (for/list ([seg (in-list drop-api)] [i (in-naturals)])
            (cond
-             [(param? seg) (string-titlecase (param-id seg))]
+             [(param? seg) (js-camel (param-id seg) #f)]
              [(zero? i) (js-camel seg #t)]
              [else (js-camel seg #f)]))))
 
@@ -350,29 +438,59 @@
                           (lambda (e) (error-response 400 (exn-message e)))]
                          [exn:fail?
                           (lambda (e)
+                            ;; Preserve diagnostic detail for the trusted
+                            ;; reporter, but never expose arbitrary exception
+                            ;; text to the WebView/browser response.
                             ((current-glaze-error-reporter)
                              e
                              (url-path-string (request-uri req)))
-                            (error-response 500 (exn-message e)))])
+                            (error-response 500 "internal server error"))])
            (define result (apply (route-handler r) req captured))
            (cond
              [(response? result) result]
              [else (api-response result)])))))
 
+;; Return #t when candidate is at or below root after path normalization.
+;; `find-relative-path` also handles Windows drive boundaries for us.
+(define (path-contained? root candidate)
+  (define rel (find-relative-path root candidate))
+  (and (relative-path? rel)
+       (for/and ([part (in-list (explode-path rel))])
+         (not (eq? part 'up)))))
+
+;; Build a request path below public-dir and prove it cannot escape. Existing
+;; files are normalized through the filesystem as a second check so a symlink
+;; inside public/ cannot expose a file outside the public root.
+(define (safe-public-candidate dir segments)
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (define root (simplify-path (path->complete-path dir) #t))
+    (define candidate
+      (simplify-path (apply build-path root segments) #f))
+    (and (path-contained? root candidate)
+         (cond
+           [(file-exists? candidate)
+            (define resolved (simplify-path candidate #t))
+            (and (path-contained? root resolved) resolved)]
+           [else candidate]))))
+
 (define (serve-static-file dir req)
   (define uri-path (url-path (request-uri req)))
-  (define segments (filter (lambda (s) (not (equal? s ""))) (map path/param-path uri-path)))
+  (define segments
+    (filter (lambda (s) (not (equal? s "")))
+            (map path/param-path uri-path)))
   (define rel
     (if (null? segments)
         '("index.html")
         segments))
-  (define candidate (apply build-path dir rel))
+  (define candidate (safe-public-candidate dir rel))
   (cond
+    [(not candidate)
+     (error-response 403 "path not allowed")]
     [(and (file-exists? candidate) (not (directory-exists? candidate)))
      (make-file-response candidate)]
     [else
-     (define fallback (build-path dir "index.html"))
-     (if (file-exists? fallback)
+     (define fallback (safe-public-candidate dir '("index.html")))
+     (if (and fallback (file-exists? fallback))
          (make-file-response fallback)
          (make-404-response))]))
 
@@ -417,3 +535,7 @@
     [(member ext '(#".mp3")) #"audio/mpeg"]
     [(member ext '(#".map")) #"application/json; charset=utf-8"]
     [else #"application/octet-stream"]))
+
+(module+ test-support
+  (provide host-string-allowed?
+           safe-public-candidate))

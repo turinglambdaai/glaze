@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# A PR can receive many small stabilization commits. Only the newest SHA is
+# useful; cancel stale runs so they do not consume the cross-platform runners
+# or delay feedback for the current head.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -27,12 +34,41 @@ jobs:
         shell: bash
         run: raco pkg install --auto --no-docs --link "$PWD"
 
+      - name: Compile public entrypoints
+        run: raco make glaze/main.rkt glaze-cli/cli.rkt scripts/package-entry-smoke.rkt
+
       - name: Run tests
         run: raco test glaze-test/
 
-      - name: Check formatting
-        run: raco fmt --check glaze/ glaze-cli/ glaze-test/
-        continue-on-error: true
+  source-package:
+    # Release hygiene: prove the filtered source archive is independently
+    # installable. This job intentionally does not link the checkout first.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: '8.12'
+
+      - name: Create source package
+        shell: bash
+        run: |
+          cd ..
+          raco pkg create --source --format zip glaze
+          test -s glaze.zip
+
+      - name: Install source package archive
+        shell: bash
+        run: raco pkg install --auto --no-docs ../glaze.zip
+
+      - name: Verify installed facade and CLI
+        shell: bash
+        run: |
+          racket -e '(require glaze) (unless (procedure? run-app) (error "missing run-app"))'
+          raco glaze help
 
   webview-e2e:
     # Real-window WebView end-to-end on each OS: open -> load (title
@@ -112,20 +148,31 @@ jobs:
 
       - name: Install installer toolchain (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          # WiX Toolset v4 (build falls back to zip if missing)
-          dotnet tool install --global wix
-          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          # Glaze supports WiX v4 syntax, but GitHub's latest global `wix`
+          # tool is now v7 and requires an additional OSMF license flow.
+          # NSIS is the other supported native Windows installer backend.
+          choco install nsis -y --no-progress
+          $nsis = "C:\Program Files (x86)\NSIS"
+          if (Test-Path $nsis) { $nsis | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
+
+      - name: Verify packaged entry executes
+        run: racket scripts/package-entry-smoke.rkt
 
       - name: Scaffold and build a sample app
         shell: bash
         run: |
           raco glaze init sampleapp
           cd sampleapp
-          # --sign - exercises the signing pipeline everywhere: macOS signs
-          # the bundle ad-hoc (verifiable without a cert); Windows/Linux
-          # degrade with a loud warning when no signing toolchain exists.
-          raco glaze build --name sampleapp --version 0.0.1 --out dist --installer --sign -
+          # Exercise signing where CI can do it without secrets. On macOS,
+          # ad-hoc signing is verifiable; Windows signing correctly requires a
+          # real certificate and is covered by argument/tool failure behavior.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            raco glaze build --name sampleapp --version 0.0.1 --out dist --installer --sign -
+          else
+            raco glaze build --name sampleapp --version 0.0.1 --out dist --installer
+          fi
       - name: Verify macOS bundle signature
         if: runner.os == 'macOS'
         run: |
@@ -143,3 +190,24 @@ jobs:
             sampleapp/dist/*.msi
             sampleapp/dist/*.dmg
             sampleapp/dist/*.AppImage
+
+  package-racket-9-3-macos:
+    # Regression coverage for the macOS/Racket 9.3 launcher failure reported
+    # in issue #1. This job executes the final packaged binary, not merely the
+    # build command.
+    runs-on: macOS-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: '9.3'
+
+      - name: Install Glaze package
+        shell: bash
+        run: raco pkg install --auto --no-docs --link "$PWD"
+
+      - name: Verify packaged entry executes
+        run: racket scripts/package-entry-smoke.rkt

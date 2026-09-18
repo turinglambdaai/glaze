@@ -1,18 +1,8 @@
 #lang racket/base
 
-;; Public WebView API (Phase 3). Opens a native OS window with an embedded
-;; WebView control pointing at a URL (typically the local HTTP server Glaze
-;; started). Dispatches to a platform-specific backend based on
-;; (system-type 'os):
-;;   - 'windows  -> webview-windows.rkt  (Win32 window + WebView2 via COM FFI)
-;;   - 'macosx   -> webview-macos.rkt    (NSWindow + WKWebView via objc FFI)
-;;   - 'unix     -> webview-linux.rkt    (GtkWindow + WebKitGTK via FFI)
-;;
-;; Every backend exports the SAME procedure names (open-webview,
-;; webview-supported?, close-webview, webview-navigate) and performs its own
-;; platform/library gating. If a backend is unavailable, open-webview returns
-;; #f so callers can fall back to opening the system browser (Phase 1/2
-;; behavior).
+;; Public WebView API. Opens a native OS window with an embedded WebView
+;; control pointing at a URL (typically the local HTTP server Glaze started).
+;; Platform-specific FFI stays behind this dispatcher.
 
 (provide open-window
          open-webview
@@ -38,14 +28,10 @@
 (require (only-in "../browser.rkt" open-browser)
          (only-in "../tray/tray-protocol.rkt" menu?))
 
-;; A webview handle wraps the backend-specific handle + the backend tag.
 (struct webview (backend handle) #:transparent)
 
-;; Every successfully opened window, weakly held: closed + collected windows
-;; disappear from all-webviews on their own.
 (define open-registry (make-weak-hasheq))
 
-;; Pick the backend module path for the current OS.
 (define (backend-module-path)
   (case (system-type 'os)
     [(windows) 'glaze/webview/webview-windows]
@@ -72,23 +58,45 @@
   (with-handlers ([exn:fail? (lambda (e) #f)])
     ((ref 'supported?))))
 
-;; open-window: high-level entry. Opens a native window with a webview
-;; rendering `url`. Optional #:title, #:width, #:height, #:on-close.
-;; Returns a webview? on success, or #f if the backend is unavailable.
-;; With #:fallback-browser? #t the system browser is opened instead when the
-;; native backend is unavailable.
+(define (check-open-args who url title width height devtools? background-active?
+                         on-close fallback?)
+  (unless (string? url)
+    (raise-argument-error who "string?" url))
+  (unless (string? title)
+    (raise-argument-error who "string?" title))
+  (unless (exact-positive-integer? width)
+    (raise-argument-error who "exact-positive-integer?" width))
+  (unless (exact-positive-integer? height)
+    (raise-argument-error who "exact-positive-integer?" height))
+  (unless (boolean? devtools?)
+    (raise-argument-error who "boolean?" devtools?))
+  (unless (boolean? background-active?)
+    (raise-argument-error who "boolean?" background-active?))
+  (unless (procedure? on-close)
+    (raise-argument-error who "procedure?" on-close))
+  (unless (boolean? fallback?)
+    (raise-argument-error who "boolean?" fallback?)))
+
+(define (check-webview who wv)
+  (unless (webview? wv)
+    (raise-argument-error who "webview?" wv)))
+
 (define (open-window url
                      #:title [title "Glaze"]
                      #:width [width 1024]
                      #:height [height 768]
                      #:devtools? [devtools? #f]
+                     #:background-active? [background-active? #f]
                      #:on-close [on-close (lambda () (void))]
                      #:fallback-browser? [fallback? #f])
+  (check-open-args 'open-window url title width height devtools?
+                   background-active? on-close fallback?)
   (open-webview url
                 #:title title
                 #:width width
                 #:height height
                 #:devtools? devtools?
+                #:background-active? background-active?
                 #:on-close on-close
                 #:fallback-browser? fallback?))
 
@@ -97,8 +105,11 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:background-active? [background-active? #f]
                       #:on-close [on-close (lambda () (void))]
                       #:fallback-browser? [fallback? #f])
+  (check-open-args 'open-webview url title width height devtools?
+                   background-active? on-close fallback?)
   (define h
     (with-handlers ([exn:fail? (lambda (e)
                                  (fprintf (current-error-port)
@@ -111,12 +122,17 @@
         #:width width
         #:height height
         #:devtools? devtools?
+        #:background-active? background-active?
         #:on-close on-close)))
   (cond
-    [h (define wv (webview (detected-backend) h))
-       (hash-set! open-registry wv #t)
-       wv]
-    [fallback? (open-browser url) #f]
+    [h
+     (define wv (webview (detected-backend) h))
+     (hash-set! open-registry wv #t)
+     wv]
+    [fallback?
+     (unless (open-browser url)
+       (error 'open-webview "native WebView unavailable and system browser fallback failed"))
+     #f]
     [else #f]))
 
 (define (detected-backend)
@@ -127,73 +143,82 @@
     [else 'stub]))
 
 (define (webview-close wv)
+  (check-webview 'webview-close wv)
   ((ref 'close) (webview-handle wv)))
 
 (define (webview-navigate wv url)
+  (check-webview 'webview-navigate wv)
+  (unless (string? url)
+    (raise-argument-error 'webview-navigate "string?" url))
   ((ref 'navigate) (webview-handle wv) url))
 
-;; ---- verification APIs ----
-;; Observe webview state programmatically — the point is that callers (and
-;; agents developing Glaze apps) can assert on what the UI is showing without
-;; a human at the screen. All degrade to #f where a backend cannot provide
-;; the value yet.
-
-;; Current page title once the first navigation has committed, else #f.
 (define (webview-title wv)
+  (check-webview 'webview-title wv)
   ((ref 'title) (webview-handle wv)))
 
-;; Current page URL once the first navigation has committed, else #f.
 (define (webview-url wv)
+  (check-webview 'webview-url wv)
   ((ref 'url) (webview-handle wv)))
 
-;; Captures the window contents to a PNG. dest defaults to a fresh temp
-;; file. Returns the path, or #f when the backend/window cannot be captured.
 (define (webview-capture! wv [dest #f])
+  (check-webview 'webview-capture! wv)
+  (unless (or (not dest) (path? dest) (string? dest))
+    (raise-argument-error 'webview-capture! "(or/c #f path? string?)" dest))
   ((ref 'capture!) (webview-handle wv) dest))
 
+(define (webview-set-title! wv t)
+  (check-webview 'webview-set-title! wv)
+  (unless (string? t)
+    (raise-argument-error 'webview-set-title! "string?" t))
+  ((ref 'set-title!) (webview-handle wv) t))
 
-;; ---- window controls ----
-(define (webview-set-title! wv t) ((ref 'set-title!) (webview-handle wv) t))
 (define (webview-set-size! wv width height)
+  (check-webview 'webview-set-size! wv)
+  (unless (exact-positive-integer? width)
+    (raise-argument-error 'webview-set-size! "exact-positive-integer?" width))
+  (unless (exact-positive-integer? height)
+    (raise-argument-error 'webview-set-size! "exact-positive-integer?" height))
   ((ref 'set-size!) (webview-handle wv) width height))
+
 (define (webview-set-fullscreen! wv on?)
+  (check-webview 'webview-set-fullscreen! wv)
+  (unless (boolean? on?)
+    (raise-argument-error 'webview-set-fullscreen! "boolean?" on?))
   ((ref 'set-fullscreen!) (webview-handle wv) on?))
 
-(define (webview-focus! wv) ((ref 'focus!) (webview-handle wv)))
+(define (webview-focus! wv)
+  (check-webview 'webview-focus! wv)
+  ((ref 'focus!) (webview-handle wv)))
 
-;; ---- menu bar ----
-;; Replace the app's custom menus with `menus` — a list of menu? values
-;; (glaze/tray/tray-protocol: make-menu + make-menu-item / menu-separator,
-;; with #:action thunks and optional #:accel like "Cmd+O"). Real keystroke
-;; accelerators on macOS; display-only hints on Windows/Linux (v1).
 (define (webview-set-menu! wv menus)
+  (check-webview 'webview-set-menu! wv)
+  (unless (and (list? menus) (andmap menu? menus))
+    (raise-argument-error 'webview-set-menu! "(listof menu?)" menus))
   ((ref 'set-menu!) (webview-handle wv) menus))
 
-;; ---- multi-window ----
-
-;; True once the window is closed (either webview-close or the OS chrome).
 (define (webview-closed? wv)
+  (check-webview 'webview-closed? wv)
   ((ref 'closed?) (webview-handle wv)))
 
-;; All windows this process opened that have not been garbage collected.
-;; Closed-but-uncollected handles report webview-closed? = #t.
 (define (all-webviews)
   (for/list ([(wv _) (in-hash open-registry)]) wv))
 
-;; Close every open window (delivers #:on-close for each).
 (define (close-all-webviews!)
   (for ([wv (in-list (all-webviews))] #:unless (webview-closed? wv))
     (webview-close wv)))
 
-;; Block until every open window is closed (OS chrome closes included), or
-;; until timeout-secs elapse. Returns #t when all closed, #f on timeout.
 (define (wait-for-webviews [timeout-secs #f])
+  (unless (or (not timeout-secs)
+              (and (real? timeout-secs) (>= timeout-secs 0)))
+    (raise-argument-error 'wait-for-webviews "(or/c #f nonnegative-real?)"
+                          timeout-secs))
   (define deadline
     (and timeout-secs (+ (current-inexact-milliseconds) (* timeout-secs 1000))))
   (let loop ()
-    (define open (for/list ([wv (in-list (all-webviews))]
-                            #:unless (webview-closed? wv))
-                   wv))
+    (define open
+      (for/list ([wv (in-list (all-webviews))]
+                 #:unless (webview-closed? wv))
+        wv))
     (cond
       [(null? open) #t]
       [(and deadline (>= (current-inexact-milliseconds) deadline)) #f]

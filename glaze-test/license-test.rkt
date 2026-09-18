@@ -27,6 +27,7 @@
 (check-true (> (days-until-expiry "2099-01-01") 0) "future expiry is positive")
 (check-true (< (days-until-expiry "2000-01-01") 0) "past expiry is negative")
 (check-exn exn:fail? (lambda () (days-until-expiry "not-a-date")) "malformed date raises")
+(check-exn exn:fail? (lambda () (days-until-expiry "2026-02-31")) "impossible date raises")
 
 ;; ---- openssl presence gate ----
 
@@ -60,6 +61,20 @@
                     #:machine-id mid
                     #:out license-path))
    "issuing a license runs")
+  ;; JSON control characters in customer-facing claims must be escaped by the
+  ;; canonical signer and round-trip without corrupting the license JSON.
+  (define control-path (build-path dir "control.license"))
+  (define control-subject (string-append "Acme" (string (integer->char 1)) " Corp"))
+  (issue-license #:private-key priv
+                 #:product "TestApp"
+                 #:subject control-subject
+                 #:out control-path)
+  (define control-ok
+    (validate-license control-path #:public-key pub #:product "TestApp"))
+  (check-true (hash-ref control-ok 'valid) "control-char claim license validates")
+  (check-equal? (hash-ref control-ok 'subject) control-subject
+                "control-char claim round-trips")
+
   (define ok (validate-license license-path #:public-key pub #:product "TestApp"))
   (check-true (hash-ref ok 'valid) "license validates")
   (check-equal? (hash-ref ok 'subject) "customer@example.com" "subject round-trips")
