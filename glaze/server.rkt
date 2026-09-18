@@ -26,6 +26,7 @@
          racket/string
          racket/tcp
          "api.rkt"
+         "assets.rkt"
          "events.rkt")
 
 (provide start-dev-server
@@ -61,12 +62,21 @@
                       #:events [event-bus #f]
                       #:api-token [api-token #f]
                       #:serve-api-client? [serve-client? #t])
+  (unless (and (exact-integer? port) (<= 1 port 65535))
+    (raise-argument-error 'start-server "exact-integer? in [1, 65535]" port))
+  (unless (or (path? public-dir) (string? public-dir))
+    (raise-argument-error 'start-server "(or/c path? string?)" public-dir))
+  (unless (and (list? api-routes) (andmap route? api-routes))
+    (raise-argument-error 'start-server "(listof route?)" api-routes))
   (when (and event-bus (not (event-bus? event-bus)))
-    (raise-argument-error 'start-server "event-bus?" event-bus))
+    (raise-argument-error 'start-server "(or/c #f event-bus?)" event-bus))
   (when (and api-token (not (string? api-token)))
     (raise-argument-error 'start-server "(or/c #f string?)" api-token))
+  (unless (boolean? serve-client?)
+    (raise-argument-error 'start-server "boolean?" serve-client?))
+  (define resolved-public-dir (resolve-public-dir public-dir))
   (define dispatcher
-    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))
+    (make-dispatcher resolved-public-dir api-routes port event-bus serve-client? api-token))
   (define shutdown-server
     (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
