@@ -85,11 +85,12 @@
 (let-values ([(_st b) (call "GET" "/glaze/api.js")])
   (define js (bytes->string/utf-8 b))
   (check-true (string-contains? js "glaze.call") "client has call wrapper")
-  (check-true (string-contains? js "counterBump: function(body)") "route -> counterBump()")
-  (check-true (string-contains? js "itemsId:") "path param -> itemsId()")
+  (check-true (string-contains? js "\"counterBump\": function(body)")
+              "route -> counterBump()")
+  (check-true (string-contains? js "\"itemsId\": function(p0, body)")
+              "path param -> itemsId() with safe positional argument")
   (check-true (string-contains? js "EventSource('/glaze/events')") "SSE endpoint"))
 
-;; ---- SSE over HTTP ----
 ;; ---- SSE over HTTP (curl as a real streaming client) ----
 (define out-path (make-temporary-file "sse-out-~a.txt"))
 (define curl-exe (or (find-executable-path "curl.exe" #f)
@@ -113,7 +114,6 @@
 (check-true (string-contains? sse-text "\"msg\":\"world\"") "SSE payload delivered")
 
 (delete-directory/files dir)
-
 
 ;; ---- event input hardening ----
 (let ()
