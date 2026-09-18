@@ -62,12 +62,13 @@
 
 (define (ensure-public-dir dir)
   (unless (directory-exists? dir)
-    (make-directory dir))
+    (make-directory* dir))
   dir)
 
 (define (copy-template src-dir dest-dir)
   (when (directory-exists? src-dir)
-    (for ([f (in-directory src-dir)])
+    (for ([f (in-directory src-dir)]
+          #:when (file-exists? f))
       (define rel (find-relative-path src-dir f))
       (define dest (build-path dest-dir rel))
       (unless (file-exists? dest)
