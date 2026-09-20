@@ -58,7 +58,7 @@ Native WebView support is mandatory for application startup. `run-app` and `open
 | macOS | WKWebView is built into macOS; run inside a logged-in graphical session. |
 | Linux | GTK 3 + WebKitGTK (`libwebkit2gtk-4.1-0` on current Debian/Ubuntu; distro equivalent elsewhere) and a graphical desktop session/Xvfb. |
 
-When startup cannot initialize the native backend, Glaze prints the underlying backend error followed by an actionable platform-specific install/repair command or download location.
+When startup cannot initialize the native backend, Glaze preserves the underlying backend error and adds actionable installation/repair guidance. Interactive desktop apps also attempt to show the same diagnosis in an OS-level error dialog, which matters for packaged Windows `--gui` executables that have no console. CI suppresses the dialog automatically; `GLAZE_NO_STARTUP_DIALOG=1` disables it explicitly.
 
 ## Quick Start
 
@@ -113,8 +113,8 @@ There is intentionally no browser-mode `dev`/`serve` command. Development and pr
 Package a Glaze project into a platform distribution (`raco exe` + `raco distribute`) with the frontend assets bundled alongside the executable. On macOS the distribution is a proper `.app` bundle with your `--version` stamped into `Info.plist`.
 
 ```bash
-raco glaze build --name myapp              # produces dist/myapp(.exe) + dist/lib + dist/public
-raco glaze build --name myapp --version 1.2.0 --installer  # + msi / dmg / AppImage (zip/tar.gz fallback)
+raco glaze build --name myapp
+raco glaze build --name myapp --version 1.2.0 --installer
 ```
 
 Options: `--name`, `--version`, `--icon <.ico/.icns>`, `--entry <path>` (default `main.rkt`), `--out <dir>` (default `dist`), `--embed-dlls` (Windows: single-file exe), `--installer`.
@@ -145,9 +145,7 @@ Details: `--sign` takes a codesign identity (macOS) or a SHA-1 thumbprint / subj
 `glaze/license` ships an offline license-key scheme with zero native dependencies — RSA-2048/SHA-256 signatures via the system `openssl` CLI:
 
 ```bash
-# vendor side — once:
-raco glaze keygen --out keys                # private.pem + public.pem
-# per customer (optionally expiry- and machine-bound):
+raco glaze keygen --out keys
 raco glaze license sign --key keys/private.pem --product "MyApp" \
   --subject "customer@example.com" --expiry 2027-12-31 --out app.license
 raco glaze license verify --pub keys/public.pem --product "MyApp" app.license
@@ -171,8 +169,7 @@ Failure reasons are stable tags (`missing-file`, `malformed`, `signature`, `prod
 
 ```racket
 (define info (check-update manifest-url #:current-version "1.0.0"))
-;; app downloads (hash-ref info 'url) ... then:
-(verify-file-sha256 artifact (hash-ref info 'sha256))   ; #t / #f (#f = cannot verify)
+(verify-file-sha256 artifact (hash-ref info 'sha256))
 ```
 
 ## Project Structure
@@ -186,7 +183,7 @@ myapp/
     └── index.html    # Frontend
 ```
 
-`raco glaze init` generates a native-window entry point:
+`raco glaze init` generates a native-window entry point. The call is deliberately top-level so the same file also starts correctly when `raco glaze build` packages it through the generated wrapper:
 
 ```racket
 #lang racket/base
@@ -196,9 +193,8 @@ myapp/
 
 (define-runtime-path public "public")
 
-(module+ main
-  (run-app #:public-dir public
-           #:title "myapp"))
+(run-app #:public-dir public
+         #:title "myapp")
 ```
 
 `run-app` starts the local HTTP application server, opens the native WebView window, and shuts the server down when the window closes. A native-backend failure is fatal and includes dependency guidance.
@@ -239,16 +235,6 @@ Starts a local HTTP server serving static files with SPA fallback, plus optional
 (start-server #:port 8080
               #:public-dir "public"
               #:api (list (GET "api/ping" (lambda (req) (hasheq 'pong #t)))))
-;; Returns (values port shutdown-proc); verifies the listener is accepting
-;; before returning.
-```
-
-### `stop-server`
-
-Stops the server.
-
-```racket
-(stop-server shutdown-proc)
 ```
 
 ### `open-browser`
@@ -274,17 +260,9 @@ The embedded frontend calls Racket with plain `fetch("/api/...")` — Glaze's an
 ```
 
 - Handlers take the request plus captured `:params`; return a jsexpr (auto-wrapped as JSON 200) or a full response.
-- `request-json-body` parses the JSON body — note Racket jsexpr parses JSON object keys as **symbols** (`(hash-ref body 'delta)`).
+- `request-json-body` parses the JSON body — Racket jsexpr parses JSON object keys as **symbols** (`(hash-ref body 'delta)`).
 - A handler that raises becomes a 500 JSON error, never a broken connection.
 - Unmatched requests fall through to static files (SPA `index.html` fallback).
-
-In the page:
-
-```js
-const s = await fetch('/api/counter/bump',
-  {method:'POST', headers:{'Content-Type':'application/json'},
-   body: JSON.stringify({delta: 5})}).then(r => r.json());
-```
 
 ### Typed routes, one declaration — `define-api-routes`
 
@@ -295,7 +273,7 @@ const s = await fetch('/api/counter/bump',
    (hasheq 'count (add1 delta))])
 ```
 
-One clause defines a Racket procedure (`bump`), a route (bad input → a 400 naming the parameter; handler errors → 500), and a JS client entry — the served `/glaze/api.js` exposes `glaze.api.counterBump({delta: 5})`, plus `glaze.call(method, path, body)` and `glaze.on(name, fn)`.
+One clause defines a Racket procedure, a validated HTTP route, and a JS client entry exposed by `/glaze/api.js`.
 
 ### Backend → frontend push (SSE)
 
@@ -309,16 +287,14 @@ One clause defines a Racket procedure (`bump`), a route (bad input → a 400 nam
 glaze.on('count-changed', s => render(s.count));
 ```
 
-The page can also use `new EventSource('/glaze/events')` directly. The event stream uses the same local origin as the embedded WebView frontend.
+The event stream uses the same local origin as the embedded WebView frontend.
 
 ### Security
 
-- Requests are only served for Host headers `127.0.0.1` / `localhost` / `[::1]` (DNS-rebinding guard; hostile origins get 403).
-- API handlers never crash the connection — parameter problems are 400 JSON, handler exceptions are 500 JSON (and reach `run-app`'s `#:on-error` for crash reporting hooks).
-- Optional API token (`#:api-token`): guards API routes and the SSE stream (401 otherwise). The app window opens a one-time `?glaze-token=` bootstrap URL that exchanges the token for an `HttpOnly` cookie (api.js deliberately hands out nothing); programmatic clients send `X-Glaze-Token`.
-- Update checks: `run-app #:check-update <manifest-url> #:current-version "1.0.0"` fetches `{"version","url","notes"}`, reports to stderr and broadcasts `update-available`. Self-replacement stays the app's decision.
-
-See [`examples/counter/`](examples/counter/) for the complete working app.
+- Requests are only served for Host headers `127.0.0.1` / `localhost` / `[::1]`.
+- API handler parameter errors become 400 JSON; handler exceptions become 500 JSON and reach `run-app`'s `#:on-error` hook.
+- Optional `#:api-token` protects API routes and SSE. The native app window uses a one-time bootstrap URL to obtain an HttpOnly cookie; programmatic clients use `X-Glaze-Token`.
+- Update checks remain opt-in through `run-app #:check-update ...`.
 
 ## System Integrations (`glaze/sys`)
 
@@ -331,37 +307,19 @@ See [`examples/counter/`](examples/counter/) for the complete working app.
 (unless (single-instance? "com.me.app") (exit 0))
 ```
 
-Desktop notifications work on all three platforms (osascript / notify-send / WinRT toast via PowerShell).
-
-Window controls (from `glaze/webview`): `webview-set-title!`, `webview-set-size!`, `webview-set-fullscreen!`.
+Window controls include `webview-set-title!`, `webview-set-size!`, `webview-set-fullscreen!`, and `webview-focus!`.
 
 ## System Tray
 
-Glaze provides a cross-platform system tray so your app can live in the notification area / menu bar with a working menu. The backend is chosen by platform — pure Racket FFI, no native compilation required:
+Glaze provides a cross-platform system tray:
 
-- **Windows** — `Shell_NotifyIconW` via `ffi/unsafe`
-- **macOS** — `NSStatusItem` / `NSMenu` via `ffi/unsafe/objc`
-- **Linux** — `libayatana-appindicator` + `libgtk-3` via `ffi/unsafe`
+- **Windows** — `Shell_NotifyIconW`
+- **macOS** — `NSStatusItem` / `NSMenu`
+- **Linux** — `libayatana-appindicator` + `libgtk-3`
 
-If a platform's tray libraries aren't available at runtime, the tray degrades to a no-op so the main native application can still run.
-
-```racket
-(require glaze)
-
-(define t
-  (make-tray #:icon #f
-             #:tooltip "My Glaze App"
-             #:menu (list (make-menu-item "Quit"
-                                          #:action (lambda () (exit 0))))))
-(tray-set-tooltip! t "running")
-(tray-close t)
-```
-
-> **macOS note:** a pure menu-bar app (no Dock icon) requires building as an `.app` bundle with `LSUIElement` set — `raco glaze build` configures this for you.
+The tray is an optional integration. If its backend is unavailable it may degrade to an inert stub; that is intentionally different from the mandatory main WebView.
 
 ## App Platform APIs
-
-Beyond the server/WebView core, Glaze ships the desktop-app capabilities commercial apps need:
 
 ```racket
 (require glaze)
@@ -400,10 +358,8 @@ Beyond the server/WebView core, Glaze ships the desktop-app capabilities commerc
 
 - [x] **Phase 1** — Local HTTP server + early browser prototype
 - [x] **Phase 2** — Frontend asset bundling, system tray, app packaging
-- [x] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK) — *done, verified by the 3-OS CI e2e*
+- [x] **Phase 3** — Native WebView embedding (WebView2 / WKWebView / WebKitGTK) — verified by the 3-OS CI e2e
 - [x] **GUI-first contract** — native WebView required; actionable failure instead of browser fallback
-
-> **Phase 3 done:** all three backends (macOS WKWebView, Windows WebView2, Linux WebKitGTK) pass the real-window CI e2e — open, page load, `webview-title`/`url` verification, `webview-capture!` screenshots, `webview-navigate`, close (programmatic and OS chrome), and `#:on-close` callbacks; `#:devtools?` and resize-follow on all three platforms. Pure Racket FFI throughout, no compiler.
 
 ## License
 
