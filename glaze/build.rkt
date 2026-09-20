@@ -245,7 +245,8 @@
 
   ;; Optional installer step. Each platform helper probes for the required
   ;; external tooling and warns (without failing the build) when it's absent;
-  ;; the CI matrix installs them. Returns the produced artifact path (or #f).
+  ;; the CI matrix exercises native paths and documented fallbacks. Returns
+  ;; the produced artifact path (or #f).
   (define installer-artifact
     (if installer?
         (make-installer os out-dir-path app-name (or version "0.0.0"))
@@ -285,11 +286,44 @@
 (define (run . args)
   (apply system* args))
 
-;; Windows: prefer WiX v4 (`wix`), then NSIS (`makensis`); else zip the dist.
+;; Return the WiX executable only when the installed major version is 4.
+;; Newer WiX majors have changed CLI/licensing behavior and must not be fed
+;; Glaze's v4 source/command line by accident. Failure to probe is treated as
+;; unsupported so NSIS/archive fallback remains available.
+(define (find-wix-v4)
+  (define wix
+    (or (find-executable-path "wix.exe" #f)
+        (find-executable-path "wix" #f)))
+  (and wix
+       (with-handlers ([exn:fail? (lambda (e) #f)])
+         (define out (open-output-string))
+         (define err (open-output-string))
+         (define code
+           (parameterize ([current-output-port out]
+                          [current-error-port err])
+             (system*/exit-code wix "--version")))
+         (define text
+           (string-trim
+            (string-append (get-output-string out) " " (get-output-string err))))
+         (define m (regexp-match #px"^\\s*([0-9]+)(?:[.]|\\s|$)" text))
+         (and (zero? code)
+              m
+              (= (string->number (second m)) 4)
+              wix))))
+
+;; Windows: prefer supported WiX v4, then NSIS; else zip the dist.
 (define (make-windows-installer out-dir app-name [version "0.0.0"])
   (define dist (path->complete-path out-dir))
+  (define any-wix
+    (or (find-executable-path "wix.exe" #f)
+        (find-executable-path "wix" #f)))
+  (define wix-v4 (find-wix-v4))
+  (when (and any-wix (not wix-v4))
+    (displayln
+     "[glaze] ignoring unsupported WiX version; Glaze currently supports WiX v4."
+     (current-error-port)))
   (cond
-    [(find-tool "wix.exe" "wix")
+    [wix-v4
      (define msi-path (build-path dist (string-append app-name ".msi")))
      ;; WiX v4: `wix build -o out.msi <wxs>`; we generate a minimal wxs.
      (define wxs-path (make-temporary-file "glaze-wix-~a.wxs"))
@@ -300,10 +334,12 @@
            #:exists 'replace)
          (when (file-exists? msi-path) (delete-file msi-path)))
        (lambda ()
-         (unless (run (find-executable-path "wix.exe" #f)
+         (unless (run wix-v4
                       "build" "-o" (path->string msi-path)
                       (path->string wxs-path))
-           (error 'build-app "WiX build failed"))
+           (error 'build-app "WiX v4 build failed"))
+         (unless (file-exists? msi-path)
+           (error 'build-app "WiX v4 reported success but installer is missing: ~a" msi-path))
          msi-path)
        (lambda () (when (file-exists? wxs-path) (delete-file wxs-path))))]
     [(find-tool "makensis")
@@ -323,8 +359,9 @@
          setup-exe)
        (lambda () (when (file-exists? nsis-path) (delete-file nsis-path))))]
     [else
-     (display "[glaze] No Windows installer toolchain found (wix / makensis); " (current-error-port))
-     (displayln "producing a .zip instead. Install WiX Toolset or NSIS for a real installer."
+     (display "[glaze] No supported Windows installer toolchain found (WiX v4 / NSIS); "
+              (current-error-port))
+     (displayln "producing a .zip instead. Install WiX Toolset v4 or NSIS for a real installer."
                 (current-error-port))
      (archive-directory dist app-name "zip")]))
 
