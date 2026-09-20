@@ -3,9 +3,9 @@
 ;; JSON API routes for the frontend <-> Racket bridge.
 ;;
 ;; The page calls `fetch("/api/...")`; Racket answers JSON. This is Glaze's
-;; answer to Tauri's invoke(): plain HTTP on the same server that serves the
-;; frontend, so one code path works in the embedded WebView, in the
-;; system-browser fallback, and in dev (curl-able).
+;; answer to Tauri's invoke(): plain HTTP on the same local server that serves
+;; the embedded WebView frontend. The endpoints are also easy to exercise from
+;; tests and developer tools such as curl.
 ;;
 ;; Routes are ordinary values:
 ;;
