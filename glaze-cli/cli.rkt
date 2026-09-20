@@ -5,8 +5,6 @@
          racket/file
          racket/string
          racket/system
-         glaze/server
-         glaze/browser
          glaze/build
          glaze/license)
 
@@ -14,18 +12,15 @@
   (printf "Creating Glaze project: ~a\n" name)
   (make-directory* name)
   (make-directory* (build-path name "public"))
-  (write-file (build-path name "main.rkt")
-              (string-append "#lang racket/base\n\n"
-                             "(require glaze)\n\n"
-                             "(define-values (port server)\n"
-                             "  (start-dev-server #:public-dir \"public\"))\n\n"
-                             "(printf \"Glaze app running at http://127.0.0.1:~a\\n\" port)\n"
-                             "(open-browser (format \"http://127.0.0.1:~a\" port))\n\n"
-                             "(with-handlers ([exn:break?\n"
-                             "                 (lambda (e)\n"
-                             "                   (stop-server server)\n"
-                             "                   (printf \"Server stopped.\\n\"))])\n"
-                             "  (sync never-evt))\n"))
+  (write-file
+   (build-path name "main.rkt")
+   (string-append
+    "#lang racket/base\n\n"
+    "(require racket/runtime-path\n"
+    "         glaze)\n\n"
+    "(define-runtime-path public \"public\")\n\n"
+    "(run-app #:public-dir public\n"
+    (format "         #:title ~s)\n" name)))
   (write-file
    (build-path name "public" "index.html")
    #"<!DOCTYPE html>
@@ -54,16 +49,24 @@
 </body>
 </html>
 ")
-  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n" name))
+  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n\nOr use:\n  cd ~a\n  raco glaze dev\n"
+          name name))
 
-(define (dev-server)
-  (define-values (actual-port server) (start-dev-server #:port 8080 #:public-dir "public"))
-  (printf "Dev server running at http://127.0.0.1:~a\n" actual-port)
-  (open-browser (format "http://127.0.0.1:~a" actual-port))
-  (with-handlers ([exn:break? (lambda (e)
-                                (stop-server server)
-                                (printf "Server stopped.\n"))])
-    (sync never-evt)))
+;; `dev` runs the project's real entry point, so routes/events/window options
+;; in main.rkt are preserved. Glaze development follows the same native GUI
+;; path as the shipped application; there is no browser-mode escape hatch.
+(define (dev-app)
+  (define entry (build-path (current-directory) "main.rkt"))
+  (unless (file-exists? entry)
+    (error 'dev "main.rkt not found in ~a; run this command from a Glaze project"
+           (path->string (current-directory))))
+  (define racket-exe (find-executable-path "racket" #f))
+  (unless racket-exe
+    (error 'dev "racket executable not found on PATH"))
+  (printf "Starting Glaze native app: ~a\n" (path->string entry))
+  (define code (system*/exit-code racket-exe (path->string entry)))
+  (unless (zero? code)
+    (exit code)))
 
 ;; Parse the rest args for `build`. Recognized flags:
 ;;   --name <name>        app/bundle name (default: project dir name)
@@ -76,12 +79,11 @@
 ;;   --sign <id>          code-signing identity (macOS: codesign identity,
 ;;                        "-" = ad-hoc; Windows: cert SHA-1 thumbprint or
 ;;                        subject name for signtool)
-;;   --entitlements <p>   macOS: .entitlements plist for codesign
-;;   --no-hardened-runtime  macOS: disable hardened runtime (notarization
-;;                        needs it; leave it on unless you know better)
+;;   --entitlements <p>   macOS: path to a .entitlements plist
+;;   --no-hardened-runtime  macOS: disable hardened runtime
 ;;   --timestamp-url <u>  Windows: RFC-3161 timestamp server for signtool
-;;   --notarize <profile> macOS: notarytool keychain profile; submits the
-;;                        dmg/app for notarization and staples it
+;;   --notarize <profile> macOS: notarytool keychain profile
+;;   --url-scheme <name>  deep-link URL scheme (repeatable)
 (define (parse-build-opts rest)
   (let loop ([args rest]
              [name #f]
@@ -133,7 +135,7 @@
              sign entitlements #t ts-url notarize schemes)]
       [(and (equal? (car args) "--timestamp-url") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
-             sign entitlements no-hardened (cadr args) notarize)]
+             sign entitlements no-hardened (cadr args) notarize schemes)]
       [(and (equal? (car args) "--notarize") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
              sign entitlements no-hardened ts-url (cadr args) schemes)]
@@ -171,12 +173,16 @@
   (displayln "Usage: raco glaze <command> [args]")
   (displayln "")
   (displayln "Commands:")
-  (displayln "  init <name>   Create a new Glaze project")
-  (displayln "  dev           Start dev server with auto-open browser")
+  (displayln "  init <name>   Create a native Glaze desktop project")
+  (displayln "  dev           Run this project's native Glaze desktop app")
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
   (displayln "  keygen        Create an RSA keypair for license signing")
   (displayln "  license       Sign or verify offline license files")
   (displayln "  help          Show this help")
+  (displayln "")
+  (displayln "Glaze requires a working native WebView. If it is missing or broken, startup")
+  (displayln "fails with platform-specific installation/repair instructions; it never opens")
+  (displayln "the system browser as a fallback.")
   (displayln "")
   (displayln "build options:")
   (displayln "  --name <name>        app/bundle name (default: project dir)")
@@ -197,13 +203,11 @@
   (displayln "                       Info.plist entries; call (ensure-url-scheme! ...)")
   (displayln "                       at app start on Windows/Linux)"))
 
-
 (define (write-file path content)
   (call-with-output-file path (lambda (out) (display content out)) #:exists 'replace))
 
 ;; ---- keygen: create an RSA keypair for license signing ----
 
-;;   raco glaze keygen [--out <dir>]     ; writes private.pem + public.pem
 (define (parse-keygen-opts rest)
   (let loop ([args rest] [out "keys"])
     (cond
@@ -242,7 +246,7 @@
     (cond
       [(null? args)
        (values sub key pub product subject expiry machine out (reverse positional))]
-      [(and (null? sub) (member (car args) '("sign" "verify")))
+      [(and (not sub) (member (car args) '("sign" "verify")))
        (loop (cdr args) (car args) key pub product subject expiry machine out positional)]
       [(and (equal? (car args) "--key") (pair? (cdr args)))
        (loop (cddr args) sub (cadr args) pub product subject expiry machine out positional)]
@@ -308,7 +312,7 @@
       (init-project (if (null? rest)
                         "myapp"
                         (car rest)))]
-     ["dev" (dev-server)]
+     ["dev" (dev-app)]
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]
      ["license" (license-command rest)]

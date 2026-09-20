@@ -1,22 +1,23 @@
 #lang racket/base
 
-;; Public WebView API (Phase 3). Opens a native OS window with an embedded
-;; WebView control pointing at a URL (typically the local HTTP server Glaze
-;; started). Dispatches to a platform-specific backend based on
-;; (system-type 'os):
+;; Public WebView API. Opens a native OS window with an embedded WebView
+;; control pointing at a URL (typically the local HTTP server Glaze started).
+;; Dispatches to a platform-specific backend based on (system-type 'os):
 ;;   - 'windows  -> webview-windows.rkt  (Win32 window + WebView2 via COM FFI)
 ;;   - 'macosx   -> webview-macos.rkt    (NSWindow + WKWebView via objc FFI)
 ;;   - 'unix     -> webview-linux.rkt    (GtkWindow + WebKitGTK via FFI)
 ;;
-;; Every backend exports the SAME procedure names (open-webview,
-;; webview-supported?, close-webview, webview-navigate) and performs its own
-;; platform/library gating. If a backend is unavailable, open-webview returns
-;; #f so callers can fall back to opening the system browser (Phase 1/2
-;; behavior).
+;; Glaze is a desktop GUI framework: native WebView startup is part of the
+;; application contract. There is deliberately no browser fallback. If a
+;; backend or runtime dependency is unavailable, startup fails with actionable
+;; platform-specific installation guidance.
 
 (provide open-window
          open-webview
          webview-supported?
+         webview-last-error
+         webview-install-guidance
+         webview-diagnostic
          webview?
          webview-backend
          webview-handle
@@ -35,11 +36,62 @@
          close-all-webviews!
          wait-for-webviews)
 
-(require (only-in "../browser.rkt" open-browser)
+(require "startup-feedback.rkt"
          (only-in "../tray/tray-protocol.rkt" menu?))
 
 ;; A webview handle wraps the backend-specific handle + the backend tag.
 (struct webview (backend handle) #:transparent)
+
+;; Keep the most recent native-backend failure so probes and higher-level
+;; callers can report the real cause rather than masking it.
+(define last-webview-error-box (box #f))
+
+(define (webview-last-error)
+  (unbox last-webview-error-box))
+
+(define (remember-webview-error! e)
+  (set-box! last-webview-error-box e))
+
+(define (clear-webview-error!)
+  (set-box! last-webview-error-box #f))
+
+(define (webview-install-guidance)
+  (case (system-type 'os)
+    [(windows)
+     (string-append
+      "Windows requires Microsoft Edge WebView2 Runtime (Evergreen).\n"
+      "Install or repair it, then start Glaze again:\n"
+      "  winget install --id Microsoft.EdgeWebView2Runtime -e\n"
+      "Official download (Evergreen Bootstrapper / Standalone Installer):\n"
+      "  https://developer.microsoft.com/microsoft-edge/webview2/#download-section\n"
+      "Glaze already ships WebView2Loader.dll. If the Runtime is installed, "
+      "verify that the Glaze package and Racket architecture match your Windows architecture.")]
+    [(unix)
+     (string-append
+      "Linux requires GTK 3 and WebKitGTK at runtime. Install the packages, then start Glaze again:\n"
+      "  Debian/Ubuntu: sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0\n"
+      "  Fedora:        sudo dnf install gtk3 webkit2gtk4.1\n"
+      "  Arch:          sudo pacman -S gtk3 webkit2gtk-4.1\n"
+      "Glaze must also run inside a graphical desktop session (or Xvfb in CI).")]
+    [(macosx)
+     (string-append
+      "WKWebView is built into macOS and normally requires no separate download.\n"
+      "Run Glaze from a logged-in graphical session. If startup still fails, "
+      "report the backend error above together with your macOS and Racket versions.")]
+    [else
+     "This operating system has no native WebView backend in Glaze."]))
+
+(define (webview-error->message e)
+  (cond
+    [(exn? e) (exn-message e)]
+    [(string? e) e]
+    [e (format "~a" e)]
+    [else "the native backend reported that it is unavailable"]))
+
+(define (webview-diagnostic [e (webview-last-error)])
+  (string-append
+   "Native WebView could not start: " (webview-error->message e) "\n\n"
+   (webview-install-guidance)))
 
 ;; Every successfully opened window, weakly held: closed + collected windows
 ;; disappear from all-webviews on their own.
@@ -68,43 +120,44 @@
 (define (ref name)
   (hash-ref (load-backend!) name))
 
+;; Non-throwing capability probe. A failed probe records the reason when one
+;; is available; actual startup through open-window/open-webview is fail-fast.
 (define (webview-supported?)
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    ((ref 'supported?))))
+  (clear-webview-error!)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (remember-webview-error! e)
+                               #f)])
+    (define supported? ((ref 'supported?)))
+    (unless supported?
+      (remember-webview-error!
+       "the platform backend is present but its runtime dependencies are not available"))
+    supported?))
 
-;; open-window: high-level entry. Opens a native window with a webview
-;; rendering `url`. Optional #:title, #:width, #:height, #:on-close.
-;; Returns a webview? on success, or #f if the backend is unavailable.
-;; With #:fallback-browser? #t the system browser is opened instead when the
-;; native backend is unavailable.
+;; open-window: high-level entry. Native GUI is mandatory. If the platform
+;; backend cannot start, the call raises with installation/repair guidance.
 (define (open-window url
                      #:title [title "Glaze"]
                      #:width [width 1024]
                      #:height [height 768]
                      #:devtools? [devtools? #f]
-                     #:on-close [on-close (lambda () (void))]
-                     #:fallback-browser? [fallback? #f])
+                     #:on-close [on-close (lambda () (void))])
   (open-webview url
                 #:title title
                 #:width width
                 #:height height
                 #:devtools? devtools?
-                #:on-close on-close
-                #:fallback-browser? fallback?))
+                #:on-close on-close))
 
 (define (open-webview url
                       #:title [title "Glaze"]
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
-                      #:on-close [on-close (lambda () (void))]
-                      #:fallback-browser? [fallback? #f])
+                      #:on-close [on-close (lambda () (void))])
+  (clear-webview-error!)
   (define h
     (with-handlers ([exn:fail? (lambda (e)
-                                 (fprintf (current-error-port)
-                                          "[glaze] webview backend unavailable (~a); "
-                                          (exn-message e))
-                                 (displayln "use open-browser as fallback." (current-error-port))
+                                 (remember-webview-error! e)
                                  #f)])
       ((ref 'open-webview) url
         #:title title
@@ -113,11 +166,18 @@
         #:devtools? devtools?
         #:on-close on-close)))
   (cond
-    [h (define wv (webview (detected-backend) h))
-       (hash-set! open-registry wv #t)
-       wv]
-    [fallback? (open-browser url) #f]
-    [else #f]))
+    [h
+     (define wv (webview (detected-backend) h))
+     (hash-set! open-registry wv #t)
+     wv]
+    [else
+     (unless (webview-last-error)
+       (remember-webview-error! "the native backend returned unavailable"))
+     (define diagnostic (webview-diagnostic))
+     ;; Packaged GUI apps may have no console. Show the same diagnosis in an
+     ;; OS-level dialog before raising; CI/automation suppresses the dialog.
+     (show-webview-startup-error! diagnostic)
+     (raise-user-error 'open-webview diagnostic)]))
 
 (define (detected-backend)
   (case (system-type 'os)
@@ -150,7 +210,6 @@
 ;; file. Returns the path, or #f when the backend/window cannot be captured.
 (define (webview-capture! wv [dest #f])
   ((ref 'capture!) (webview-handle wv) dest))
-
 
 ;; ---- window controls ----
 (define (webview-set-title! wv t) ((ref 'set-title!) (webview-handle wv) t))

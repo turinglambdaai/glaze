@@ -5,12 +5,13 @@
 ;;   (run-app #:public-dir "public" #:api (list (GET "api/ping" ...)))
 ;;
 ;; picks a free port, starts the server (static + JSON API), opens the native
-;; webview window, calls #:on-ready with the handle, and blocks until the
-;; window closes. Returns (values kind shutdown):
-;;   - kind 'webview: window closed, server already stopped; shutdown is a
-;;     no-op if called again
-;;   - kind 'browser: no native backend, the system browser was opened and
-;;     the server keeps running — call shutdown (or exit) to stop
+;; WebView window, calls #:on-ready with the handle, and blocks until the
+;; window closes. Returns (values 'webview shutdown); shutdown is a no-op if
+;; called again after the normal window-close path.
+;;
+;; Native GUI is the application contract. If the platform WebView cannot
+;; start, run-app stops the local server and propagates the actionable startup
+;; error from glaze/webview. It never opens the system browser as a fallback.
 
 (require racket/random
          "server.rkt"
@@ -57,7 +58,6 @@
                  #:title [title "Glaze"]
                  #:width [width 1024]
                  #:height [height 768]
-                 #:fallback-browser? [fallback? #t]
                  #:events [event-bus #f]
                  #:api-token [api-token #f]
                  #:on-close [user-on-close (lambda () (void))]
@@ -99,7 +99,7 @@
                   (or on-error (current-glaze-error-reporter))])
     (when check-update
       (define info (do-check-update check-update
-                                       #:current-version current-version))
+                                    #:current-version current-version))
       (when info
         (printf "[glaze] update available: ~a (current ~a) — ~a~n"
                 (hash-ref info 'version #f)
@@ -107,27 +107,21 @@
                 (hash-ref info 'url #f))
         (when event-bus
           (bus-broadcast! event-bus 'update-available info))))
+    ;; If native GUI startup fails, never leave the local HTTP server behind.
+    ;; open-window's exception contains the platform-specific install/repair
+    ;; instructions; preserve it unchanged for the caller/user.
     (define wv
-      (open-window open-url
-                   #:title title
-                   #:width width
-                   #:height height
-                   #:on-close (lambda ()
-                                (user-on-close)
-                                (semaphore-post closed))
-                   #:fallback-browser? fallback?))
-    (cond
-      [wv
-       (on-ready wv url)
-       (sync closed)
-       (shutdown)
-       (values 'webview shutdown)]
-      [else
-       ;; Browser fallback: no window to wait on. Leave the server running so
-       ;; the browser keeps working; caller decides when to exit.
-       (on-ready #f url)
-       (printf "[glaze] app served at ~a (system-browser fallback)~n" open-url)
-       (when token
-         (printf "[glaze] api token (X-Glaze-Token header): ~a~n" token))
-       (printf "[glaze] call the returned shutdown procedure or exit to stop~n")
-       (values 'browser shutdown)])))
+      (with-handlers ([exn:fail? (lambda (e)
+                                   (shutdown)
+                                   (raise e))])
+        (open-window open-url
+                     #:title title
+                     #:width width
+                     #:height height
+                     #:on-close (lambda ()
+                                  (user-on-close)
+                                  (semaphore-post closed)))))
+    (on-ready wv url)
+    (sync closed)
+    (shutdown)
+    (values 'webview shutdown)))

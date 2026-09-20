@@ -2,8 +2,8 @@
 
 ;; Backend -> frontend event push: a broadcast bus consumed by the SSE
 ;; endpoint that start-server mounts at /glaze/events (Glaze's answer to
-;; Tauri's emit() and Eel's websocket push — plain SSE on the same origin,
-;; so the browser fallback gets push for free).
+;; Tauri's emit() and Eel's websocket push — plain SSE on the same local
+;; origin used by the embedded WebView).
 ;;
 ;;   (define bus (make-event-bus))
 ;;   (start-server #:public-dir "public" #:events bus ...)
