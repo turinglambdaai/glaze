@@ -5,8 +5,6 @@
          racket/file
          racket/string
          racket/system
-         glaze/server
-         glaze/browser
          glaze/build
          glaze/license)
 
@@ -56,8 +54,8 @@
           name name))
 
 ;; `dev` runs the project's real entry point, so routes/events/window options
-;; in main.rkt are preserved. This is intentionally different from `serve`,
-;; which is the explicit browser/static-server workflow.
+;; in main.rkt are preserved. Glaze development follows the same native GUI
+;; path as the shipped application; there is no browser-mode escape hatch.
 (define (dev-app)
   (define entry (build-path (current-directory) "main.rkt"))
   (unless (file-exists? entry)
@@ -70,18 +68,6 @@
   (define code (system*/exit-code racket-exe (path->string entry)))
   (unless (zero? code)
     (exit code)))
-
-;; Browser-only mode is explicit. Useful for inspecting static frontend assets
-;; without a native WebView; it is not the default Glaze application mode.
-(define (serve-server)
-  (define-values (actual-port server)
-    (start-dev-server #:port 8080 #:public-dir "public"))
-  (printf "Browser-only dev server running at http://127.0.0.1:~a\n" actual-port)
-  (open-browser (format "http://127.0.0.1:~a" actual-port))
-  (with-handlers ([exn:break? (lambda (e)
-                                (stop-server server)
-                                (printf "Server stopped.\n"))])
-    (sync never-evt)))
 
 ;; Parse the rest args for `build`. Recognized flags:
 ;;   --name <name>        app/bundle name (default: project dir name)
@@ -151,7 +137,7 @@
              sign entitlements #t ts-url notarize schemes)]
       [(and (equal? (car args) "--timestamp-url") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
-             sign entitlements no-hardened (cadr args) notarize)]
+             sign entitlements no-hardened (cadr args) notarize schemes)]
       [(and (equal? (car args) "--notarize") (pair? (cdr args)))
        (loop (cddr args) name version icon entry out embed installer
              sign entitlements no-hardened ts-url (cadr args) schemes)]
@@ -189,16 +175,16 @@
   (displayln "Usage: raco glaze <command> [args]")
   (displayln "")
   (displayln "Commands:")
-  (displayln "  init <name>   Create a new GUI-first Glaze project")
+  (displayln "  init <name>   Create a native Glaze desktop project")
   (displayln "  dev           Run this project's native Glaze desktop app")
-  (displayln "  serve         Start a browser-only static dev server")
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
   (displayln "  keygen        Create an RSA keypair for license signing")
   (displayln "  license       Sign or verify offline license files")
   (displayln "  help          Show this help")
   (displayln "")
-  (displayln "Native WebView startup failures are errors by default and print platform-specific")
-  (displayln "installation guidance. Browser mode is opt-in via `serve` or #:fallback-browser? #t.")
+  (displayln "Glaze requires a working native WebView. If it is missing or broken, startup")
+  (displayln "fails with platform-specific installation/repair instructions; it never opens")
+  (displayln "the system browser as a fallback.")
   (displayln "")
   (displayln "build options:")
   (displayln "  --name <name>        app/bundle name (default: project dir)")
@@ -330,7 +316,6 @@
                         "myapp"
                         (car rest)))]
      ["dev" (dev-app)]
-     ["serve" (serve-server)]
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]
      ["license" (license-command rest)]
