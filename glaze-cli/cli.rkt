@@ -19,9 +19,8 @@
     "(require racket/runtime-path\n"
     "         glaze)\n\n"
     "(define-runtime-path public \"public\")\n\n"
-    "(module+ main\n"
-    "  (run-app #:public-dir public\n"
-    (format "           #:title ~s))\n" name)))
+    "(run-app #:public-dir public\n"
+    (format "         #:title ~s)\n" name)))
   (write-file
    (build-path name "public" "index.html")
    #"<!DOCTYPE html>
@@ -80,12 +79,11 @@
 ;;   --sign <id>          code-signing identity (macOS: codesign identity,
 ;;                        "-" = ad-hoc; Windows: cert SHA-1 thumbprint or
 ;;                        subject name for signtool)
-;;   --entitlements <p>   macOS: .entitlements plist for codesign
-;;   --no-hardened-runtime  macOS: disable hardened runtime (notarization
-;;                        needs it; leave it on unless you know better)
+;;   --entitlements <p>   macOS: path to a .entitlements plist
+;;   --no-hardened-runtime  macOS: disable hardened runtime
 ;;   --timestamp-url <u>  Windows: RFC-3161 timestamp server for signtool
-;;   --notarize <profile> macOS: notarytool keychain profile; submits the
-;;                        dmg/app for notarization and staples it
+;;   --notarize <profile> macOS: notarytool keychain profile
+;;   --url-scheme <name>  deep-link URL scheme (repeatable)
 (define (parse-build-opts rest)
   (let loop ([args rest]
              [name #f]
@@ -210,7 +208,6 @@
 
 ;; ---- keygen: create an RSA keypair for license signing ----
 
-;;   raco glaze keygen [--out <dir>]     ; writes private.pem + public.pem
 (define (parse-keygen-opts rest)
   (let loop ([args rest] [out "keys"])
     (cond
@@ -249,7 +246,7 @@
     (cond
       [(null? args)
        (values sub key pub product subject expiry machine out (reverse positional))]
-      [(and (null? sub) (member (car args) '("sign" "verify")))
+      [(and (not sub) (member (car args) '("sign" "verify")))
        (loop (cdr args) (car args) key pub product subject expiry machine out positional)]
       [(and (equal? (car args) "--key") (pair? (cdr args)))
        (loop (cddr args) sub (cadr args) pub product subject expiry machine out positional)]
