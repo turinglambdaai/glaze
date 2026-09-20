@@ -16,7 +16,7 @@
          glaze/webview/main
          (only-in glaze/webview/webview-macos mac:webview-window))
 
-(import-class NSColor NSWindow)
+(import-class NSColor NSString NSWindow)
 
 (define-cstruct _NSPoint ([x _double] [y _double]))
 (define-cstruct _NSSize ([width _double] [height _double]))
@@ -25,6 +25,7 @@
 (define NSBackingStoreBuffered 2)
 (define NSWindowAbove 1)
 (define NSWindowOcclusionStateVisible 2)
+(define cover-margin 64.0)
 
 (define failures '())
 
@@ -51,6 +52,29 @@
     (and (string? current-title)
          (regexp-match #px"^occlusion:([0-9]+)$" current-title)))
   (and match (string->number (cadr match))))
+
+(define (->nsstring s)
+  (tell (tell NSString alloc) initWithUTF8String: #:type _string s))
+
+;; Ask KVC to box the NSUInteger and read its decimal string. This avoids an
+;; objc_msgSend integer-return anomaly seen on hosted arm64 runners, where a
+;; direct _uintptr call returned 8192 for both visible windows instead of the
+;; documented NSWindowOcclusionStateVisible value (2).
+(define occlusion-state-key (->nsstring "occlusionState"))
+(define (window-occlusion-state window)
+  (define boxed
+    (tell #:type _id window valueForKey: #:type _id occlusion-state-key))
+  (define state-string (tell #:type _id boxed stringValue))
+  (string->number (tell #:type _string state-string UTF8String)))
+
+(define (expanded-cover-frame frame)
+  (define origin (NSRect-origin frame))
+  (define size (NSRect-size frame))
+  (make-NSRect
+   (make-NSPoint (- (NSPoint-x origin) cover-margin)
+                 (- (NSPoint-y origin) cover-margin))
+   (make-NSSize (+ (NSSize-width size) (* 2.0 cover-margin))
+                (+ (NSSize-height size) (* 2.0 cover-margin)))))
 
 (define public-dir (make-temporary-file "glaze-occlusion-~a" 'directory))
 (define stop-server! #f)
@@ -100,11 +124,12 @@
 
      (define target (mac:webview-window (webview-handle wv)))
      (define target-frame (tell #:type _NSRect target frame))
+     (define cover-frame (expanded-cover-frame target-frame))
      (set! cover
            (tell (tell NSWindow alloc)
                  initWithContentRect:
                  #:type _NSRect
-                 target-frame
+                 cover-frame
                  styleMask:
                  #:type _uintptr
                  0
@@ -135,8 +160,12 @@
                   #:type _double
                   1.0))
      ;; Borderless content and frame rectangles are identical, so using the
-     ;; target's frame covers its full bounds without introducing title-bar
-     ;; geometry differences.
+     ;; target's frame plus a small margin covers its full bounds without
+     ;; title-bar, shadow, or rounded-corner geometry leaking through.
+     (tellv cover
+            setLevel:
+            #:type _intptr
+            (add1 (tell #:type _intptr target level)))
      (tellv cover
             orderWindow:
             #:type _intptr
@@ -144,22 +173,23 @@
             relativeTo:
             #:type _intptr
             (tell #:type _intptr target windowNumber))
+     (tellv cover orderFrontRegardless)
 
      (define (fully-occluded?)
        (and (tell #:type _bool target isVisible)
             (positive?
              (bitwise-and NSWindowOcclusionStateVisible
-                          (tell #:type _uintptr cover occlusionState)))
+                          (window-occlusion-state cover)))
             (zero?
              (bitwise-and NSWindowOcclusionStateVisible
-                          (tell #:type _uintptr target occlusionState)))))
+                          (window-occlusion-state target)))))
 
      (unless (check! "AppKit reports the covered target as fully occluded"
                      (wait-until fully-occluded? 10))
        (error 'macos-occlusion-e2e
               "could not establish occlusion (target state=~a, cover state=~a)"
-              (tell #:type _uintptr target occlusionState)
-              (tell #:type _uintptr cover occlusionState)))
+              (window-occlusion-state target)
+              (window-occlusion-state cover)))
 
      (define before (tick-number wv))
      (log "fully occluded at tick ~a; holding cover for 35 seconds" before)
