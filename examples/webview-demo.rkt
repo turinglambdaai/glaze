@@ -70,15 +70,16 @@ HTML
 (say "[demo] server up on 127.0.0.1:~a\n" port)
 
 (define closed? (box #f))
-(define wv (open-window (format "http://127.0.0.1:~a/" port)
-                        #:title "Glaze · Native WebView Demo"
-                        #:width 960
-                        #:height 680
-                        #:on-close (lambda () (set-box! closed? #t))))
-(unless wv
-  (stop)
-  (delete-directory/files dir)
-  (error 'demo "native WebView backend unavailable — see the Glaze diagnostic above"))
+(define wv
+  (with-handlers ([exn:fail? (lambda (e)
+                               (stop)
+                               (delete-directory/files dir)
+                               (raise e))])
+    (open-window (format "http://127.0.0.1:~a/" port)
+                 #:title "Glaze · Native WebView Demo"
+                 #:width 960
+                 #:height 680
+                 #:on-close (lambda () (set-box! closed? #t)))))
 (say "[demo] native window opened (backend=~a)\n" (webview-backend wv))
 
 (define tmp (path->string (find-system-path 'temp-dir)))
