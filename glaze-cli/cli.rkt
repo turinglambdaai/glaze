@@ -14,18 +14,16 @@
   (printf "Creating Glaze project: ~a\n" name)
   (make-directory* name)
   (make-directory* (build-path name "public"))
-  (write-file (build-path name "main.rkt")
-              (string-append "#lang racket/base\n\n"
-                             "(require glaze)\n\n"
-                             "(define-values (port server)\n"
-                             "  (start-dev-server #:public-dir \"public\"))\n\n"
-                             "(printf \"Glaze app running at http://127.0.0.1:~a\\n\" port)\n"
-                             "(open-browser (format \"http://127.0.0.1:~a\" port))\n\n"
-                             "(with-handlers ([exn:break?\n"
-                             "                 (lambda (e)\n"
-                             "                   (stop-server server)\n"
-                             "                   (printf \"Server stopped.\\n\"))])\n"
-                             "  (sync never-evt))\n"))
+  (write-file
+   (build-path name "main.rkt")
+   (string-append
+    "#lang racket/base\n\n"
+    "(require racket/runtime-path\n"
+    "         glaze)\n\n"
+    "(define-runtime-path public \"public\")\n\n"
+    "(module+ main\n"
+    "  (run-app #:public-dir public\n"
+    (format "           #:title ~s))\n" name)))
   (write-file
    (build-path name "public" "index.html")
    #"<!DOCTYPE html>
@@ -54,11 +52,31 @@
 </body>
 </html>
 ")
-  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n" name))
+  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n\nOr use:\n  cd ~a\n  raco glaze dev\n"
+          name name))
 
-(define (dev-server)
-  (define-values (actual-port server) (start-dev-server #:port 8080 #:public-dir "public"))
-  (printf "Dev server running at http://127.0.0.1:~a\n" actual-port)
+;; `dev` runs the project's real entry point, so routes/events/window options
+;; in main.rkt are preserved. This is intentionally different from `serve`,
+;; which is the explicit browser/static-server workflow.
+(define (dev-app)
+  (define entry (build-path (current-directory) "main.rkt"))
+  (unless (file-exists? entry)
+    (error 'dev "main.rkt not found in ~a; run this command from a Glaze project"
+           (path->string (current-directory))))
+  (define racket-exe (find-executable-path "racket" #f))
+  (unless racket-exe
+    (error 'dev "racket executable not found on PATH"))
+  (printf "Starting Glaze native app: ~a\n" (path->string entry))
+  (define code (system*/exit-code racket-exe (path->string entry)))
+  (unless (zero? code)
+    (exit code)))
+
+;; Browser-only mode is explicit. Useful for inspecting static frontend assets
+;; without a native WebView; it is not the default Glaze application mode.
+(define (serve-server)
+  (define-values (actual-port server)
+    (start-dev-server #:port 8080 #:public-dir "public"))
+  (printf "Browser-only dev server running at http://127.0.0.1:~a\n" actual-port)
   (open-browser (format "http://127.0.0.1:~a" actual-port))
   (with-handlers ([exn:break? (lambda (e)
                                 (stop-server server)
@@ -171,12 +189,16 @@
   (displayln "Usage: raco glaze <command> [args]")
   (displayln "")
   (displayln "Commands:")
-  (displayln "  init <name>   Create a new Glaze project")
-  (displayln "  dev           Start dev server with auto-open browser")
+  (displayln "  init <name>   Create a new GUI-first Glaze project")
+  (displayln "  dev           Run this project's native Glaze desktop app")
+  (displayln "  serve         Start a browser-only static dev server")
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
   (displayln "  keygen        Create an RSA keypair for license signing")
   (displayln "  license       Sign or verify offline license files")
   (displayln "  help          Show this help")
+  (displayln "")
+  (displayln "Native WebView startup failures are errors by default and print platform-specific")
+  (displayln "installation guidance. Browser mode is opt-in via `serve` or #:fallback-browser? #t.")
   (displayln "")
   (displayln "build options:")
   (displayln "  --name <name>        app/bundle name (default: project dir)")
@@ -196,7 +218,6 @@
   (displayln "  --url-scheme <name>  Deep-link URL scheme (repeatable): macOS gets")
   (displayln "                       Info.plist entries; call (ensure-url-scheme! ...)")
   (displayln "                       at app start on Windows/Linux)"))
-
 
 (define (write-file path content)
   (call-with-output-file path (lambda (out) (display content out)) #:exists 'replace))
@@ -308,7 +329,8 @@
       (init-project (if (null? rest)
                         "myapp"
                         (car rest)))]
-     ["dev" (dev-server)]
+     ["dev" (dev-app)]
+     ["serve" (serve-server)]
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]
      ["license" (license-command rest)]
