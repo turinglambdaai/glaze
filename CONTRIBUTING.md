@@ -23,6 +23,18 @@ raco test glaze-test/
 
 When your change touches WebView or packaging behavior, also run the relevant verification script on the affected operating system. CI exercises native WebView behavior and package construction on Windows, macOS, and Linux, including a macOS/Racket 9.3 packaging regression test.
 
+### macOS full-occlusion probe
+
+Changes to background WebView scheduling should also be checked from an interactive macOS desktop session:
+
+```bash
+racket scripts/macos-occlusion-e2e.rkt
+```
+
+The probe opens a WebView with `#:background-active? #t`, covers it with a larger opaque native `NSWindow`, requires AppKit to report the target as fully occluded, and then checks that a JavaScript timer advances for 35 seconds while the cover remains in place. It deliberately fails if it cannot prove full occlusion.
+
+This probe is not part of GitHub Actions. On the hosted `macos-26-arm64` image, ordinary WebView load, capture, navigation, and close checks work, but two attempts to establish occlusion left both windows reporting the same undocumented `occlusionState` value (`8192`) even with an oversized higher-level cover. Because the runner cannot demonstrate the precondition, a green result there would not be a valid regression test for issue #2. Keep that issue open until this probe passes reliably in an environment whose WindowServer reports real occlusion.
+
 ## Architecture Rules
 
 Read [`docs/architecture.md`](docs/architecture.md) before moving modules or adding a new capability. In particular:

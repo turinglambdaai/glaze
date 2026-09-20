@@ -7,6 +7,10 @@
 ;;
 ;; Keep the native machinery here instead of adding test-only surface to the
 ;; public API. mac:webview-window is an existing backend inspection hook.
+;; Run this probe from an interactive macOS desktop session. GitHub's hosted
+;; macos-26-arm64 runner can render and capture WebViews, but did not update
+;; per-window occlusion state when one native window covered another (both
+;; windows reported 8192), so CI cannot use that host as proof of occlusion.
 
 (require ffi/unsafe
          ffi/unsafe/objc
