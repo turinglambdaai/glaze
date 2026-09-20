@@ -23,6 +23,7 @@
          racket/file
          racket/match
          racket/path
+         racket/port
          racket/string
          racket/tcp
          "api.rkt"
@@ -494,10 +495,17 @@
          (make-file-response fallback)
          (make-404-response))]))
 
+;; Stream static assets directly from disk to the HTTP output port. The old
+;; `file->bytes` response loaded the entire asset into the Racket heap first,
+;; which scaled poorly for video, WebAssembly, source maps, and other large
+;; frontend assets.
 (define (make-file-response path)
-  (define data (file->bytes path))
   (define mime (path->mime-type path))
-  (response/full 200 #"OK" (current-seconds) mime '() (list data)))
+  (response 200 #"OK" (current-seconds) mime '()
+            (lambda (out)
+              (call-with-input-file path
+                (lambda (in) (copy-port in out))
+                #:mode 'binary))))
 
 (define (make-404-response)
   (response/full 404
