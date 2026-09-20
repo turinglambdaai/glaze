@@ -123,6 +123,10 @@ jobs:
             racket scripts/webview-e2e.rkt
           fi
 
+      - name: Run macOS full-occlusion regression
+        if: runner.os == 'macOS'
+        run: racket scripts/macos-occlusion-e2e.rkt
+
   package:
     # Build a sample app with `raco glaze build --installer` on each platform
     # and upload the resulting distribution + installer as artifacts.
