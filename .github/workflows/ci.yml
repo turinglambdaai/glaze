@@ -29,10 +29,10 @@ jobs:
         racket-version: ['8.12']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Racket
-        uses: Bogdanp/setup-racket@v1.11
+        uses: Bogdanp/setup-racket@0094a9d8bd157633293a2210f373bb542687fa6d # v1.11
         with:
           version: ${{ matrix.racket-version }}
 
@@ -53,10 +53,10 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Racket
-        uses: Bogdanp/setup-racket@v1.11
+        uses: Bogdanp/setup-racket@0094a9d8bd157633293a2210f373bb542687fa6d # v1.11
         with:
           version: '8.12'
 
@@ -91,10 +91,10 @@ jobs:
         racket-version: ['8.12']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Racket
-        uses: Bogdanp/setup-racket@v1.11
+        uses: Bogdanp/setup-racket@0094a9d8bd157633293a2210f373bb542687fa6d # v1.11
         with:
           version: ${{ matrix.racket-version }}
 
@@ -135,10 +135,10 @@ jobs:
         racket-version: ['8.12']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Racket
-        uses: Bogdanp/setup-racket@v1.11
+        uses: Bogdanp/setup-racket@0094a9d8bd157633293a2210f373bb542687fa6d # v1.11
         with:
           version: ${{ matrix.racket-version }}
 
@@ -189,7 +189,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" sampleapp/dist/sampleapp.app/Contents/Info.plist | grep -qx "0.0.1"
 
       - name: Upload distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: glaze-${{ runner.os }}-dist
           path: |
@@ -208,10 +208,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Racket
-        uses: Bogdanp/setup-racket@v1.11
+        uses: Bogdanp/setup-racket@0094a9d8bd157633293a2210f373bb542687fa6d # v1.11
         with:
           version: '9.3'
 
