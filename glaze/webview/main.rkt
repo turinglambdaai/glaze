@@ -10,13 +10,15 @@
 ;;
 ;; Every backend exports the SAME procedure names (open-webview,
 ;; webview-supported?, close-webview, webview-navigate) and performs its own
-;; platform/library gating. If a backend is unavailable, open-webview returns
-;; #f so callers can fall back to opening the system browser (Phase 1/2
-;; behavior).
+;; platform/library gating. Native GUI is the default product behavior. Browser
+;; fallback is opt-in and is always reported explicitly.
 
 (provide open-window
          open-webview
          webview-supported?
+         webview-last-error
+         webview-install-guidance
+         webview-diagnostic
          webview?
          webview-backend
          webview-handle
@@ -35,11 +37,61 @@
          close-all-webviews!
          wait-for-webviews)
 
-(require (only-in "../browser.rkt" open-browser)
+(require racket/string
+         (only-in "../browser.rkt" open-browser)
          (only-in "../tray/tray-protocol.rkt" menu?))
 
 ;; A webview handle wraps the backend-specific handle + the backend tag.
 (struct webview (backend handle) #:transparent)
+
+;; Keep the most recent native-backend failure so high-level callers can give
+;; a useful diagnosis rather than silently pretending the app is a web site.
+(define last-webview-error-box (box #f))
+
+(define (webview-last-error)
+  (unbox last-webview-error-box))
+
+(define (remember-webview-error! e)
+  (set-box! last-webview-error-box e))
+
+(define (clear-webview-error!)
+  (set-box! last-webview-error-box #f))
+
+(define (webview-install-guidance)
+  (case (system-type 'os)
+    [(windows)
+     (string-append
+      "Windows requires Microsoft Edge WebView2 Runtime.\n"
+      "Install or repair the Evergreen Runtime, then start Glaze again:\n"
+      "  winget install --id Microsoft.EdgeWebView2Runtime -e\n"
+      "  https://developer.microsoft.com/microsoft-edge/webview2/\n"
+      "Glaze ships WebView2Loader.dll; if the Runtime is already installed, "
+      "verify that the Glaze package matches your Racket/Windows architecture.")]
+    [(unix)
+     (string-append
+      "Linux requires GTK 3 and WebKitGTK at runtime.\n"
+      "Debian/Ubuntu: sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0\n"
+      "Fedora:        sudo dnf install gtk3 webkit2gtk4.1\n"
+      "After installing the packages, start Glaze again from a graphical desktop session.")]
+    [(macosx)
+     (string-append
+      "WKWebView is included with macOS and normally needs no separate download.\n"
+      "Make sure Glaze is running in a logged-in graphical session. If this keeps failing, "
+      "the backend error above is the useful part to report.")]
+    [else
+     "No native WebView backend is available for this operating system."]))
+
+(define (webview-error->message e)
+  (cond
+    [(exn? e) (exn-message e)]
+    [(string? e) e]
+    [e (format "~a" e)]
+    [else "the native backend reported that it is unavailable"]))
+
+(define (webview-diagnostic [e (webview-last-error)])
+  (string-append
+   "[glaze] native WebView could not start: " (webview-error->message e) "\n"
+   (webview-install-guidance)))
 
 ;; Every successfully opened window, weakly held: closed + collected windows
 ;; disappear from all-webviews on their own.
@@ -69,14 +121,20 @@
   (hash-ref (load-backend!) name))
 
 (define (webview-supported?)
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    ((ref 'supported?))))
+  (clear-webview-error!)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (remember-webview-error! e)
+                               #f)])
+    (define supported? ((ref 'supported?)))
+    (unless supported?
+      (remember-webview-error! "the platform backend is present but its runtime dependencies are not available"))
+    supported?))
 
 ;; open-window: high-level entry. Opens a native window with a webview
 ;; rendering `url`. Optional #:title, #:width, #:height, #:on-close.
 ;; Returns a webview? on success, or #f if the backend is unavailable.
-;; With #:fallback-browser? #t the system browser is opened instead when the
-;; native backend is unavailable.
+;; Browser fallback is deliberately opt-in. When enabled, Glaze prints a
+;; diagnostic first, then clearly reports that it is opening the browser.
 (define (open-window url
                      #:title [title "Glaze"]
                      #:width [width 1024]
@@ -99,12 +157,10 @@
                       #:devtools? [devtools? #f]
                       #:on-close [on-close (lambda () (void))]
                       #:fallback-browser? [fallback? #f])
+  (clear-webview-error!)
   (define h
     (with-handlers ([exn:fail? (lambda (e)
-                                 (fprintf (current-error-port)
-                                          "[glaze] webview backend unavailable (~a); "
-                                          (exn-message e))
-                                 (displayln "use open-browser as fallback." (current-error-port))
+                                 (remember-webview-error! e)
                                  #f)])
       ((ref 'open-webview) url
         #:title title
@@ -113,11 +169,20 @@
         #:devtools? devtools?
         #:on-close on-close)))
   (cond
-    [h (define wv (webview (detected-backend) h))
-       (hash-set! open-registry wv #t)
-       wv]
-    [fallback? (open-browser url) #f]
-    [else #f]))
+    [h
+     (define wv (webview (detected-backend) h))
+     (hash-set! open-registry wv #t)
+     wv]
+    [else
+     (unless (webview-last-error)
+       (remember-webview-error! "the native backend returned unavailable"))
+     (displayln (webview-diagnostic) (current-error-port))
+     (when fallback?
+       (fprintf (current-error-port)
+                "[glaze] browser fallback was explicitly enabled; opening ~a\n"
+                url)
+       (open-browser url))
+     #f]))
 
 (define (detected-backend)
   (case (system-type 'os)
