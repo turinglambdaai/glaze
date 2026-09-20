@@ -36,7 +36,8 @@
          close-all-webviews!
          wait-for-webviews)
 
-(require (only-in "../tray/tray-protocol.rkt" menu?))
+(require "startup-feedback.rkt"
+         (only-in "../tray/tray-protocol.rkt" menu?))
 
 ;; A webview handle wraps the backend-specific handle + the backend tag.
 (struct webview (backend handle) #:transparent)
@@ -172,7 +173,11 @@
     [else
      (unless (webview-last-error)
        (remember-webview-error! "the native backend returned unavailable"))
-     (raise-user-error 'open-webview (webview-diagnostic))]))
+     (define diagnostic (webview-diagnostic))
+     ;; Packaged GUI apps may have no console. Show the same diagnosis in an
+     ;; OS-level dialog before raising; CI/automation suppresses the dialog.
+     (show-webview-startup-error! diagnostic)
+     (raise-user-error 'open-webview diagnostic)]))
 
 (define (detected-backend)
   (case (system-type 'os)
