@@ -20,6 +20,17 @@ dist/
 
 # Build output
 build/
+dist.zip
+dist.tar.gz
+*.msi
+*.dmg
+*.AppImage
+*-setup.exe
+
+# Local signing / license secrets
+keys/private.pem
+*.p12
+*.pfx
 
 # showcase runtime artifacts (generated at startup / by self-check)
 examples/showcase/public/manifest.json
