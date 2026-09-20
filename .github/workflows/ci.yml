@@ -146,14 +146,14 @@ jobs:
         shell: bash
         run: raco pkg install --auto --no-docs --link "$PWD"
 
-      - name: Install installer toolchain (Linux)
+      - name: Install packaging dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libayatana-appindicator3-dev libgtk-3-dev
-          # AppImage tooling (optional; build falls back to tar.gz if missing)
-          sudo wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
-          sudo chmod +x /usr/local/bin/appimagetool
+          # Do not download and execute AppImageKit's mutable `continuous`
+          # release in CI. With no AppImage tool installed, Glaze deliberately
+          # exercises its portable tar.gz installer fallback instead.
 
       - name: Install installer toolchain (Windows)
         if: runner.os == 'Windows'
@@ -181,6 +181,9 @@ jobs:
             raco glaze build --name sampleapp --version 0.0.1 --out dist --installer --sign -
           else
             raco glaze build --name sampleapp --version 0.0.1 --out dist --installer
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            test -s dist.tar.gz
           fi
       - name: Verify macOS bundle signature
         if: runner.os == 'macOS'
