@@ -69,11 +69,15 @@ raco glaze build \
   --sign <certificate-thumbprint-or-subject>
 ```
 
+The current native installer backends are **NSIS** and **WiX Toolset v4**. Glaze's generated WiX source uses the v4 schema and command line; do not assume a newer WiX major version is compatible. For a predictable production build, install NSIS or pin WiX v4 in the release environment rather than relying on whatever `wix` happens to be on `PATH`.
+
 Verify both the executable and installer with the Windows signing tools before publication. Do not treat an unsigned fallback archive as equivalent to a signed commercial installer.
 
 ### Linux
 
 Glaze can produce an AppImage when `appimagetool` is available, otherwise a portable archive fallback. Linux has no single universal code-signing mechanism in the current Glaze build API; distributors should use the signing/verification mechanism appropriate to their chosen channel.
+
+CI deliberately exercises the `.tar.gz` fallback instead of downloading and executing AppImageKit's mutable `continuous` release. If a production pipeline builds AppImages, provision `appimagetool` from a separately pinned and verified toolchain.
 
 ## 4. Create the Racket source package
 
