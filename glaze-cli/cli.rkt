@@ -235,7 +235,7 @@
     (when (file-exists? priv) (delete-file priv))
     (when (file-exists? pub) (delete-file pub))
     (error 'keygen "openssl pkey -pubout failed"))
-  (when (eq? (system-type 'os) 'unix)
+  (when (memq (system-type 'os) '(unix macosx))
     (file-or-directory-permissions priv #o600))
   (printf "Done.\n  private: ~a  (keep secret — signs licenses)\n  public:  ~a  (ship with the app — verifies licenses)\n"
           priv pub))
