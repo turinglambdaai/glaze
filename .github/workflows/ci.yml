@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# CI only needs to read the repository. Keep the default GITHUB_TOKEN surface
+# minimal so third-party actions and native packaging steps cannot write back.
+permissions:
+  contents: read
+
 # A PR can receive many small stabilization commits. Only the newest SHA is
 # useful; cancel stale runs so they do not consume the cross-platform runners
 # or delay feedback for the current head.
@@ -16,6 +21,7 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +50,7 @@ jobs:
     # Release hygiene: prove the filtered source archive is independently
     # installable. This job intentionally does not link the checkout first.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +83,7 @@ jobs:
     # nothing extra (WebView2 runtime is preinstalled); Linux runs under
     # Xvfb with the WebKitGTK packages.
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -119,6 +127,7 @@ jobs:
     # Build a sample app with `raco glaze build --installer` on each platform
     # and upload the resulting distribution + installer as artifacts.
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -196,6 +205,7 @@ jobs:
     # in issue #1. This job executes the final packaged binary, not merely the
     # build command.
     runs-on: macOS-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
