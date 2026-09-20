@@ -9,8 +9,12 @@
 ;; window closes. Returns (values kind shutdown):
 ;;   - kind 'webview: window closed, server already stopped; shutdown is a
 ;;     no-op if called again
-;;   - kind 'browser: no native backend, the system browser was opened and
-;;     the server keeps running — call shutdown (or exit) to stop
+;;   - kind 'browser: only when #:fallback-browser? #t was explicitly requested;
+;;     the system browser was opened and the server keeps running — call
+;;     shutdown (or exit) to stop
+;;
+;; Native GUI is the default contract. A missing/broken WebView is an actionable
+;; startup error, not a silent switch to a different application model.
 
 (require racket/random
          "server.rkt"
@@ -57,7 +61,7 @@
                  #:title [title "Glaze"]
                  #:width [width 1024]
                  #:height [height 768]
-                 #:fallback-browser? [fallback? #t]
+                 #:fallback-browser? [fallback? #f]
                  #:events [event-bus #f]
                  #:api-token [api-token #f]
                  #:on-close [user-on-close (lambda () (void))]
@@ -99,7 +103,7 @@
                   (or on-error (current-glaze-error-reporter))])
     (when check-update
       (define info (do-check-update check-update
-                                       #:current-version current-version))
+                                    #:current-version current-version))
       (when info
         (printf "[glaze] update available: ~a (current ~a) — ~a~n"
                 (hash-ref info 'version #f)
@@ -122,12 +126,21 @@
        (sync closed)
        (shutdown)
        (values 'webview shutdown)]
-      [else
-       ;; Browser fallback: no window to wait on. Leave the server running so
-       ;; the browser keeps working; caller decides when to exit.
+      [fallback?
+       ;; Explicit browser fallback: no window to wait on. Leave the server
+       ;; running so the browser keeps working; caller decides when to exit.
        (on-ready #f url)
-       (printf "[glaze] app served at ~a (system-browser fallback)~n" open-url)
+       (printf "[glaze] app served at ~a (explicit system-browser fallback)~n" open-url)
        (when token
          (printf "[glaze] api token (X-Glaze-Token header): ~a~n" token))
        (printf "[glaze] call the returned shutdown procedure or exit to stop~n")
-       (values 'browser shutdown)])))
+       (values 'browser shutdown)]
+      [else
+       ;; Native GUI is the contract. open-window already printed the detailed
+       ;; backend failure + platform-specific installation guidance.
+       (shutdown)
+       (error 'run-app
+              (string-append
+               "native WebView startup failed and browser fallback is disabled (default). "
+               "Fix the dependency reported above, or explicitly pass "
+               "#:fallback-browser? #t if browser mode is really what you want."))])))
