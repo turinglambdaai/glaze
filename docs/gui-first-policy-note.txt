@@ -1,0 +1,1 @@
+Glaze native application entry points do not use a system-browser fallback. See gui-first.md.
