@@ -80,7 +80,8 @@
 ;; action (the same dispatch a real click takes) -> marker file appears ->
 ;; close -> wait-for-webviews.
 
-(when (webview-supported?)
+(when (and (eq? (system-type 'os) 'macosx)
+           (webview-supported?))
   ;; AppKit is loaded by the backend; register the class binding locally so
   ;; the test can query NSApp for the main menu.
   (import-class NSApplication)
