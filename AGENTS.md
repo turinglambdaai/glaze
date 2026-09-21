@@ -1,212 +1,346 @@
 # AGENTS.md
 
-指引给 AI agent（及开发者）：如何理解、构建、测试、验证、改动 Glaze。
+本文件给维护 Glaze 的 AI agent 和开发者使用。目标是说明项目当前真正的架构契约、容易踩坑的地方，以及改动后必须怎么验证。
 
-## 这是什么
+## 项目定位
 
-Glaze 是 "Tauri-like framework for Racket"——Racket 写后端，Web 技术做前端，桌面应用。
-三层能力：
+Glaze 是一个 **Tauri-like framework for Racket**：
 
-1. **本地 HTTP 服务器**（Phase 1，稳定）：`glaze/server`
-2. **资源打包 / 系统托盘 / 应用打包**（Phase 2，稳定）：`glaze/assets` / `glaze/tray` / `glaze/build`
-3. **原生 WebView 窗口**（Phase 3，已完成，三平台 CI e2e 验证）：`glaze/webview`
+- Racket 写业务逻辑与本地 API；
+- HTML/CSS/JS 写现代 UI；
+- UI 运行在真正的原生桌面窗口内；
+- Windows 使用 WebView2，macOS 使用 WKWebView，Linux 使用 WebKitGTK；
+- 核心平台层尽量使用纯 Racket FFI，不要求用户安装 C/C++ 编译器。
 
-纯 Racket FFI，**不需要 C 编译器**。核心卖点之一是 agent 友好：框架提供
-`webview-title` / `webview-url` / `webview-capture!` 验证 API，让 agent 能以编程方式
-确认 UI 状态（无需人眼看屏幕）。
+### 最重要的产品契约：GUI-first
 
-## 各平台 WebView 状态
+**Glaze 是桌面 GUI 框架，不是“本地 server + 浏览器”的框架。**
 
-| 平台 | 状态 | 说明 |
-|------|------|------|
-| macOS | ✅ 本机 + CI e2e | NSWindow + WKWebView（objc FFI），验证 API + devtools |
-| Windows | ✅ CI e2e | 历史上卡在"COM apartment"——真相是 `get_CoreWebView2` vtable 索引错（25 被写成 3）。vtable 顺序已对官方 SDK 头文件核对，详见 `webview-windows.rkt` 头注释 |
-| Linux | ✅ CI e2e（Xvfb） | 泵 + destroy 回调 + title/url/capture（gdk_pixbuf）；注意 ffi-lib 需要 multiarch 绝对路径兜底 |
+应用入口 `run-app`、`open-window`、`open-webview` 必须走 Native WebView：
 
-## 商业化层（签名 / 许可证 / 更新校验）
-
-- **菜单派发（`webview-set-menu!`）**：声明式 spec 复用 tray-protocol（`make-menu` +
-  `make-menu-item`，`#:accel`）。macOS 是 NSApp 主菜单上追加自定义段（标准 Edit/Window
-  只装一次——`ensure-app!` 重装会冲掉自定义菜单）；macOS 用 target+tag 派发（`GlazeMenuTarget`
-  单例），Windows 用 WM_COMMAND 的 LOWORD(wParam)，Linux 用 "activate" 信号。
-  **两个已踩坑**：① menu-sema 不能在重建菜单的整个过程中持有（build 内部还要申请 tag → 自锁）；
-  注册和派发必须查同一张表（id-allocator 的表，别另开 hash）。② 加速键在 macOS 真实生效，
-  Win/Linux 仅展示（v1 限制，写进文档）
-- **测试菜单派发**：`performActionForItemAtIndex:` 对 objc-target 菜单项是静默 no-op；
-  用 `NSApp sendAction: (item action) to: (item target) from: item` 才是真点击路径
-- **文件对话框**：macos NSSavePanel（AppKit 显式 ffi-lib 加载）；Windows comdlg32（UTF-16
-  编解码用 bytes-open-converter "UTF-8"/"UTF-16LE"，platform-* 名字在 macOS 不存在）；
-  Linux zenity/kdialog 子进程。#f=取消，后端缺失 RAISE
-- **开机自启**：macOS SMAppService（13+、需打包 .app、无 TCC 弹窗）；Windows HKCU Run 键
-  （reg.exe 子进程）；Linux ~/.config/autostart 桌面条目（测试用 XDG_CONFIG_HOME 覆盖）
-
-- `glaze/license`：RSA-2048/SHA-256 离线许可证，签名走**系统 openssl CLI 子进程**（三平台
-  开箱即有），不引入 crypto 包。`machine-id` = IOPlatformUUID(macOS)/
-  /etc/machine-id(Linux)/MachineGuid(Win) 的 SHA-256 摘要。`validate-license` 的失败
-  reason 是稳定标签（signature/expired/machine/product/...），改语义先改测试
-- **macOS 打包布局**：`raco distribute` 产出的是扁平 bin/+lib/（各版本形状不一），build-app
-  自己组装 `.app`（Contents/MacOS + lib + Info.plist + PkgInfo）。launcher 的
-  `@executable_path/../lib` 在 MacOS/ 下深度不变，搬移安全；homebrew CS 版的 framework
-  引用是绝对路径（不可重定位），官方发行版才是可分发的——发布用官方 Racket 构建
-- **codesign 顺序陷阱**：嵌套代码（framework dylib）先签、bundle 后签；一把 `--deep` 在
-  Apple Silicon 会产出 Team-ID 不匹配的签名（dyld 拒绝映射）。adhoc 身份（`-`）下必须跳过
-  `--options runtime`——hardened runtime 的 library validation 会拒绝 adhoc 的自身 framework
-- `raco exe` 产出的 launcher 是只读的，`raco distribute` 写段会 EACCES（9.3 实测），build-app
-  里已 chmod u+w；codesign 前同样要保证主 exe 可写
-- 签名失败**中止构建**（假装签好的产物比失败更糟）；工具链缺失降级响亮告警——与 installer
-  的降级语义不同，别搞混
-- 更新 manifest 的可选 `"sha256"` 由 `verify-file-sha256` 校验；`#f` 返回值 = "无法校验"，
-  永远不当成"校验通过"
-
-## 快速命令
-
-```bash
-# 安装（本地开发，链接方式；仓库根即单一包）
-# 注意：--link 的路径末元素必须是包名，"." 不合法，用 "$PWD"
-raco pkg install --auto --no-docs --link "$PWD"
-
-# 拉取更新后刷新链接包
-raco pkg update --link "$PWD"
-
-# 编译
-raco make glaze/main.rkt glaze-cli/cli.rkt
-
-# 测试（macOS 上含 WebView e2e；Linux/Windows 自动跳过 macOS 段）
-raco test glaze-test/
-
-# 跑 GUI 示例（会开真窗口）
-racket -e '(require glaze/server glaze/webview/main)
-  (define-values (p stop) (start-server #:port 18940 #:public-dir "public"))
-  (define wv (open-window (format "http://127.0.0.1:~a/" p)))
-  (sleep 30) (webview-close wv) (stop)'
+```text
+Racket local server
+        ↓
+HTML / CSS / JS
+        ↓
+Native OS window
+        ↓
+WebView2 / WKWebView / WebKitGTK
 ```
 
-## 打包规则（单包多集合）
+以下行为禁止重新引入：
 
-仓库根 = 一个包（`info.rkt`，`collection 'multi`）。包级字段（name/deps/version/raco-commands…）
-在根 `info.rkt`；但 **`scribblings` 和 `raco-commands` 是集合级字段**，必须放对应集合目录的
-`info.rkt`（`glaze-doc/info.rkt`、`glaze-cli/info.rkt`），raco 和 raco setup 只扫集合信息，
-放包根不生效（`raco glaze` 命令会消失）。examples/ 与 scripts/ 带集合级 `compile-omit-paths`，
-setup 不编译示例正文。
+- WebView 启动失败后自动打开 Chrome / Edge / Safari；
+- `#:fallback-browser?`；
+- `raco glaze dev` 退化成 browser-only server；
+- 用“应用还能在浏览器里打开”掩盖缺失依赖或 native backend bug。
 
-- **版本号格式**：Racket `valid-version?` 拒绝尾部 `.0` 分量——写 `"0.5"` 不写 `"0.5.0"`
-- **安装路径**：`raco pkg install --link` 的路径末元素必须是包名，`.`/`./` 不合法，用 `"$PWD"`
+Native WebView 失败时的正确行为：
 
-## 项目结构
+1. 保留底层真实异常；
+2. 明确告诉用户缺少或可能损坏的运行时；
+3. 给安装命令 / 官方下载入口；
+4. GUI 打包程序尽量弹 OS 级错误框；
+5. 终止启动；
+6. 如果 `run-app` 已启动本地 server，必须先关闭 server 再抛错。
 
-仓库根目录即**一个**可安装的 Racket 包（根 `info.rkt`，`collection 'multi`），
-每个顶层目录是一个集合（collection）：
+`open-browser` 仍可保留为显式工具函数，用于打开帮助文档、OAuth、支持页面等外部链接，但绝不能作为应用 UI fallback。
 
+## WebView 缺失反馈
+
+公开层在 `glaze/webview/main.rkt`：
+
+- `webview-install-guidance`：平台依赖安装说明；
+- `webview-diagnostic`：底层异常 + 安装说明；
+- `webview-last-error`：最近一次 probe / startup 错误；
+- `glaze/webview/startup-feedback.rkt`：在交互式桌面环境尝试显示系统错误对话框；
+- CI / GitHub Actions 自动关闭错误对话框，避免无人值守任务阻塞；
+- `GLAZE_NO_STARTUP_DIALOG=1` 可显式禁用错误对话框。
+
+Windows 依赖：Microsoft Edge WebView2 Runtime (Evergreen)。Glaze 自己带 `WebView2Loader.dll`，不要把 Loader DLL 和 Runtime 混为一谈。
+
+Linux 依赖：GTK 3 + WebKitGTK + 图形桌面会话（CI 使用 Xvfb）。
+
+macOS 的 WKWebView 随系统提供；失败时重点保留初始化错误和运行环境信息。
+
+## 平台 WebView 状态
+
+| 平台 | 后端 | 状态 |
+|---|---|---|
+| Windows | Win32 + WebView2 COM FFI | CI 真窗口 e2e |
+| macOS | NSWindow + WKWebView objc FFI | 本机 + CI 真窗口 e2e |
+| Linux | GtkWindow + WebKitGTK FFI | CI Xvfb 真窗口 e2e |
+
+三平台 e2e 应至少覆盖：open、页面加载、title/url、截图、navigate、close、on-close。
+
+## Windows WebView2 关键历史坑
+
+`glaze/webview/webview-windows.rkt` 的 COM vtable 索引必须以官方 WebView2 SDK header 为准，不能靠相邻接口猜。
+
+曾经最难查的问题不是 COM apartment，而是把 `ICoreWebView2Controller::get_CoreWebView2` 的 vtable slot 写错。错误 slot 会写入 BOOL，再被当成接口指针使用，表现得像随机 COM 生命周期崩溃。
+
+现有关键约定：
+
+- COM vtable 函数指针用 `_fpointer` 读取；
+- out 参数先检查 HRESULT；
+- controller 与 CoreWebView2 接口在 callback 内 AddRef 并保存在 handle；
+- 初始化链在同一个 STA / Racket OS thread 上由消息泵推进；
+- 不要未经 SDK header 核对就新增 vtable index。
+
+## macOS WebView 关键点
+
+- AppKit 必须显式加载；纯 `racket` 进程默认不保证已加载 AppKit；
+- UI 事件通过非阻塞 run-loop pump 服务，不能用会长期阻塞 Racket OS thread 的调用；
+- 多窗口共享 run-loop pump，关闭一个窗口不能让其他窗口失去事件服务；
+- 打包 `.app` 后和裸 `racket` 进程的生命周期/激活行为并不完全一致，改 backend 后两种路径都要验证。
+
+## Linux WebView 关键点
+
+- WebKitGTK + GTK 3；
+- `ffi-lib` 在部分 Debian/Ubuntu multiarch 环境无法靠 soname 自动找到库，所以 backend 有常见绝对路径兜底；
+- 不要调用阻塞式 `gtk_main`；用 `g_main_context_iteration(..., FALSE)` 做非阻塞 pump；
+- CI 使用 Xvfb；“库存在”与“有图形会话”是两个不同条件。
+
+## 后端契约
+
+每个 WebView backend 导出同一组过程：
+
+```text
+open-webview
+supported?
+close
+navigate
+title
+url
+capture!
+set-title!
+set-size!
+set-fullscreen!
+focus!
+set-menu!
+closed?
 ```
-glaze/                # 仓库根 = `glaze` 包：一次安装装齐下列全部
-├── info.rkt          # 包元数据（deps / version / raco-commands）
-├── glaze/            # 核心库（collection "glaze"）
-│   ├── server.rkt    # start-server / stop-server（start-dev-server 是别名）
-│   ├── browser.rkt   # open-browser（跨平台系统浏览器）
-│   ├── api.rkt       # API 路由值（GET/POST/PUT/DELETE + :param 捕获）
-│   ├── api-macros.rkt # define-api-routes（一处声明 = 过程+路由+JS 客户端）
-│   ├── events.rkt    # 事件总线 → 内置 SSE 端点 /glaze/events
-│   ├── assets.rkt    # public/ 目录解析、MIME
-│   ├── build.rkt     # raco exe + distribute 封装
-│   ├── update.rkt    # 更新检查（check-update / newer-version?）
-│   ├── app.rkt       # run-app：服务+窗口+生命周期一键入口
-│   ├── sys/          # 系统集成：剪贴板/通知/open/reveal/单实例（main 调度 + 平台后端）
-│   ├── tray/         # 托盘：main.rkt 调度 + tray-{windows,macos,linux,stub}.rkt
-│   └── webview/      # WebView：main.rkt 调度 + webview-{windows,macos,linux,stub}.rkt
-├── glaze-cli/        # raco glaze init / dev / build
-├── glaze-doc/        # scribble 文档（scribblings 声明在其集合级 info.rkt）
-├── glaze-test/       # rackunit 套件（main + webview + api + events + hardening + sys）
-├── examples/         # showcase / hello / counter / agent-verify / tray-demo / webview-demo（不参与 setup 编译）
-└── scripts/          # webview-e2e.rkt（CI 用）
-```
 
-## 系统集成（glaze/sys）
-
-- 剪贴板（三平台 FFI）、通知（三平台：mac osascript / linux notify-send /
-  windows WinRT toast 经 PowerShell 子进程，脚本走临时 .ps1 避开命令行转义）、
-  open/reveal、单实例锁（派生端口绑定）
-- 窗口控制：`webview-set-title!/set-size!/set-fullscreen!`、`webview-focus!`（四后端）
-- **AppKit 必须显式加载**：Racket 只链接 Foundation；不加载 AppKit 的进程里
-  NSStatusBar/NSPasteboard 等类为 NULL，objc 消息发给 nil 静默返回 nil（曾致 tray 空转）
-
-## 加固层
-
-- `#:api-token`（start-server/run-app）：只护 API+SSE；run-app 打开一次性 `?glaze-token=` 引导 URL，
-  服务器把 token 换成 HttpOnly cookie 后 302 回净路径；api.js 有意不发凭据（曾经发过 = 任何本地进程
-  curl 一下就绕过 token）；程序化走 `X-Glaze-Token`；诚实边界写在 README（同用户进程仍可读内存）
-- `current-glaze-error-reporter`（parameter）：500 路径的异常上报，run-app `#:on-error` 装配；
-  **必须先 parameterize 再 start-server**（连接线程继承 accept 循环的 parameterization）
-- `glaze/update`：`check-update` + `newer-version?`（数值点分比较，"1.10">"1.9"）；run-app
-  `#:check-update`/`#:current-version` 通知 + 广播；注意 `#rx` 不支持 `{n}` 量词（用 `#px`）
-
-## 事件推送 / 宏路由 / 内置端点
-
-- `glaze/events`：`make-event-bus` + `bus-broadcast!` → 内置 SSE 端点 `GET /glaze/events`
-  （15s keepalive；慢订阅者溢出丢事件不阻塞广播方）
-- `glaze/api-macros`：`define-api-routes` 一处声明 = Racket 过程 + 类型化路由 + JS 客户端入口；
-  path 里的 `:id` 参数自动从 URL 取，其余从 JSON body 取（**symbol 键**）
-- 内置端点：`/glaze/api.js`（生成客户端，`#:serve-api-client? #f` 关闭）
-- Host 头校验默认开启（只认 127.0.0.1/localhost/[::1]）
-
-## JS↔Racket 桥接（define-api 已废除）
-
-前端 `fetch("/api/...")` → Racket JSON。路由是普通值（`glaze/api` 的 GET/POST/PUT/DELETE +
-`:param` 捕获），由 `start-server #:api` 或 `run-app #:api` 挂载。**陷阱**：Racket jsexpr 把
-JSON 对象键解析为 symbol（`hash-ref body 'delta`，不是 `"delta"`）——写成字符串键会静默取默认值。
-
-## 后端契约（webview 与 tray 同构）
-
-每个 webview 后端模块必须导出同名 13 个过程，调度层按 `(system-type 'os)` 动态加载：
-
-`open-webview` / `supported?` / `close` / `navigate` / `title` / `url` / `capture!` /
-`set-title!` / `set-size!` / `set-fullscreen!` / `focus!` / `set-menu!` / `closed?`
+公开层再包装成 `webview-*` API。
 
 约定：
 
-- 后端不可用 → `supported?` 返回 `#f`，`open-webview` 抛错（公开层捕获后返回 `#f`）
-- 验证 API 拿不到值就返回 `#f`（不许抛错）
-- `capture!` 接受 `(or/c #f string? path?)`，返回 PNG 路径或 `#f`
-- 公开层（`webview/main.rkt`）再做 `webview-*` 前缀包装；新增能力先扩后端契约，四个后端都要补导出
+- backend 的 `supported?` 是非抛错能力 probe；
+- backend 的 `open-webview` 无法启动时可以抛错；
+- 公开 `open-window` / `open-webview` **成功返回 `webview?`，失败直接抛带指引的错误**；
+- 验证 API 暂时拿不到值时返回 `#f`；
+- `capture!` 返回 PNG path 或 `#f`；
+- 不允许重新加入 browser fallback。
 
-## Agent 验证工作流（改 webview/tray 后必做）
+## `run-app` 契约
 
-改了 FFI 代码后，别只跑单测——真机验证才是权威（macOS 本机即可）：
+`glaze/app.rkt` 是默认应用入口：
 
-```racket
-#lang racket/base
-(require glaze/server glaze/webview/main)
-;; 1. 起服务 + 开窗口
-;; 2. 轮询 webview-title / webview-url 直到预期值（说明页面真的加载了）
-;; 3. webview-capture! 截图 → 用视觉能力看图确认渲染正确
-;; 4. webview-close → 确认 #:on-close 触发
+1. 选择端口；
+2. 启动本地 server；
+3. 创建 Native WebView；
+4. `#:on-ready` 得到 `webview?` + URL；
+5. 阻塞直到窗口关闭；
+6. 停 server；
+7. 返回 `(values 'webview shutdown)`。
+
+如果第 3 步失败，必须先 shutdown server，再把 WebView startup error 原样抛出去。
+
+`#:api-token`、`#:events`、`#:on-error`、update check 等逻辑不能改变上述生命周期。
+
+## CLI 契约
+
+当前 CLI：
+
+```text
+raco glaze init <name>
+raco glaze dev
+raco glaze build
+raco glaze keygen
+raco glaze license
+raco glaze help
 ```
 
-要点（都是踩过的坑）：
+`init` 生成的 `main.rkt` 必须直接使用 `run-app`。
 
-- **不要用固定 sleep 等加载**——轮询 + deadline（首次导航含 WebContent 冷启动约 2s）
-- `webview-capture!` 在窗口首次合成上屏前会返回 `#f`，重试几秒
-- 截图能拿到 = 窗口在活跃 Space 上；被全屏应用挡住时 title/url 仍可验证
+`dev` 必须运行项目真实 `main.rkt`，这样 routes、events、window options、token 等与生产行为一致。
 
-## FFI 发现（改代码前先读）
+**不要新增 browser-only `serve` 作为标准应用工作流。** 如果开发者需要测 HTTP endpoint，可直接使用底层 `start-server` / curl；这不是另一套 UI runtime。
 
-两个后端文件的头部注释沉淀了全部平台级 FFI 结论，改 FFI 前必读：
+## 项目结构
 
-- `glaze/webview/webview-windows.rkt`：COM vtable 调用形式、out 参数两箭头形式、回调内对象生命周期
-- `glaze/webview/webview-macos.rkt`：`_double` 拒绝精确整数、结构体传参必须 `#:type`、`runMode:beforeDate:` vs `nextEventMatchingMask:`（后者不服务 RunLoop 源）、泵线程必须让出调度器
+```text
+glaze/
+├── info.rkt
+├── glaze/
+│   ├── app.rkt
+│   ├── server.rkt
+│   ├── api.rkt
+│   ├── api-macros.rkt
+│   ├── events.rkt
+│   ├── browser.rkt
+│   ├── build.rkt
+│   ├── assets.rkt
+│   ├── update.rkt
+│   ├── license.rkt
+│   ├── dialogs.rkt
+│   ├── deeplink.rkt
+│   ├── autolaunch.rkt
+│   ├── sys/
+│   ├── tray/
+│   └── webview/
+│       ├── main.rkt
+│       ├── startup-feedback.rkt
+│       ├── webview-windows.rkt
+│       ├── webview-macos.rkt
+│       ├── webview-linux.rkt
+│       └── webview-stub.rkt
+├── glaze-cli/
+├── glaze-doc/
+├── glaze-test/
+├── examples/
+└── scripts/
+```
+
+仓库根是一个 `collection 'multi` 的 Racket 包。集合级 `scribblings` / `raco-commands` 要放在相应 collection 的 `info.rkt`，不要只放根 `info.rkt`。
+
+## 快速开发命令
+
+```bash
+raco pkg install --auto --no-docs --link "$PWD"
+raco pkg update --link "$PWD"
+raco make glaze/main.rkt glaze-cli/cli.rkt
+raco test glaze-test/
+racket examples/hello/main.rkt
+racket examples/showcase/main.rkt
+racket examples/webview-demo.rkt
+```
+
+改动 WebView / tray / platform FFI 后，只跑 unit test 不够，必须看三平台 CI e2e。
+
+## GUI-first 回归测试
+
+`glaze-test/gui-first-test.rkt` 应长期保留以下防回归检查：
+
+- `run-app` 不接受 `#:fallback-browser?`；
+- `open-window` 不接受 `#:fallback-browser?`；
+- `open-webview` 不接受 `#:fallback-browser?`；
+- platform install guidance 非空；
+- Windows guidance 提到 WebView2 Runtime 与官方入口；
+- Linux guidance 提到 WebKitGTK；
+- macOS guidance 提到 WKWebView。
+
+如果未来有人为了“容错”想恢复浏览器 fallback，先重新讨论产品定位，而不是直接改代码。
+
+## JS ↔ Racket 桥接
+
+前端 `fetch("/api/...")` 调本地 Racket API。`define-api-routes` 一处声明同时产生：
+
+1. Racket procedure；
+2. validated route；
+3. `/glaze/api.js` 中的 JS client entry。
+
+重要：Racket jsexpr 的 JSON object key 是 symbol，例如 `(hash-ref body 'delta)`。
+
+SSE 事件流使用同一个 origin；这套 HTTP 机制服务的是**嵌入式 WebView 前端**。它也方便 curl/测试工具验证，但不要因此重新定义为浏览器应用模型。
+
+## 安全加固
+
+- server 只绑定 loopback；
+- Host header 仅允许 `127.0.0.1` / `localhost` / `[::1]`；
+- API handler 参数错误 -> 400 JSON；handler 异常 -> 500 JSON；
+- `#:api-token` 保护 API + SSE；静态资源与 bootstrap 不直接泄露 token；
+- `run-app` 的一次性 `?glaze-token=` URL 换 HttpOnly cookie；
+- 程序化客户端用 `X-Glaze-Token`；
+- 同用户本地进程仍可能读进程内存，因此这不是强隔离边界。
+
+## 系统托盘
+
+tray 是**可选能力**，语义与 WebView 不同：
+
+- native tray backend 不可用时可以降级到 inert stub；
+- 不能因为 tray 允许 stub，就推导出主 WebView 也应允许 fallback；
+- Windows 用 Shell_NotifyIconW；macOS 用 NSStatusItem/NSMenu；Linux 用 AppIndicator/GTK。
+
+菜单 spec 复用 `tray-protocol`。
+
+已踩过的菜单坑：
+
+- 不要在整个重建菜单过程中一直持有 menu semaphore，否则内部 tag 分配可能自锁；
+- 注册和派发必须使用同一张 action 表；
+- macOS accelerator 真正工作，Windows/Linux 当前主要是展示。
+
+## 文件对话框
+
+- macOS：NSOpenPanel / NSSavePanel；
+- Windows：comdlg32 wide-char API；
+- Linux：zenity / kdialog；
+- `#f` 表示用户取消；backend 缺失与“用户取消”不能混为一谈。
+
+## 开机自启 / Deep Link
+
+- macOS autolaunch 使用 SMAppService（13+，打包 `.app`）；
+- Windows autolaunch 使用 HKCU Run；
+- Linux 使用 `~/.config/autostart`；
+- macOS URL scheme 在构建时写 Info.plist；
+- Windows 注册 HKCU protocol；
+- Linux 写 desktop entry + xdg-mime。
+
+## 打包与签名
+
+`glaze/build.rkt` 包装 `raco exe` + `raco distribute`。
+
+Windows GUI 构建使用 `raco exe --gui`，因此用户可能看不到 stderr；这是 startup error dialog 必须存在的重要原因。
+
+### macOS
+
+- build-app 自己组装标准 `.app`；
+- nested framework/dylib 先签，bundle 后签；
+- 不要用一把 `--deep` 代替正确签名顺序；
+- ad-hoc 身份 `-` 下不要启用 hardened runtime 的 library validation；
+- notarization 使用 `notarytool` + staple。
+
+### Windows
+
+- signtool 支持 SHA-1 thumbprint 或 subject；
+- 时间戳默认 RFC-3161；
+- WebView2Loader.dll 随 Glaze 分发，但 Edge WebView2 Runtime 是系统运行时依赖。
+
+### Installer fallback
+
+installer toolchain 缺失时降级 zip/tar.gz 并响亮告警是允许的，因为那只是**分发格式**降级；不要把这种语义复制到应用 UI runtime。
+
+## License / Update
+
+- license：RSA-2048/SHA-256，系统 `openssl` CLI；
+- `machine-id` 返回稳定摘要，不直接暴露原始系统 ID；
+- `validate-license` 的 reason tag 是稳定接口，修改前先改测试；
+- update manifest 可带 `sha256`；
+- `verify-file-sha256` 返回 `#f` 同时可能代表“不匹配”或“无法校验”，绝不能把 `#f` 当验证成功。
+
+## 提交前检查
+
+至少完成：
+
+```bash
+raco make glaze/main.rkt glaze-cli/cli.rkt
+raco test glaze-test/
+```
+
+涉及 WebView / FFI：确认 GitHub Actions 的 Windows、macOS、Ubuntu WebView e2e 全绿。
+
+涉及 CLI scaffold/build：确认三平台 package job 里 `raco glaze init sampleapp` + build 全绿。
+
+涉及文档 API 签名：确认 Scribble 可以编译。
 
 ## 不要破坏的契约
 
-- 后端导出契约 + 公开层 `webview-*` 名称（测试和下游依赖）
-- `open-window` 返回 `webview?` 或 `#f`（配合 `#:fallback-browser?` 语义）
-- `raco glaze` 子命令名与参数
-- tray 公开 API（`make-tray` 等五个）
-
-## 已知问题
-
-- macOS 多窗口：单一共享泵线程服务所有窗口（0.3.x 是每窗口一个泵线程）；0→1 转变触发启动，
-  最后一个窗口关闭时退出。多窗口 e2e 在 `webview-test.rkt`
-- **后台会话白屏**：从无控制终端的分离会话启动（如 CI 后台任务、`nohup`、某些 agent 工具的后台执行）时，
-  macOS 窗口可能停在白屏——WebKit 加载/IPC 全通（`webview-title` 正常），但绘制不上屏（窗口合成被冻结）。
-  窗口现已 `orderFrontRegardless` 无条件置前（缓解）；本机 `nohup` 探针已验证正常合成+截图。
-  若再现：`webview-title`/`url` 正常而 `webview-capture!` 返回 `#f` 即此症状，优先换前台终端启动，
-  而不是排查 glaze 代码
+- Glaze 主应用 = Native WebView GUI；
+- Native WebView 失败 = 明确失败 + actionable guidance；
+- 不存在浏览器 fallback；
+- `run-app` 失败不能遗留 server；
+- backend 公开命名与四平台导出一致；
+- `webview-title/url/capture!` 的 agent 验证能力保留；
+- tray / sys 的“可选能力降级”和主 WebView 的“必须成功”要明确区分；
+- 打包、签名失败不能假装成功；
+- 文档、示例、CLI scaffold 与真实运行行为必须保持一致。

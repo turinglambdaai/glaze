@@ -222,7 +222,8 @@ The current WebView, tray, and sys implementations already have a sound dispatch
 
 - the public dispatcher selects the backend lazily
 - applications do not need to select an operating system implementation
-- unsupported native capabilities can report `#f` or use a stub/fallback behavior
+- optional native capabilities can report `#f` or use a stub; the mandatory
+  application WebView instead fails fast with platform-specific guidance
 
 A small coupling exists where `webview/main.rkt` imports only `menu?` from `tray/tray-protocol.rkt`. This is not a cycle and does not pull in the tray backend, but it shows why shared protocol/types should remain lightweight.
 

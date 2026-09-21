@@ -25,7 +25,6 @@ Build desktop apps with Racket backend and web frontend.
           [#:title title string? "Glaze"]
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
-          [#:fallback-browser? fallback-browser? boolean? #t]
           [#:background-active? background-active? boolean? #f]
           [#:events events (or/c #f event-bus?) #f]
           [#:api-token api-token (or/c #f string? #t) #t]
@@ -33,9 +32,9 @@ Build desktop apps with Racket backend and web frontend.
           [#:on-error on-error (or/c #f (exn? string? . -> . any)) #f]
           [#:check-update check-update (or/c #f string?) #f]
           [#:current-version current-version string? "0.0.0"]
-          [#:on-ready on-ready (-> (or/c webview? #f) string? any)
+          [#:on-ready on-ready (-> webview? string? any)
                       (lambda (wv url) (void))])
-         (values (or/c 'webview 'browser) procedure?)]{
+         (values 'webview procedure?)]{
 The one-call entry: picks a free port (unless @racket[#:port] is given),
 starts the server (static + JSON API, optional SSE event bus and API token),
 opens the native webview window, and blocks until the window closes.
@@ -43,7 +42,7 @@ opens the native webview window, and blocks until the window closes.
 is up — the hook agents use for verification. @racket[on-error], when given,
 receives every API-handler failure (the 500 path) for crash reporting.
 By default @racket[#:api-token] is @racket[#t], so a random token is generated
-(@racket[make-api-token]). The token is not printed; the WebView/browser receives
+(@racket[make-api-token]). The token is not printed; the WebView receives
 it through the bootstrap URL and trusted Racket callbacks can read it through
 @racket[current-api-token]. Pass @racket[#f] explicitly only when an open local
 API is intended.
@@ -51,9 +50,9 @@ When @racket[#:check-update] is a manifest URL, a background check runs
 (see @secref["update-checks"]).
 
 Returns @racket['webview] after a window-driven shutdown (server already
-stopped) or @racket['browser] immediately after opening the system-browser
-fallback (server still running; call the returned shutdown procedure to stop
-it).
+stopped). A native WebView is mandatory. If startup fails, the server is
+stopped and an actionable platform-specific diagnostic is raised; Glaze does
+not open the system browser as a fallback.
 }
 
 @defproc[(make-api-token) string?]{ A random 32-hex-character capability
@@ -99,16 +98,17 @@ Receives API-handler failures (the 500 path). Defaults to logging on stderr;
 @defmodule[glaze/browser]
 
 @defproc[(open-browser [url string?]) void?]{
-Opens the system browser to the given URL.
+Opens the system browser to the given external URL. This low-level utility is
+not used as an application fallback by @racket[run-app] or @racket[open-window].
 }
 
 @section[#:tag "js-bridge"]{JavaScript Bridge}
 
 @defmodule[glaze/api]
 
-The page calls Racket with plain @litchar{fetch("/api/...")}; Racket answers
-JSON. One code path works in the embedded WebView, in the system-browser
-fallback, and in dev (curl-able).
+The embedded page calls Racket with plain @litchar{fetch("/api/...")}; Racket
+answers JSON. The same endpoints remain easy to exercise from developer tools
+such as curl.
 
 @defproc[(GET [path string?] [handler procedure?]) route?]{}
 @defproc[(POST [path string?] [handler procedure?]) route?]{}
@@ -210,8 +210,8 @@ glaze.on('count-changed', s => render(s.count));
 @defmodule[glaze/events]
 
 Backend-to-frontend push — Glaze's answer to Tauri's @litchar{emit()} and
-Eel's websocket push — over plain Server-Sent Events on the same origin, so
-the browser fallback gets push for free.
+Eel's websocket push — over plain Server-Sent Events on the same origin as the
+embedded frontend.
 
 @defproc[(make-event-bus) event-bus?]{ A broadcast bus. Pass it to
 @racket[start-server]/@racket[run-app] via @racket[#:events] to mount
@@ -536,8 +536,9 @@ Opens a native OS window with an embedded WebView pointing at a URL
 (@racket[NSWindow] + @racket[WKWebView] via objc FFI), Windows (WebView2
 via COM FFI), Linux (@racket[GtkWindow] + WebKitGTK via FFI) — all three
 pass the real-window CI e2e (open, load, capture, navigate, close,
-on-close). When the native backend is unavailable, @racket[open-window]
-returns @racket[#f] so callers can fall back to @racket[open-browser].
+on-close). Native GUI is the application contract: when the backend is
+unavailable, @racket[open-window] raises with platform-specific installation
+or repair guidance and may also show that diagnosis in an OS-level dialog.
 
 @defproc[(open-window
           [url string?]
@@ -546,9 +547,8 @@ returns @racket[#f] so callers can fall back to @racket[open-browser].
           [#:height height exact-positive-integer? 768]
           [#:devtools? devtools? boolean? #f]
           [#:background-active? background-active? boolean? #f]
-          [#:on-close on-close (-> any) (lambda () (void))]
-          [#:fallback-browser? fallback-browser? boolean? #f])
-         (or/c webview? #f)]{
+          [#:on-close on-close (-> any) (lambda () (void))])
+         webview?]{
 Opens the window and loads @racket[url]. @racket[on-close] runs when the
 window closes (programmatic @racket[webview-close] or the user closing it).
 @racket[#:devtools?] opens the platform inspector (macOS: inspectable,
@@ -558,13 +558,27 @@ For monitoring applications that must keep timers active while backgrounded,
 @racket[#:background-active? #t] additionally uses the public
 @racket[NSProcessInfo] activity API to suppress App Nap while the window is
 alive; it is opt-in because it can increase power use. Other backends accept
-the option as a portable no-op. Returns @racket[#f] when the backend is unavailable; with
-@racket[#:fallback-browser?] the system browser is opened instead.
+the option as a portable no-op. Backend startup failure raises an actionable
+error instead of returning @racket[#f].
 @racket[open-webview] is a synonym.
 }
 
 @defproc[(webview-supported?) boolean?]{
 Whether the current platform backend is available.
+}
+
+@defproc[(webview-last-error) any/c]{
+Returns the most recent backend startup error, or @racket[#f] when none has
+been recorded.
+}
+
+@defproc[(webview-install-guidance) string?]{
+Returns platform-specific native WebView installation and repair guidance.
+}
+
+@defproc[(webview-diagnostic [error any/c (webview-last-error)]) string?]{
+Combines the backend error with the platform guidance used for fail-fast
+startup reporting.
 }
 
 @defproc[(webview-navigate [wv webview?] [url string?]) void?]{

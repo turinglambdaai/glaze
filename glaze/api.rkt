@@ -3,8 +3,8 @@
 ;; JSON API routes for the frontend <-> Racket bridge.
 ;;
 ;; The page calls `fetch("/api/...")`; Racket answers JSON. Routes are
-;; ordinary values and remain usable in the embedded WebView, browser fallback,
-;; and direct HTTP clients.
+;; ordinary values and remain usable in the embedded WebView, tests, and
+;; direct HTTP clients.
 
 (require json
          racket/list

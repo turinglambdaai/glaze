@@ -4,7 +4,7 @@ Start with the smallest examples. They use the public `(require glaze)` facade a
 
 | Example | Purpose | Main capabilities |
 |---|---|---|
-| [`hello/`](hello/) | Minimal desktop application | `run-app`, static assets, native WebView/browser fallback |
+| [`hello/`](hello/) | Minimal desktop application | `run-app`, static assets, required native WebView |
 | [`tray/`](tray/) | Minimal system tray application | `make-tray`, menu items, tray lifecycle |
 | [`events/`](events/) | Minimal JS/Racket communication | JSON request route + Server-Sent Events push |
 | [`counter/`](counter/) | Fuller bridge example | `define-api-routes`, generated client support, event bus, shared state |

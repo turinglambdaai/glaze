@@ -1,12 +1,15 @@
 #lang racket/base
 
-;; Public WebView API. Opens a native OS window with an embedded WebView
-;; control pointing at a URL (typically the local HTTP server Glaze started).
+;; Public WebView API. Glaze is GUI-first: a native WebView is mandatory and
+;; startup fails with platform-specific guidance when its backend is missing.
 ;; Platform-specific FFI stays behind this dispatcher.
 
 (provide open-window
          open-webview
          webview-supported?
+         webview-last-error
+         webview-install-guidance
+         webview-diagnostic
          webview?
          webview-backend
          webview-handle
@@ -25,10 +28,59 @@
          close-all-webviews!
          wait-for-webviews)
 
-(require (only-in "../browser.rkt" open-browser)
+(require "startup-feedback.rkt"
          (only-in "../tray/tray-protocol.rkt" menu?))
 
 (struct webview (backend handle) #:transparent)
+
+(define last-webview-error-box (box #f))
+
+(define (webview-last-error)
+  (unbox last-webview-error-box))
+
+(define (remember-webview-error! e)
+  (set-box! last-webview-error-box e))
+
+(define (clear-webview-error!)
+  (set-box! last-webview-error-box #f))
+
+(define (webview-install-guidance)
+  (case (system-type 'os)
+    [(windows)
+     (string-append
+      "Windows requires Microsoft Edge WebView2 Runtime (Evergreen).\n"
+      "Install or repair it, then start Glaze again:\n"
+      "  winget install --id Microsoft.EdgeWebView2Runtime -e\n"
+      "Official download (Evergreen Bootstrapper / Standalone Installer):\n"
+      "  https://developer.microsoft.com/microsoft-edge/webview2/#download-section\n"
+      "Glaze already ships WebView2Loader.dll. If the Runtime is installed, "
+      "verify that the Glaze package and Racket architecture match your Windows architecture.")]
+    [(unix)
+     (string-append
+      "Linux requires GTK 3 and WebKitGTK at runtime. Install the packages, then start Glaze again:\n"
+      "  Debian/Ubuntu: sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0\n"
+      "  Fedora:        sudo dnf install gtk3 webkit2gtk4.1\n"
+      "  Arch:          sudo pacman -S gtk3 webkit2gtk-4.1\n"
+      "Glaze must also run inside a graphical desktop session (or Xvfb in CI).")]
+    [(macosx)
+     (string-append
+      "WKWebView is built into macOS and normally requires no separate download.\n"
+      "Run Glaze from a logged-in graphical session. If startup still fails, "
+      "report the backend error above together with your macOS and Racket versions.")]
+    [else
+     "This operating system has no native WebView backend in Glaze."]))
+
+(define (webview-error->message e)
+  (cond
+    [(exn? e) (exn-message e)]
+    [(string? e) e]
+    [e (format "~a" e)]
+    [else "the native backend reported that it is unavailable"]))
+
+(define (webview-diagnostic [e (webview-last-error)])
+  (string-append
+   "Native WebView could not start: " (webview-error->message e) "\n\n"
+   (webview-install-guidance)))
 
 (define open-registry (make-weak-hasheq))
 
@@ -55,11 +107,18 @@
   (hash-ref (load-backend!) name))
 
 (define (webview-supported?)
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    ((ref 'supported?))))
+  (clear-webview-error!)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (remember-webview-error! e)
+                               #f)])
+    (define supported? ((ref 'supported?)))
+    (unless supported?
+      (remember-webview-error!
+       "the platform backend is present but its runtime dependencies are not available"))
+    supported?))
 
 (define (check-open-args who url title width height devtools? background-active?
-                         on-close fallback?)
+                         on-close)
   (unless (string? url)
     (raise-argument-error who "string?" url))
   (unless (string? title)
@@ -73,9 +132,7 @@
   (unless (boolean? background-active?)
     (raise-argument-error who "boolean?" background-active?))
   (unless (procedure? on-close)
-    (raise-argument-error who "procedure?" on-close))
-  (unless (boolean? fallback?)
-    (raise-argument-error who "boolean?" fallback?)))
+    (raise-argument-error who "procedure?" on-close)))
 
 (define (check-webview who wv)
   (unless (webview? wv)
@@ -87,18 +144,16 @@
                      #:height [height 768]
                      #:devtools? [devtools? #f]
                      #:background-active? [background-active? #f]
-                     #:on-close [on-close (lambda () (void))]
-                     #:fallback-browser? [fallback? #f])
+                     #:on-close [on-close (lambda () (void))])
   (check-open-args 'open-window url title width height devtools?
-                   background-active? on-close fallback?)
+                   background-active? on-close)
   (open-webview url
                 #:title title
                 #:width width
                 #:height height
                 #:devtools? devtools?
                 #:background-active? background-active?
-                #:on-close on-close
-                #:fallback-browser? fallback?))
+                #:on-close on-close))
 
 (define (open-webview url
                       #:title [title "Glaze"]
@@ -106,16 +161,13 @@
                       #:height [height 768]
                       #:devtools? [devtools? #f]
                       #:background-active? [background-active? #f]
-                      #:on-close [on-close (lambda () (void))]
-                      #:fallback-browser? [fallback? #f])
+                      #:on-close [on-close (lambda () (void))])
   (check-open-args 'open-webview url title width height devtools?
-                   background-active? on-close fallback?)
+                   background-active? on-close)
+  (clear-webview-error!)
   (define h
     (with-handlers ([exn:fail? (lambda (e)
-                                 (fprintf (current-error-port)
-                                          "[glaze] webview backend unavailable (~a); "
-                                          (exn-message e))
-                                 (displayln "use open-browser as fallback." (current-error-port))
+                                 (remember-webview-error! e)
                                  #f)])
       ((ref 'open-webview) url
         #:title title
@@ -129,11 +181,12 @@
      (define wv (webview (detected-backend) h))
      (hash-set! open-registry wv #t)
      wv]
-    [fallback?
-     (unless (open-browser url)
-       (error 'open-webview "native WebView unavailable and system browser fallback failed"))
-     #f]
-    [else #f]))
+    [else
+     (unless (webview-last-error)
+       (remember-webview-error! "the native backend returned unavailable"))
+     (define diagnostic (webview-diagnostic))
+     (show-webview-startup-error! diagnostic)
+     (raise-user-error 'open-webview diagnostic)]))
 
 (define (detected-backend)
   (case (system-type 'os)

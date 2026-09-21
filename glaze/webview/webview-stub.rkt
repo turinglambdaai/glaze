@@ -2,7 +2,7 @@
 
 ;; Stub WebView backend: used when the platform is unsupported or the native
 ;; libraries required by a real backend are missing. open-webview returns #f
-;; so the public dispatcher (and callers) can fall back to the system browser.
+;; so the public dispatcher can raise its actionable GUI-startup diagnostic.
 
 (provide open-webview
          supported?

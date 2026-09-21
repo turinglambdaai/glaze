@@ -5,8 +5,6 @@
          racket/file
          racket/string
          racket/system
-         glaze/server
-         glaze/browser
          glaze/build
          glaze/license)
 
@@ -58,21 +56,23 @@
 </body>
 </html>
 ")
-  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n" name))
+  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n\nOr use:\n  cd ~a\n  raco glaze dev\n"
+          name name))
 
-(define (dev-server)
-  (define-values (actual-port server)
-    (start-dev-server #:port 8080 #:public-dir "public"))
-  (define url (format "http://127.0.0.1:~a" actual-port))
-  (printf "Dev server running at ~a\n" url)
-  (unless (open-browser url)
-    (stop-server server)
-    (error 'dev "could not open the system browser"))
-  (with-handlers ([exn:break?
-                   (lambda (e)
-                     (stop-server server)
-                     (printf "Server stopped.\n"))])
-    (sync never-evt)))
+;; Run the project's real entry point so development exercises the same native
+;; GUI path, routes, events, and window options as the shipped application.
+(define (dev-app)
+  (define entry (build-path (current-directory) "main.rkt"))
+  (unless (file-exists? entry)
+    (error 'dev "main.rkt not found in ~a; run this command from a Glaze project"
+           (path->string (current-directory))))
+  (define racket-exe (find-executable-path "racket" #f))
+  (unless racket-exe
+    (error 'dev "racket executable not found on PATH"))
+  (printf "Starting Glaze native app: ~a\n" (path->string entry))
+  (define code (system*/exit-code racket-exe (path->string entry)))
+  (unless (zero? code)
+    (exit code)))
 
 ;; ---- build ----
 
@@ -171,12 +171,16 @@
   (displayln "Usage: raco glaze <command> [args]")
   (displayln "")
   (displayln "Commands:")
-  (displayln "  init <name>   Create a new Glaze project")
-  (displayln "  dev           Start dev server with auto-open browser")
+  (displayln "  init <name>   Create a native Glaze desktop project")
+  (displayln "  dev           Run this project's native Glaze desktop app")
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
   (displayln "  keygen        Create an RSA keypair for license signing")
   (displayln "  license       Sign or verify offline license files")
   (displayln "  help          Show this help")
+  (displayln "")
+  (displayln "Glaze requires a working native WebView. If it is missing or broken, startup")
+  (displayln "fails with platform-specific installation/repair instructions; it never opens")
+  (displayln "the system browser as a fallback.")
   (displayln "")
   (displayln "build options:")
   (displayln "  --name <name>        app/bundle name (default: project dir)")
@@ -351,7 +355,7 @@
       (init-project (if (null? rest) "myapp" (car rest)))]
      ["dev"
       (unless (null? rest) (error 'dev "unexpected arguments: ~a" rest))
-      (dev-server)]
+      (dev-app)]
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]
      ["license" (license-command rest)]

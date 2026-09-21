@@ -6,11 +6,10 @@
 ;;
 ;; picks a free port, starts the server (static + JSON API), opens the native
 ;; webview window, calls #:on-ready with the handle, and blocks until the
-;; window closes. Returns (values kind shutdown):
-;;   - kind 'webview: window closed, server already stopped; shutdown is a
-;;     no-op if called again
-;;   - kind 'browser: no native backend, the system browser was opened and
-;;     the server keeps running — call shutdown (or exit) to stop
+;; window closes. A native WebView is mandatory; startup fails with actionable
+;; guidance when the backend is unavailable. Returns (values 'webview shutdown)
+;; after the window closes and the server has stopped. The returned shutdown
+;; procedure is a no-op if called again.
 
 (require racket/random
          "server.rkt"
@@ -82,7 +81,6 @@
                  #:title [title "Glaze"]
                  #:width [width 1024]
                  #:height [height 768]
-                 #:fallback-browser? [fallback? #t]
                  #:background-active? [background-active? #f]
                  #:events [event-bus #f]
                  #:api-token [api-token #t]
@@ -100,8 +98,6 @@
     (raise-argument-error 'run-app "exact-positive-integer?" width))
   (unless (exact-positive-integer? height)
     (raise-argument-error 'run-app "exact-positive-integer?" height))
-  (unless (boolean? fallback?)
-    (raise-argument-error 'run-app "boolean?" fallback?))
   (unless (boolean? background-active?)
     (raise-argument-error 'run-app "boolean?" background-active?))
   (unless (or (eq? api-token #t) (eq? api-token #f) (string? api-token))
@@ -185,27 +181,13 @@
                        (dynamic-wind
                          void
                          user-on-close
-                         (lambda () (semaphore-post closed))))
-                     #:fallback-browser? fallback?))
+                         (lambda () (semaphore-post closed))))))
       (set! active-wv wv)
-      (cond
-        [wv
-         (on-ready wv url)
-         (start-update-check!)
-         (sync closed)
-         (shutdown)
-         (values 'webview shutdown)]
-        [else
-         ;; Browser fallback: no window to wait on. Leave the server running so
-         ;; the browser keeps working; caller decides when to exit.
-         (on-ready #f url)
-         (start-update-check!)
-         (printf "[glaze] app served at ~a (system-browser fallback)~n" url)
-         ;; Do not print the capability token. It remains available to trusted
-         ;; application callbacks through current-api-token, while the browser
-         ;; receives it only through the one-time bootstrap URL.
-         (printf "[glaze] call the returned shutdown procedure or exit to stop~n")
-         (values 'browser shutdown)]))))
+      (on-ready wv url)
+      (start-update-check!)
+      (sync closed)
+      (shutdown)
+      (values 'webview shutdown))))
 
 (module+ test-support
   (provide make-idempotent-shutdown))

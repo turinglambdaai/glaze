@@ -35,6 +35,8 @@ Native OS APIs
 - macOS：WKWebView
 - Linux：WebKitGTK
 
+Glaze 明确采用 GUI-first 模式，运行时必须具备可用的原生 WebView。后端缺失或损坏时，启动会失败并给出对应平台的安装/修复指引，而不会静默改成浏览器标签页。
+
 当前前后端桥接有意保持简单：请求使用本地 HTTP JSON API，Racket 向前端推送事件使用 Server-Sent Events。完整 RPC 框架和插件系统还不是当前公共架构的一部分。
 
 ## 快速开始
@@ -90,7 +92,7 @@ racket main.rkt
 - 文件/目录对话框、Deep Link、开机自启动辅助能力
 - `raco glaze build` 应用打包
 - 更新检查和离线许可证工具
-- 原生 WebView 不可用时的系统浏览器 fallback
+- 原生 WebView 不可用时的可操作诊断信息
 
 Glaze 本身使用 Racket 实现，原生集成主要通过 FFI；核心框架不要求用户安装 C 编译器。
 
@@ -106,7 +108,7 @@ Glaze 本身使用 Racket 实现，原生集成主要通过 FFI；核心框架�
 | 系统能力封装 | 支持 | 支持 | 支持 |
 | 打包流程 | 支持 | 支持 | 支持 |
 
-部分原生能力依赖操作系统组件或桌面会话。应用层不应该直接 require 某个平台 backend；不支持的能力应通过公共 dispatcher 明确失败或使用框架提供的 fallback。
+部分原生能力依赖操作系统组件或桌面会话。WebView 启动失败属于致命错误，并会提供对应平台的处理指引；应用层不应该直接 require 某个平台 backend。运行要求和诊断说明见 [`docs/gui-first.md`](docs/gui-first.md)。
 
 ## 架构
 

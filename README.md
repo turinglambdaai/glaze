@@ -35,6 +35,10 @@ The framework currently uses the operating system WebView through Racket FFI:
 - macOS: WKWebView
 - Linux: WebKitGTK
 
+Glaze is deliberately GUI-first. A working native WebView is required: when
+the backend is missing or broken, startup fails with platform-specific
+installation or repair guidance instead of silently opening a browser tab.
+
 The frontend/backend bridge today is intentionally simple: local HTTP JSON routes for requests and Server-Sent Events for backend-to-frontend events. A larger RPC or plugin system is not part of the current public architecture.
 
 ## Quick Start
@@ -90,7 +94,7 @@ Implemented today:
 - file dialogs, deep-link helpers, and autolaunch helpers
 - application packaging through `raco glaze build`
 - update and offline-license utilities
-- browser fallback when a native WebView is unavailable
+- actionable diagnostics when a required native WebView is unavailable
 
 Glaze is implemented in Racket and uses FFI for native integrations; the core framework does not require a C compiler.
 
@@ -106,7 +110,7 @@ The repository CI tests Racket 8.12 on Windows, macOS, and Linux. Native WebView
 | System helpers | Yes | Yes | Yes |
 | Packaging pipeline | Yes | Yes | Yes |
 
-Some native features depend on platform libraries or desktop-session availability. Unsupported native backends should fail clearly or use the framework's documented fallback behavior instead of requiring application code to import a platform implementation directly.
+Some native features depend on platform libraries or desktop-session availability. WebView startup failures are fatal and include platform-specific guidance; application code should not import a platform implementation directly. See [`docs/gui-first.md`](docs/gui-first.md) for runtime requirements and diagnostics.
 
 ## Architecture
 
