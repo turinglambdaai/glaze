@@ -1,12 +1,9 @@
 #lang racket/base
 
 ;; glaze/sys — desktop-system integrations beyond the tray: clipboard,
-;; notifications, opening/revealing paths, single-instance locking, and
-;; (via the webview module) window controls. Same platform-dispatch shape
-;; as glaze/tray and glaze/webview.
+;; notifications, opening/revealing paths, and single-instance locking.
 
-(require racket/file
-         racket/system)
+(require racket/tcp)
 
 (provide sys-supported?
          clipboard-set!
@@ -15,8 +12,6 @@
          open-path
          reveal-path
          single-instance?)
-
-;; ---- platform backend dispatch ----
 
 (define (backend-module-path)
   (case (system-type 'os)
@@ -43,53 +38,75 @@
   (with-handlers ([exn:fail? (lambda (e) #f)])
     ((ref 'supported?))))
 
-;; ---- clipboard ----
-
-;; Place text on the system clipboard. Returns #t on success.
+;; Platform failures are best-effort values, but caller type errors remain
+;; visible contracts instead of being swallowed into #f/"".
 (define (clipboard-set! text)
+  (unless (string? text)
+    (raise-argument-error 'clipboard-set! "string?" text))
   (with-handlers ([exn:fail? (lambda (e) #f)])
     ((ref 'clipboard-set!) text)))
 
-;; Read text from the system clipboard; "" when empty/absent.
 (define (clipboard-get)
   (with-handlers ([exn:fail? (lambda (e) "")])
     ((ref 'clipboard-get))))
 
-;; ---- notifications ----
-
-;; Show a desktop notification. Returns #t if a delivery mechanism ran
-;; (delivery itself is best-effort — OS settings may suppress it).
 (define (notify! title [body ""] #:subtitle [subtitle ""])
+  (unless (string? title)
+    (raise-argument-error 'notify! "string?" title))
+  (unless (string? body)
+    (raise-argument-error 'notify! "string?" body))
+  (unless (string? subtitle)
+    (raise-argument-error 'notify! "string?" subtitle))
   (with-handlers ([exn:fail? (lambda (e) #f)])
     ((ref 'notify!) title body subtitle)))
 
-;; ---- opening files / URLs ----
+(define (path-argument->string who p)
+  (cond
+    [(path? p) (path->string p)]
+    [(string? p) p]
+    [else (raise-argument-error who "(or/c path? string?)" p)]))
 
-;; Open a path or URL with the OS default handler. Returns #t if the
-;; launcher subprocess succeeded.
 (define (open-path p)
+  (define s (path-argument->string 'open-path p))
   (with-handlers ([exn:fail? (lambda (e) #f)])
-    ((ref 'open-path) (if (path? p) (path->string p) p))))
+    ((ref 'open-path) s)))
 
-;; Reveal a file in Finder / Explorer / the file manager (selecting it).
 (define (reveal-path p)
+  (define s (path-argument->string 'reveal-path p))
   (with-handlers ([exn:fail? (lambda (e) #f)])
-    ((ref 'reveal-path) (if (path? p) (path->string p) p))))
+    ((ref 'reveal-path) s)))
 
 ;; ---- single instance ----
 
-;; Adjudicate "am I the first instance of app-id?" without leaving files
-;; behind: derive a deterministic TCP port from the id and hold a listener
-;; on it for the process lifetime. The second instance's bind fails.
-;; Returns #t for the first instance, #f if another process already holds
-;; the lock. (A firewall prompt is possible on first run on some systems.)
-(define (single-instance? app-id)
-  (define h (equal-hash-code app-id))
-  (define port (+ 49152 (modulo h 16384)))
-  (with-handlers ([exn:fail:network? (lambda (e) #f)])
-    (define cust (make-custodian))
-    (parameterize ([current-custodian cust])
-      (tcp-listen port 1 #f "127.0.0.1"))
-    #t))
+(define instance-locks (make-hash))
+(define instance-locks-sema (make-semaphore 1))
 
-(require racket/tcp)
+(define (app-id->lock-port app-id)
+  (define h
+    (for/fold ([h 2166136261])
+              ([b (in-bytes (string->bytes/utf-8 app-id))])
+      (bitwise-and (* (bitwise-xor h b) 16777619) #xffffffff)))
+  (+ 49152 (modulo h 16384)))
+
+;; Hold a deterministic loopback listener strongly for the process lifetime.
+;; This is intentionally a lightweight 0.x lock rather than an OS-specific IPC
+;; protocol; collisions with an unrelated process conservatively report #f.
+(define (single-instance? app-id)
+  (unless (and (string? app-id) (positive? (string-length app-id)))
+    (raise-argument-error 'single-instance? "non-empty-string?" app-id))
+  (call-with-semaphore
+   instance-locks-sema
+   (lambda ()
+     (cond
+       [(hash-has-key? instance-locks app-id) #f]
+       [else
+        (define cust (make-custodian))
+        (with-handlers ([exn:fail:network?
+                         (lambda (e)
+                           (custodian-shutdown-all cust)
+                           #f)])
+          (define listener
+            (parameterize ([current-custodian cust])
+              (tcp-listen (app-id->lock-port app-id) 1 #f "127.0.0.1")))
+          (hash-set! instance-locks app-id (cons cust listener))
+          #t)]))))

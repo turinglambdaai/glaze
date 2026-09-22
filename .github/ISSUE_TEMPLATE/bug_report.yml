@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible Glaze runtime, native integration, or packaging problem
+title: "[bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a Glaze bug. Native and packaging behavior is platform-sensitive, so exact environment details are important.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest Racket code or repository/commands that reproduce the problem.
+      placeholder: |
+        raco glaze init repro
+        cd repro
+        ...
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version / architecture
+      placeholder: "macOS 15 arm64, Windows 11 x64, Ubuntu 24.04 x86_64"
+    validations:
+      required: true
+  - type: input
+    id: racket
+    attributes:
+      label: Racket version
+      placeholder: "8.12 CS / 9.3 CS"
+    validations:
+      required: true
+  - type: input
+    id: glaze
+    attributes:
+      label: Glaze version or commit
+      placeholder: "0.7 or commit SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed secrets, license private keys, tokens, and customer data from the report.
+          required: true

@@ -350,6 +350,7 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:background-active? [background-active? #f]
                       #:on-close [on-close (lambda () (void))])
   (unless (supported?)
     (error 'open-webview "WebView2 backend unavailable"))

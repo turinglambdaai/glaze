@@ -7,6 +7,8 @@
   '("showcase"
     "hello"
     "counter"
+    "events"
+    "tray"
     "agent-verify.rkt"
     "tray-demo.rkt"
     "webview-demo.rkt"))

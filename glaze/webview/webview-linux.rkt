@@ -157,6 +157,7 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:background-active? [background-active? #f]
                       #:on-close [on-close (lambda () (void))])
   (define (show-devtools-later!)
     ;; The inspector window needs the webview realized; retry briefly.

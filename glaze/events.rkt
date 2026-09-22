@@ -14,7 +14,8 @@
 ;;   const es = new EventSource('/glaze/events');
 ;;   es.addEventListener('counter-changed', e => e.detail);
 
-(require racket/async-channel)
+(require json
+         racket/async-channel)
 
 (provide make-event-bus
          event-bus?
@@ -45,9 +46,24 @@
 
 ;; Deliver (name . jsexpr) to every subscriber. Non-blocking: a full
 ;; backlog drops the event for that subscriber only.
+(define (valid-event-name? name)
+  (define s
+    (cond
+      [(symbol? name) (symbol->string name)]
+      [(string? name) name]
+      [else #f]))
+  (and s
+       (positive? (string-length s))
+       (not (regexp-match? #rx"[\r\n\u0000]" s))))
+
 (define (bus-broadcast! bus name data)
-  (unless (or (symbol? name) (string? name))
-    (raise-argument-error 'bus-broadcast! "(or/c symbol? string?)" name))
+  (unless (valid-event-name? name)
+    (raise-argument-error
+     'bus-broadcast!
+     "non-empty symbol/string without CR, LF, or NUL"
+     name))
+  (unless (jsexpr? data)
+    (raise-argument-error 'bus-broadcast! "jsexpr?" data))
   (define payload
     (list (if (string? name) (string->symbol name) name) data))
   (define snapshot
@@ -59,4 +75,6 @@
 ;; Blocking receive with timeout — for tests and non-SSE consumers.
 ;; Returns (list name data) or 'timeout.
 (define (bus-wait ch [secs 10])
+  (unless (and (real? secs) (>= secs 0))
+    (raise-argument-error 'bus-wait "nonnegative-real?" secs))
   (or (sync/timeout secs ch) 'timeout))

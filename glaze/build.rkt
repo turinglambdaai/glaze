@@ -4,10 +4,9 @@
 ;; `raco distribute` so a Glaze project becomes a runnable directory (Windows)
 ;; or application bundle (macOS) with its frontend assets bundled.
 ;;
-;; The frontend (public/) is declared via define-runtime-path in the generated
-;; entry module, so raco distribute copies it next to the executable; at
-;; runtime the app resolves the directory without depending on the working
-;; directory.
+;; The user's entry module is compiled directly so normal Racket
+;; `(module+ main ...)` semantics are preserved. Frontend assets are copied
+;; into the distribution and resolved at runtime by glaze/assets.
 
 (require racket/file
          racket/list
@@ -19,6 +18,56 @@
 
 (provide build-app
          default-entry-template)
+
+
+;; ---- packaging input hygiene ----
+
+(define invalid-app-name-chars
+  (list #\< #\> #\: #\" #\/ #\\ #\| #\? #\*))
+
+(define (valid-app-name? s)
+  (and (string? s)
+       (non-empty-string? s)
+       (not (member s '("." "..")))
+       (for/and ([c (in-string s)])
+         (and (>= (char->integer c) 32)
+              (not (member c invalid-app-name-chars))))
+       (not (member (string-ref s (sub1 (string-length s))) '(#\space #\.)))))
+
+(define (valid-url-scheme? s)
+  (and (string? s) (regexp-match? #px"^[a-z][a-z0-9+.-]*$" s)))
+
+(define (xml-escape s)
+  (define str (format "~a" s))
+  (string-replace
+   (string-replace
+    (string-replace
+     (string-replace
+      (string-replace str "&" "&amp;")
+      "<" "&lt;")
+     ">" "&gt;")
+    "\"" "&quot;")
+   "'" "&apos;"))
+
+(define (bundle-id-component s)
+  (define raw
+    (list->string
+     (for/list ([c (in-string (string-downcase s))])
+       (if (or (char<=? #\a c #\z)
+               (char<=? #\0 c #\9)
+               (char=? c #\.)
+               (char=? c #\-))
+           c
+           #\-))))
+  (define cleaned (regexp-replace* #px"-+" raw "-"))
+  (if (regexp-match? #px"[a-z0-9]" cleaned) cleaned "app"))
+
+(define (nsis-escape s)
+  ;; In NSIS strings, '$' introduces variables/escapes.
+  (string-replace (format "~a" s) "$" "$$"))
+
+(define (shell-single-quote s)
+  (string-append "'" (string-replace s "'" "'\"'\"'") "'"))
 
 ;; Build a Glaze project into a distributable.
 ;;
@@ -83,23 +132,49 @@
   (define entry-abs (path->complete-path entry-path))
   (define project-dir (path-only entry-abs))
   (define app-name (or name (path->string (file-name-from-path project-dir))))
+  (unless (valid-app-name? app-name)
+    (raise-argument-error
+     'build-app
+     "non-empty cross-platform filename without control chars or <>:\"/\\|?*"
+     app-name))
+  (when (and version (not (and (string? version) (non-empty-string? version))))
+    (raise-argument-error 'build-app "(or/c #f non-empty-string?)" version))
+  (unless (and (list? url-schemes) (andmap valid-url-scheme? url-schemes))
+    (raise-argument-error
+     'build-app
+     "(listof lowercase URL schemes matching [a-z][a-z0-9+.-]*)"
+     url-schemes))
+  (when (and icon-path (not (file-exists? icon-path)))
+    (error 'build-app "icon file not found: ~a" icon-path))
 
-  ;; Generate an entry wrapper in a temp location that requires the user's
-  ;; main plus glaze, and re-exports nothing. We write it next to the entry so
-  ;; define-runtime-path for public/ resolves relative to the project.
-  (define gen-entry (build-path project-dir "glaze-build-entry.rkt"))
-  (call-with-output-file gen-entry
-                         (lambda (out) (display (entry-module-source entry-path) out))
-                         #:exists 'replace)
-
+  ;; Compile the user's actual entry module. Compiling a wrapper that merely
+  ;; required main.rkt skipped the user's `(module+ main ...)` submodule and
+  ;; could produce an executable that immediately exited with status 0.
   ;; Assemble the raco exe arguments.
   (define os (system-type 'os))
+  (when (and entitlements (not (eq? os 'macosx)))
+    (error 'build-app "#:entitlements is only supported on macOS"))
+  (when notarize-profile
+    (unless (eq? os 'macosx)
+      (error 'build-app "#:notarize-profile is only supported on macOS"))
+    (unless sign
+      (error 'build-app "notarization requires #:sign with a signing identity")))
+  (when (and sign (eq? os 'unix))
+    (error 'build-app "#:sign is not supported for Linux distributions"))
   (define out-exe-name
     (case os
       [(windows) (string-append app-name ".exe")]
       [(macosx) app-name] ; --gui produces a .app bundle named app-name
       [else app-name]))
-  (define out-exe-path (build-path project-dir out-exe-name))
+  ;; Build intermediates live in an isolated temporary directory. Older
+  ;; versions wrote <project>/<app-name>(.exe) and deleted it afterwards,
+  ;; which could overwrite a developer-owned file with the same name.
+  (define build-work-dir (make-temporary-file "glaze-build-~a" 'directory))
+  (define out-exe-path (build-path build-work-dir out-exe-name))
+
+  (define (cleanup-build-work!)
+    (when (directory-exists? build-work-dir)
+      (delete-directory/files build-work-dir)))
 
   (define exe-args
     ;; --gui is Windows-only (console-less exe). On macOS --gui would make
@@ -117,12 +192,11 @@
                   [(macosx) (list "--icns" (path->string icon-path))]
                   [else '()])
                 '())
-            (list "-o" (path->string out-exe-path) (path->string gen-entry))))
+            (list "-o" (path->string out-exe-path) (path->string entry-abs))))
 
   (unless (apply system* (find-racket-bin) exe-args)
-    (delete-the-generated-entry gen-entry)
+    (cleanup-build-work!)
     (error 'build-app "raco exe failed"))
-
   ;; raco exe emits a read-only launcher; `raco distribute` needs to rewrite
   ;; the copy it makes (Mach-O/ELF segment patching) and fails with EACCES
   ;; on some Racket versions otherwise.
@@ -135,14 +209,11 @@
   ;; produce a consistent layout across platforms.
   (define dist-args (list "distribute" (path->string out-dir-path) (path->string out-exe-path)))
   (unless (apply system* (find-racket-bin) dist-args)
-    (delete-the-generated-entry gen-entry)
+    (cleanup-build-work!)
     (error 'build-app "raco distribute failed"))
 
-  ;; Clean up the generated entry and the standalone exe copy (distribute has
-  ;; its own copy inside out-dir).
-  (delete-the-generated-entry gen-entry)
-  (when (file-exists? out-exe-path)
-    (delete-file out-exe-path))
+  ;; Distribute has copied everything it needs; remove isolated intermediates.
+  (cleanup-build-work!)
 
   ;; macOS: `raco distribute` of a bare exe yields a flat bin/+lib/ layout
   ;; (exact shape varies across Racket versions) — assemble the canonical
@@ -153,9 +224,9 @@
 
   ;; Bundle the project's public/ next to the distribution so the packaged
   ;; app can serve its frontend. On macOS the assets go inside the .app bundle
-  ;; Resources; elsewhere they sit beside the executable. The generated entry
-  ;; sets current-directory to the executable's dir at runtime so the user's
-  ;; relative #:public-dir "public" resolves to this copy.
+  ;; Resources; elsewhere they sit beside the executable. glaze/assets
+  ;; resolves a relative #:public-dir against these packaged locations without
+  ;; changing the process current directory.
   (copy-public-into-dist project-dir out-dir-path app-name os)
 
   ;; macOS post-processing: customize the bundle's Info.plist if produced.
@@ -174,11 +245,14 @@
 
   ;; Optional installer step. Each platform helper probes for the required
   ;; external tooling and warns (without failing the build) when it's absent;
-  ;; the CI matrix installs them. Returns the produced artifact path (or #f).
+  ;; the CI matrix exercises native paths and documented fallbacks. Returns
+  ;; the produced artifact path (or #f).
   (define installer-artifact
     (if installer?
         (make-installer os out-dir-path app-name (or version "0.0.0"))
         #f))
+  (when (and installer? (not installer-artifact))
+    (error 'build-app "installer was requested but no installer artifact was produced"))
 
   ;; Sign the installer artifact too (Windows msi / NSIS setup exe) — it
   ;; embeds the already-signed exe but is itself what SmartScreen judges.
@@ -212,36 +286,82 @@
 (define (run . args)
   (apply system* args))
 
-;; Windows: prefer WiX v4 (`wix`), then NSIS (`makensis`); else zip the dist.
+;; Return the WiX executable only when the installed major version is 4.
+;; Newer WiX majors have changed CLI/licensing behavior and must not be fed
+;; Glaze's v4 source/command line by accident. Failure to probe is treated as
+;; unsupported so NSIS/archive fallback remains available.
+(define (find-wix-v4)
+  (define wix
+    (or (find-executable-path "wix.exe" #f)
+        (find-executable-path "wix" #f)))
+  (and wix
+       (with-handlers ([exn:fail? (lambda (e) #f)])
+         (define out (open-output-string))
+         (define err (open-output-string))
+         (define code
+           (parameterize ([current-output-port out]
+                          [current-error-port err])
+             (system*/exit-code wix "--version")))
+         (define text
+           (string-trim
+            (string-append (get-output-string out) " " (get-output-string err))))
+         (define m (regexp-match #px"^\\s*([0-9]+)(?:[.]|\\s|$)" text))
+         (and (zero? code)
+              m
+              (= (string->number (second m)) 4)
+              wix))))
+
+;; Windows: prefer supported WiX v4, then NSIS; else zip the dist.
 (define (make-windows-installer out-dir app-name [version "0.0.0"])
   (define dist (path->complete-path out-dir))
+  (define any-wix
+    (or (find-executable-path "wix.exe" #f)
+        (find-executable-path "wix" #f)))
+  (define wix-v4 (find-wix-v4))
+  (when (and any-wix (not wix-v4))
+    (displayln
+     "[glaze] ignoring unsupported WiX version; Glaze currently supports WiX v4."
+     (current-error-port)))
   (cond
-    [(find-tool "wix.exe" "wix")
+    [wix-v4
      (define msi-path (build-path dist (string-append app-name ".msi")))
      ;; WiX v4: `wix build -o out.msi <wxs>`; we generate a minimal wxs.
-     (define wxs-path (build-path dist (string-append app-name ".wxs")))
-     (call-with-output-file wxs-path
-                            (lambda (out) (display (windows-wxs app-name dist version) out))
-                            #:exists 'replace)
-     (if (run (find-executable-path "wix.exe" #f)
-              "build"
-              "-o"
-              (path->string msi-path)
-              (path->string wxs-path))
-         msi-path
-         (fprintf (current-error-port) "[glaze] WiX build failed; see output above.\n"))]
+     (define wxs-path (make-temporary-file "glaze-wix-~a.wxs"))
+     (dynamic-wind
+       (lambda ()
+         (call-with-output-file wxs-path
+           (lambda (out) (display (windows-wxs app-name dist version) out))
+           #:exists 'replace)
+         (when (file-exists? msi-path) (delete-file msi-path)))
+       (lambda ()
+         (unless (run wix-v4
+                      "build" "-o" (path->string msi-path)
+                      (path->string wxs-path))
+           (error 'build-app "WiX v4 build failed"))
+         (unless (file-exists? msi-path)
+           (error 'build-app "WiX v4 reported success but installer is missing: ~a" msi-path))
+         msi-path)
+       (lambda () (when (file-exists? wxs-path) (delete-file wxs-path))))]
     [(find-tool "makensis")
-     (define nsis-path (build-path dist (string-append app-name ".nsi")))
-     (call-with-output-file nsis-path
-                            (lambda (out) (display (windows-nsis app-name dist) out))
-                            #:exists 'replace)
+     (define nsis-path (make-temporary-file "glaze-nsis-~a.nsi"))
      (define setup-exe (build-path dist (string-append app-name "-setup.exe")))
-     (if (run (find-executable-path "makensis" #f) (path->string nsis-path))
-         setup-exe
-         (fprintf (current-error-port) "[glaze] NSIS build failed; see output above.\n"))]
+     (dynamic-wind
+       (lambda ()
+         (call-with-output-file nsis-path
+           (lambda (out) (display (windows-nsis app-name dist) out))
+           #:exists 'replace)
+         (when (file-exists? setup-exe) (delete-file setup-exe)))
+       (lambda ()
+         (unless (run (find-executable-path "makensis" #f) (path->string nsis-path))
+           (error 'build-app "NSIS build failed"))
+         (unless (file-exists? setup-exe)
+           (error 'build-app "NSIS reported success but installer is missing: ~a" setup-exe))
+         setup-exe)
+       (lambda () (when (file-exists? nsis-path) (delete-file nsis-path))))]
     [else
-     (display "[glaze] No Windows installer toolchain found (wix / makensis); " (current-error-port))
-     (displayln "producing a .zip instead. Install WiX Toolset or NSIS for a real installer."
+     (display "[glaze] No supported Windows installer toolchain found (WiX v4 / NSIS); "
+              (current-error-port))
+     (displayln "producing a .zip instead. Install WiX Toolset v4 or NSIS for a real installer."
                 (current-error-port))
      (archive-directory dist app-name "zip")]))
 
@@ -252,24 +372,22 @@
   (define dmg-path (build-path dist (string-append app-name ".dmg")))
   (cond
     [(find-tool "create-dmg")
-     (and (run (find-executable-path "create-dmg" #f)
-               "--volname"
-               app-name
-               (path->string dmg-path)
-               (path->string bundle))
-          dmg-path)]
+     (when (file-exists? dmg-path) (delete-file dmg-path))
+     (unless (run (find-executable-path "create-dmg" #f)
+                  "--volname" app-name
+                  (path->string dmg-path)
+                  (path->string bundle))
+       (error 'build-app "create-dmg failed"))
+     dmg-path]
     [(find-tool "hdiutil")
-     (and (run (find-executable-path "hdiutil" #f)
-               "create"
-               "-volname"
-               app-name
-               "-srcfolder"
-               (path->string bundle)
-               "-ov"
-               "-format"
-               "UDZO"
-               (path->string dmg-path))
-          dmg-path)]
+     (when (file-exists? dmg-path) (delete-file dmg-path))
+     (unless (run (find-executable-path "hdiutil" #f)
+                  "create" "-volname" app-name
+                  "-srcfolder" (path->string bundle)
+                  "-ov" "-format" "UDZO"
+                  (path->string dmg-path))
+       (error 'build-app "hdiutil failed"))
+     dmg-path]
     [else
      (display "[glaze] No macOS dmg toolchain found (create-dmg / hdiutil); " (current-error-port))
      (displayln "producing a .zip instead." (current-error-port))
@@ -279,25 +397,60 @@
 (define (make-linux-installer out-dir app-name)
   (define dist (path->complete-path out-dir))
   (define appimage-path (build-path dist (string-append app-name ".AppImage")))
+  (define appimagetool (find-executable-path "appimagetool" #f))
   (cond
-    [(find-tool "appimagetool")
-     (define appdir (build-path dist "AppDir"))
-     (and (run (find-executable-path "appimagetool" #f)
-               (path->string appdir)
-               (path->string appimage-path))
-          appimage-path)]
-    [(find-tool "linuxdeploy")
-     (putenv "OUTPUT" (path->string appimage-path))
-     (and (run (find-executable-path "linuxdeploy" #f)
-               "--appdir"
-               (path->string (build-path dist "AppDir"))
-               "--output"
-               "appimage")
-          appimage-path)]
+    [appimagetool
+     (define appdir (make-temporary-file "glaze-AppDir-~a" 'directory))
+     (dynamic-wind
+       (lambda ()
+         (when (file-exists? appimage-path) (delete-file appimage-path))
+         (define payload (build-path appdir "usr" "share" app-name))
+         (make-directory* (path-only payload))
+         (copy-directory/files dist payload)
+         (define app-run (build-path appdir "AppRun"))
+         (call-with-output-file app-run
+           (lambda (out)
+             (fprintf out "#!/bin/sh\nset -eu\nHERE=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n")
+             (fprintf out "APP_NAME=~a\n" (shell-single-quote app-name))
+             (display "ROOT=\"$HERE/usr/share/$APP_NAME\"\n" out)
+             (display "if [ -x \"$ROOT/$APP_NAME\" ]; then exec \"$ROOT/$APP_NAME\" \"$@\"; fi\n" out)
+             (display "exec \"$ROOT/bin/$APP_NAME\" \"$@\"\n" out))
+           #:exists 'replace)
+         (file-or-directory-permissions
+          app-run
+          (bitwise-ior (file-or-directory-permissions app-run 'bits) #o100))
+         (call-with-output-file (build-path appdir (string-append app-name ".desktop"))
+           (lambda (out)
+             (fprintf out "[Desktop Entry]\nType=Application\nName=~a\nExec=AppRun\nIcon=glaze-app\nTerminal=false\nCategories=Utility;\n"
+                      app-name))
+           #:exists 'replace)
+         ;; appimagetool requires an icon named by the Desktop Entry.
+         (call-with-output-file (build-path appdir "glaze-app.svg")
+           (lambda (out)
+             (display
+              "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"256\" height=\"256\" viewBox=\"0 0 256 256\"><rect width=\"256\" height=\"256\" rx=\"48\" fill=\"#202020\"/><circle cx=\"128\" cy=\"128\" r=\"72\" fill=\"#f4f4f4\"/><circle cx=\"128\" cy=\"128\" r=\"38\" fill=\"#202020\"/></svg>"
+              out))
+           #:exists 'replace)
+         (void))
+       (lambda ()
+         (define old-extract (getenv "APPIMAGE_EXTRACT_AND_RUN"))
+         (define ok?
+           (dynamic-wind
+             (lambda () (putenv "APPIMAGE_EXTRACT_AND_RUN" "1"))
+             (lambda ()
+               (run appimagetool (path->string appdir) (path->string appimage-path)))
+             (lambda () (putenv "APPIMAGE_EXTRACT_AND_RUN" (or old-extract "")))))
+         (unless ok?
+           (error 'build-app "appimagetool failed"))
+         (unless (file-exists? appimage-path)
+           (error 'build-app "appimagetool reported success but AppImage is missing"))
+         appimage-path)
+       (lambda ()
+         (when (directory-exists? appdir) (delete-directory/files appdir))))]
     [else
-     (display "[glaze] No Linux AppImage toolchain found (appimagetool / linuxdeploy); "
-              (current-error-port))
-     (displayln "producing a .tar.gz instead." (current-error-port))
+     (displayln
+      "[glaze] appimagetool not found; producing a .tar.gz instead."
+      (current-error-port))
      (archive-directory dist app-name "tar.gz")]))
 
 ;; Minimal WiX v4 source referencing the dist directory contents.
@@ -322,11 +475,11 @@
   </Package>
 </Wix>
 WXEOF
-          app-name
-          version
-          app-name
-          (path->string dist-dir)
-          app-name))
+          (xml-escape app-name)
+          (xml-escape version)
+          (xml-escape app-name)
+          (xml-escape (path->string dist-dir))
+          (xml-escape app-name)))
 
 ;; Minimal NSIS script.
 (define (windows-nsis app-name dist-dir)
@@ -342,13 +495,13 @@ Section ""
   CreateShortcut "$DESKTOP\\~a.lnk" "$INSTDIR\\~a.exe"
 SectionEnd
 NSI
-          app-name
-          (path->string dist-dir)
-          app-name
-          app-name
-          (path->string dist-dir)
-          app-name
-          app-name))
+          (nsis-escape app-name)
+          (nsis-escape (path->string dist-dir))
+          (nsis-escape app-name)
+          (nsis-escape app-name)
+          (nsis-escape (path->string dist-dir))
+          (nsis-escape app-name)
+          (nsis-escape app-name)))
 
 ;; Produce a zip or tar.gz of dist contents as a portable fallback. Uses the
 ;; host `tar` if present (handles both formats), else warns. Returns the
@@ -363,13 +516,21 @@ NSI
     [(equal? fmt "zip")
      (cond
        [(and (eq? (system-type 'os) 'windows) (find-executable-path "powershell.exe" #f))
-        (and (run (find-executable-path "powershell.exe" #f)
-                  "-NoProfile"
-                  "-Command"
-                  (format "Compress-Archive -Path '~a\\*' -DestinationPath '~a' -Force"
-                          (path->string dist-abs)
-                          (path->string archive-path)))
-             archive-path)]
+        (define script (make-temporary-file "glaze-archive-~a.ps1"))
+        (dynamic-wind
+          (lambda ()
+            (call-with-output-file script
+              (lambda (out)
+                (display "param([string]$Source,[string]$Destination)\nCompress-Archive -Path (Join-Path $Source '*') -DestinationPath $Destination -Force\n" out))
+              #:exists 'replace))
+          (lambda ()
+            (and (run (find-executable-path "powershell.exe" #f)
+                      "-NoProfile" "-NonInteractive" "-File"
+                      (path->string script)
+                      "-Source" (path->string dist-abs)
+                      "-Destination" (path->string archive-path))
+                 archive-path))
+          (lambda () (when (file-exists? script) (delete-file script))))]
        [(find-executable-path "zip" #f)
         (and (parameterize ([current-directory parent])
                (run (find-executable-path "zip" #f) "-r" (path->string archive-path) base))
@@ -416,7 +577,9 @@ NSI
    "               (and c (directory-exists? (build-path c \"public\")) c))])\n"
    "  (when (and pick (not (directory-exists? (build-path (current-directory) \"public\"))))\n"
    "    (current-directory pick)))\n"
-   (format "(require \"~a\")\n" entry-filename)))
+   (format "(dynamic-require \"~a\" #f)\n" entry-filename)
+   (format "(define main-submod '(submod \"~a\" main))\n" entry-filename)
+   "(when (module-declared? main-submod #t) (dynamic-require main-submod #f))\n"))
 
 ;; Assemble a canonical macOS .app bundle from whatever `raco distribute`
 ;; produced. Current versions lay out <dist>/bin/<name> + <dist>/lib/; older
@@ -469,18 +632,23 @@ NSI
 </dict>
 </plist>
 PLIST
-          app-name app-name app-name app-name version version
+          (xml-escape app-name)
+          (xml-escape app-name)
+          (xml-escape (bundle-id-component app-name))
+          (xml-escape app-name)
+          (xml-escape version)
+          (xml-escape version)
           (if (null? url-schemes)
               ""
               (string-append
                "\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n"
                "      <key>CFBundleURLName</key><string>io.glaze."
-               app-name
+               (xml-escape (bundle-id-component app-name))
                "</string>\n"
                "      <key>CFBundleURLSchemes</key>\n      <array>\n"
                (string-join
                 (for/list ([sc (in-list url-schemes)])
-                  (format "        <string>~a</string>\n" sc))
+                  (format "        <string>~a</string>\n" (xml-escape sc)))
                 "")
                "      </array>\n    </dict>\n  </array>"))))
 ;; Copy the project's public/ into the distribution next to the executable.
@@ -519,29 +687,25 @@ PLIST
 (define (post-process-macos-bundle out-dir app-name icon [version #f])
   (define bundle (build-path out-dir (string-append app-name ".app")))
   (define plist (build-path bundle "Contents" "Info.plist"))
-  (when (file-exists? plist)
-    (define pb (find-executable-path "PlistBuddy" #f))
-    (when pb
-      (define (plist-set key val)
-        (system* pb "-c" (format "Set :~a ~a" key val) plist))
-      (with-handlers ([exn:fail? void])
-        (plist-set "CFBundleName" app-name)
-        (plist-set "CFBundleDisplayName" app-name)
-        (plist-set "CFBundleIdentifier" (string-append "io.glaze." app-name))
-        (when version
-          (plist-set "CFBundleShortVersionString" version)
-          (plist-set "CFBundleVersion" version)))
-      (when (and icon (file-exists? icon))
-        ;; Copy the icon into Resources and reference it.
-        (define icns-name (path->string (file-name-from-path icon)))
-        (define res-dir (build-path bundle "Contents" "Resources"))
-        (make-directory* res-dir)
-        (call-with-output-file (build-path res-dir icns-name)
-                               (lambda (out)
-                                 (call-with-input-file icon (lambda (in) (copy-port in out))))
-                               #:exists 'replace)
-        (with-handlers ([exn:fail? void])
-          (system* pb "-c" (format "Set :CFBundleIconFile ~a" icns-name) plist))))))
+  ;; Name/id/version are already written by macos-info-plist. This pass only
+  ;; installs the optional icon and makes the plist reference it.
+  (when (and icon (file-exists? icon))
+    (unless (file-exists? plist)
+      (error 'build-app "Info.plist missing from bundle: ~a" plist))
+    (define pb-path (string->path "/usr/libexec/PlistBuddy"))
+    (unless (file-exists? pb-path)
+      (error 'build-app "PlistBuddy not found; cannot install bundle icon"))
+    (define icns-name (path->string (file-name-from-path icon)))
+    (define res-dir (build-path bundle "Contents" "Resources"))
+    (make-directory* res-dir)
+    (copy-file icon (build-path res-dir icns-name) #t)
+    (define set-ok?
+      (system* pb-path "-c" (format "Set :CFBundleIconFile ~a" icns-name) plist))
+    (unless (or set-ok?
+                (system* pb-path "-c"
+                         (format "Add :CFBundleIconFile string ~a" icns-name)
+                         plist))
+      (error 'build-app "could not write CFBundleIconFile to ~a" plist))))
 
 ;; ---- Code signing & notarization ----
 
@@ -559,14 +723,11 @@ PLIST
      (sign-macos-bundle bundle sign entitlements hardened-runtime?)]
     [(windows)
      (define exe-path (build-path out-dir (string-append app-name ".exe")))
-     (if (file-exists? exe-path)
-         (sign-windows-file exe-path sign timestamp-url)
-         (displayln (format "[glaze] cannot sign: exe not found at ~a" exe-path)
-                    (current-error-port)))]
+     (unless (file-exists? exe-path)
+       (error 'build-app "cannot sign: exe not found at ~a" exe-path))
+     (sign-windows-file exe-path sign timestamp-url)]
     [else
-     (displayln "[glaze] --sign is not applicable on this platform (no standard signing "
-                (current-error-port))
-     (displayln "scheme for Linux apps); ignoring." (current-error-port))]))
+     (error 'build-app "#:sign is unsupported on this platform")]))
 
 ;; Sign a macOS .app with `codesign`, then verify. Raises on failure.
 ;;
@@ -629,11 +790,8 @@ PLIST
 (define (sign-windows-file file cert-spec [timestamp-url default-timestamp-url])
   (define signtool (find-tool "signtool.exe" "signtool"))
   (unless signtool
-    (displayln "[glaze] signtool not found (Windows SDK); skipping code signing. "
-               (current-error-port))
-    (displayln "[glaze] Install the Windows SDK Signing Tools to sign for distribution."
-               (current-error-port))
-    #f)
+    (error 'build-app
+           "signtool not found; install Windows SDK Signing Tools before using #:sign"))
   (when signtool
     (define cert-flag
       ;; A 40-hex string is a SHA-1 thumbprint; anything else is a subject name.
@@ -681,8 +839,12 @@ PLIST
       (error 'build-app "notarization failed for ~a (profile ~a)" artifact keychain-profile))
     (define staple-target
       (if (file-exists? dmg) dmg bundle))
-    (system*/exit-code xcrun "stapler" "staple" (path->string staple-target))
-    (fprintf (current-error-port) "[glaze] notarized: ~a\n" staple-target)
+    (unless (zero? (system*/exit-code xcrun "stapler" "staple"
+                                      (path->string staple-target)))
+      (error 'build-app "stapling notarization ticket failed for ~a"
+             staple-target))
+    (fprintf (current-error-port) "[glaze] notarized and stapled: ~a\n"
+             staple-target)
     #t))
 
 (define (default-entry-template)
