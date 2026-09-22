@@ -278,18 +278,76 @@
     </footer>
 
     <script>
-        // Bilingual content: data-en / data-zh attributes, English default.
-        function setLanguage(lang) {
+        // Unified language policy for product sites:
+        // - explicit user choice persists and always wins;
+        // - otherwise follow the browser/system locale on every visit;
+        // - zh* => Simplified Chinese, other known locales => English;
+        // - if no locale is available at all, fall back to Chinese.
+        //
+        // `site-lang` is deliberately treated as legacy because older versions
+        // could not distinguish a user click from an automatically applied value.
+        var LANGUAGE_OVERRIDE_KEY = 'glaze-lang-override-v2';
+        var LEGACY_LANGUAGE_KEY = 'site-lang';
+        var pageMetadata = {
+            en: {
+                title: 'Glaze — Racket backend, web UI, native desktop',
+                description: 'Build desktop apps with a Racket backend and a web frontend. A Tauri-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.'
+            },
+            zh: {
+                title: 'Glaze — Racket 后端、Web UI、原生桌面应用',
+                description: '用 Racket 编写应用逻辑，用 HTML/CSS/JS 构建界面，并通过系统 WebView 交付原生桌面应用。Glaze 是面向 Racket 的 Tauri 式框架。'
+            }
+        };
+
+        function readLanguageOverride() {
+            try {
+                var saved = localStorage.getItem(LANGUAGE_OVERRIDE_KEY);
+                return saved === 'zh' || saved === 'en' ? saved : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function detectBrowserLanguage() {
+            var locale = (navigator.languages && navigator.languages[0]) || navigator.language || '';
+            if (!locale) return 'zh';
+            return String(locale).toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+        }
+
+        function applyLanguage(lang, persist) {
+            if (persist) {
+                try { localStorage.setItem(LANGUAGE_OVERRIDE_KEY, lang); } catch (e) { /* private mode */ }
+            }
+
             document.querySelectorAll('[data-en]').forEach(function (el) {
-                el.textContent = el.getAttribute('data-' + lang);
+                var text = el.getAttribute('data-' + lang);
+                if (text !== null) el.textContent = text;
             });
             document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
-            try { localStorage.setItem('site-lang', lang); } catch (e) { /* private mode */ }
+            document.documentElement.setAttribute('data-language', lang);
+
+            var label = document.getElementById('current-lang-label');
+            if (label) label.textContent = lang === 'zh' ? '简体中文' : 'English';
+
+            var metadata = pageMetadata[lang];
+            if (metadata) {
+                document.title = metadata.title;
+                var description = document.querySelector('meta[name="description"]');
+                if (description) description.setAttribute('content', metadata.description);
+            }
         }
-        try {
-            var saved = localStorage.getItem('site-lang');
-            if (saved && saved !== 'en') setLanguage(saved);
-        } catch (e) { /* private mode */ }
+
+        function setLanguage(lang) {
+            if (lang !== 'zh' && lang !== 'en') return;
+            applyLanguage(lang, true);
+        }
+
+        try { localStorage.removeItem(LEGACY_LANGUAGE_KEY); } catch (e) { /* private mode */ }
+        applyLanguage(readLanguageOverride() || detectBrowserLanguage(), false);
+
+        window.addEventListener('languagechange', function () {
+            if (!readLanguageOverride()) applyLanguage(detectBrowserLanguage(), false);
+        });
 
         // Scroll-in animation.
         var observer = new IntersectionObserver(function (entries) {
