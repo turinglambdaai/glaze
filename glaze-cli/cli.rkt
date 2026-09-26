@@ -6,7 +6,8 @@
          racket/string
          racket/system
          glaze/build
-         glaze/license)
+         glaze/license
+         glaze-cli/pkg)
 
 (define (init-project name)
   (printf "Creating Glaze project: ~a\n" name)
@@ -178,6 +179,8 @@
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
   (displayln "  keygen        Create an RSA keypair for license signing")
   (displayln "  license       Sign or verify offline license files")
+  (displayln "  install       Pin the glaze package to a revision and link it")
+  (displayln "  doctor        Diagnose glaze package links (--fix removes broken ones)")
   (displayln "  help          Show this help")
   (displayln "")
   (displayln "Glaze requires a working native WebView. If it is missing or broken, startup")
@@ -316,6 +319,8 @@
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]
      ["license" (license-command rest)]
+     ["install" (install-command rest)]
+     ["doctor" (doctor-command rest)]
      ["help" (print-help)]
      [_
       (printf "Unknown command: ~a\n" cmd)
