@@ -30,6 +30,15 @@ jobs:
       - name: Run tests
         run: raco test glaze-test/
 
+      - name: Build Scribble documentation
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/glaze-doc"
+          raco scribble ++xref-in setup/xref load-collections-xref \
+            --htmls --dest "$RUNNER_TEMP/glaze-doc" \
+            glaze-doc/scribblings/glaze.scrbl
+
       - name: Check formatting
         run: raco fmt --check glaze/ glaze-cli/ glaze-test/
         continue-on-error: true

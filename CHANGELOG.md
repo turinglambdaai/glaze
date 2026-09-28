@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Build the Scribble reference manual in CI and group modules that share a
+  manual section, eliminating duplicate exporting-library warnings during
+  package-catalog documentation builds.
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
