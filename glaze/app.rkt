@@ -97,16 +97,22 @@
   (parameterize ([current-api-token (or token "")]
                  [current-glaze-error-reporter
                   (or on-error (current-glaze-error-reporter))])
+    ;; Update check runs in the background: the fetch has a multi-second
+    ;; network timeout and a GUI app must not stall first paint on it. The
+    ;; 'update-available broadcast keeps its original contract (same event,
+    ;; same payload) — consumers cannot tell it arrived asynchronously.
     (when check-update
-      (define info (do-check-update check-update
-                                    #:current-version current-version))
-      (when info
-        (printf "[glaze] update available: ~a (current ~a) — ~a~n"
-                (hash-ref info 'version #f)
-                current-version
-                (hash-ref info 'url #f))
-        (when event-bus
-          (bus-broadcast! event-bus 'update-available info))))
+      (thread
+       (lambda ()
+         (define info (do-check-update check-update
+                                       #:current-version current-version))
+         (when info
+           (printf "[glaze] update available: ~a (current ~a) — ~a~n"
+                   (hash-ref info 'version #f)
+                   current-version
+                   (hash-ref info 'url #f))
+           (when event-bus
+             (bus-broadcast! event-bus 'update-available info))))))
     ;; If native GUI startup fails, never leave the local HTTP server behind.
     ;; open-window's exception contains the platform-specific install/repair
     ;; instructions; preserve it unchanged for the caller/user.

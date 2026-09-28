@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Build the Scribble reference manual in CI and group modules that share a
   manual section, eliminating duplicate exporting-library warnings during
   package-catalog documentation builds.
+- **`#:check-update` stalled app startup**: run-app performed the update
+  check synchronously before opening the window, so a slow or blocked
+  network held first paint for the manifest timeout (seconds). The check
+  now runs in a background thread; the `'update-available` broadcast
+  contract is unchanged.
 - **Linux tray aborted standalone processes**: `tray-linux` never called
   `gtk_init` — inside a webview app the window backend had already done it,
   but tray-only processes (and `raco test glaze-test/` on a Linux desktop)
