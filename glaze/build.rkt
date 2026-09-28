@@ -18,7 +18,34 @@
          "assets.rkt")
 
 (provide build-app
-         default-entry-template)
+         default-entry-template
+         platform-backend-modules)
+
+;; Modules that glaze's webview/sys/tray schedulers reach only via runtime
+;; dispatch (dynamic-require keyed on (system-type 'os)). raco exe's static
+;; module walk cannot see them, so an embedded/packaged build ships WITHOUT
+;; the platform backend unless it is embedded explicitly with `++lib` — the
+;; app would start and pass every headless check, then die at the first
+;; window/notification with "collection not found". Builds always run on the
+;; target platform, so keying on (system-type 'os) here is exact.
+(define (platform-backend-modules)
+  (define os (system-type 'os))
+  (list
+   (case os
+     [(windows) 'glaze/webview/webview-windows]
+     [(macosx) 'glaze/webview/webview-macos]
+     [(unix) 'glaze/webview/webview-linux]
+     [else 'glaze/webview/webview-stub])
+   (case os
+     [(windows) 'glaze/sys/sys-windows]
+     [(macosx) 'glaze/sys/sys-macos]
+     [(unix) 'glaze/sys/sys-linux]
+     [else 'glaze/sys/sys-stub])
+   (case os
+     [(windows) 'glaze/tray/tray-windows]
+     [(macosx) 'glaze/tray/tray-macos]
+     [(unix) 'glaze/tray/tray-linux]
+     [else 'glaze/tray/tray-stub])))
 
 ;; Build a Glaze project into a distributable.
 ;;
@@ -117,6 +144,10 @@
                   [(macosx) (list "--icns" (path->string icon-path))]
                   [else '()])
                 '())
+            ;; Embed the runtime-dispatched platform backends; see
+            ;; platform-backend-modules for why this is load-bearing.
+            (append* (for/list ([mod (in-list (platform-backend-modules))])
+                       (list "++lib" (symbol->string mod))))
             (list "-o" (path->string out-exe-path) (path->string gen-entry))))
 
   (unless (apply system* (find-racket-bin) exe-args)

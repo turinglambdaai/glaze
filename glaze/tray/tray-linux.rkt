@@ -20,6 +20,7 @@
 
 (require ffi/unsafe
          racket/path
+         "../ffi-discovery.rkt"
          "tray-protocol.rkt")
 
 (provide make-tray
@@ -32,31 +33,32 @@
 
 
 ;; Racket's ffi-lib misses Debian/Ubuntu multiarch dirs on some hosts;
-;; try the bare soname first, then common absolute locations.
-(define lib-search-dirs
-  '("" "/lib/x86_64-linux-gnu/" "/usr/lib/x86_64-linux-gnu/"
-    "/lib/aarch64-linux-gnu/" "/usr/lib/aarch64-linux-gnu/"
-    "/usr/lib64/" "/usr/lib/" "/lib/"))
-
-(define (try-ffi-lib name version)
-  (for/or ([dir (in-list lib-search-dirs)])
-    (with-handlers ([exn:fail? (lambda (e) #f)])
-      (if (string=? dir "")
-          (ffi-lib name (list version #f))
-          (ffi-lib (format "~alib~a.so~a" dir name (if version (format ".~a" version) "")))))))
-
+;; try the bare soname first, then common absolute locations — shared with
+;; the other backends via ../ffi-discovery.rkt.
+(define try-ffi-lib ffi-lib*)
 
 ;; Load the indicator library; try ayatana first, then legacy appindicator.
 (define indicator-lib
-  (or (try-ffi-lib "ayatana-appindicator3" "1")
+  (or (try-ffi-lib "ayatana-appindicator3" '("1"))
       (with-handlers ([exn:fail? (lambda (e) #f)])
-        (try-ffi-lib "appindicator" "3"))
+        (try-ffi-lib "appindicator" '("3")))
       (with-handlers ([exn:fail? (lambda (e) #f)])
-        (try-ffi-lib "appindicator3" "1"))))
+        (try-ffi-lib "appindicator3" '("1")))))
 
-(define gtk-lib (try-ffi-lib "gtk-3" "0"))
+(define gtk-lib (try-ffi-lib "gtk-3" '("0")))
 
-(define gobject-lib (try-ffi-lib "gobject-2.0" "0"))
+(define gobject-lib (try-ffi-lib "gobject-2.0" '("0")))
+
+;; GTK must be initialized before any widget call. In a webview app the
+;; window backend already did it; standalone tray processes (and the test
+;; suite) would otherwise abort inside appindicator with "Can't create a
+;; GtkStyleContext without a display connection". Once per process.
+(define gtk_init (maybe-bind gtk-lib "gtk_init" (_fun _pointer _pointer -> _void)))
+(define gtk-initialized? #f)
+(define (ensure-gtk-init!)
+  (unless (or gtk-initialized? (not gtk_init))
+    (gtk_init #f #f)
+    (set! gtk-initialized? #t)))
 
 ;; Bindings (resolved only if the libraries loaded; otherwise #f).
 (define (maybe-bind lib name type)
@@ -131,6 +133,7 @@
                           " + libgtk-3 + libgobject-2.0); falling back to stub")))
 
   ;; appindicator takes an icon-name (theme icon) or absolute path.
+  (ensure-gtk-init!)
   (define icon-name
     (if (and icon-path (file-exists? icon-path))
         (path->string icon-path)
