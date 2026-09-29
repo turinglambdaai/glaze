@@ -7,6 +7,7 @@
          racket/system
          glaze/build
          glaze/license
+         glaze/signing
          glaze-cli/pkg)
 
 (define (init-project name)
@@ -178,6 +179,9 @@
   (displayln "  dev           Run this project's native Glaze desktop app")
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
   (displayln "  keygen        Create an RSA keypair for license signing")
+  (displayln "  updater-keygen  Create an Ed25519 keypair for update signing")
+  (displayln "  update-sign   Sign an update artifact (Ed25519 over its sha256)")
+  (displayln "  update-verify Verify an update artifact signature")
   (displayln "  license       Sign or verify offline license files")
   (displayln "  install       Pin the glaze package to a revision and link it")
   (displayln "  doctor        Diagnose glaze package links (--fix removes broken ones)")
@@ -312,6 +316,67 @@
      (displayln "          [--expiry YYYY-MM-DD] [--machine-id | --machine-id <hex>] --out <file>")
      (displayln "  verify: --pub <public.pem> --product <name> <file.license>")]))
 
+;; ---- updater artifact signing (Ed25519) -------------------------------------
+
+(define (updater-sign-command rest)
+  (let loop ([args rest] [artifact #f] [key #f] [password #f] [out #f])
+    (cond
+      [(null? args)
+       (unless (and artifact key out)
+         (error 'update-sign "usage: raco glaze update-sign --artifact <file> --key <private.pem> --out <signature.txt> [--password <pw>]"))
+       (define sig (sign-file artifact
+                              #:private-key key
+                              #:password password))
+       (with-output-to-file out
+         (lambda () (displayln sig))
+         #:exists 'replace)
+       (printf "signed ~a -> ~a\n" artifact out)]
+      [(equal? (car args) "--artifact") (loop (cdr args) (cadr args) key password out)]
+      [(equal? (car args) "--key") (loop (cdr args) artifact (cadr args) password out)]
+      [(equal? (car args) "--password") (loop (cdr args) artifact key (cadr args) out)]
+      [(equal? (car args) "--out") (loop (cdr args) artifact key password (cadr args))]
+      [else (loop (cdr args) (or artifact (car args)) key password out)])))
+
+(define (updater-verify-command rest)
+  (let loop ([args rest] [artifact #f] [pub #f] [signature #f] [sha256 #f])
+    (cond
+      [(null? args)
+       (unless (and artifact pub signature)
+         (error 'update-verify "usage: raco glaze update-verify --artifact <file> --pub <public.pem> --signature <signature.txt|base64> [--sha256 <hex>]"))
+       (define sig-text
+         (if (file-exists? signature)
+             (string-trim (file->string signature))
+             signature))
+       (printf "Verifying ~a...\n" artifact)
+       (if (verify-signature artifact
+                             #:public-key pub
+                             #:signature sig-text
+                             #:expected-sha256 sha256)
+           (begin (printf "VALID\n")
+                  (exit 0))
+           (begin (printf "INVALID\n") (exit 1)))]
+      [(equal? (car args) "--artifact") (loop (cdr args) (cadr args) pub signature sha256)]
+      [(equal? (car args) "--pub") (loop (cdr args) artifact (cadr args) signature sha256)]
+      [(equal? (car args) "--signature") (loop (cdr args) artifact pub (cadr args) sha256)]
+      [(equal? (car args) "--sha256") (loop (cdr args) artifact pub signature (cadr args))]
+      [else (loop (cdr args) (or artifact (car args)) pub signature sha256)])))
+
+(define (updater-keygen-command rest)
+  (let loop ([args rest] [out "updater-keys"] [password #f])
+    (cond
+      [(null? args)
+       (make-directory* out)
+       (define-values (priv pub)
+         (signing-keygen #:private-key (build-path out "private.pem")
+                         #:public-key (build-path out "public.pem")
+                         #:password password))
+       (printf "Updater Ed25519 keypair written:\n  private: ~a  (keep secret — signs update artifacts)\n  public:  ~a  (pin inside the app — verifies update artifacts)\n"
+               priv pub)
+       (printf "public key fingerprint: ~a\n" (public-key-fingerprint pub))]
+      [(equal? (car args) "--out") (loop (cdr args) (cadr args) password)]
+      [(equal? (car args) "--password") (loop (cdr args) out (cadr args))]
+      [else (loop (cdr args) out password)])))
+
 ;; Dispatch CLI commands
 (define args (vector->list (current-command-line-arguments)))
 (cond
@@ -328,6 +393,9 @@
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]
      ["license" (license-command rest)]
+     ["updater-keygen" (updater-keygen-command rest)]
+     ["update-sign" (updater-sign-command rest)]
+     ["update-verify" (updater-verify-command rest)]
      ["install" (install-command rest)]
      ["doctor" (doctor-command rest)]
      ["help" (print-help)]
