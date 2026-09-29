@@ -119,11 +119,12 @@
 ;; backends on supported hosts, stub fallback elsewhere. The result must be
 ;; usable without raising.
 (define t
-  (make-tray #:icon #f
-             #:tooltip "Glaze Test"
-             #:menu (list (make-menu-item "Quit" #:action (lambda () (void)))
-                          (menu-separator)
-                          (make-menu-item "Hi" #:action (lambda () (void))))))
+  (parameterize ([current-error-port (open-output-string)])
+    (make-tray #:icon #f
+               #:tooltip "Glaze Test"
+               #:menu (list (make-menu-item "Quit" #:action (lambda () (void)))
+                            (menu-separator)
+                            (make-menu-item "Hi" #:action (lambda () (void)))))))
 (check-true (tray? t) "make-tray returns a tray?")
 (check-not-false (memq (tray-backend t) '(windows macos linux stub)) "valid backend tag")
 (check-not-exn (lambda () (tray-set-tooltip! t "updated")) "set-tooltip! does not raise")

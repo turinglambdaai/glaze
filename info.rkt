@@ -26,6 +26,21 @@
 ;; ("0.7.0" is invalid; "0.7" is the same release).
 (define version "0.7")
 
+;; `raco test --package` otherwise executes every backend implementation as a
+;; standalone test module. The dispatcher and platform CI exercise these
+;; modules on their matching OS; directly loading a platform FFI backend as a
+;; test on a different OS is neither meaningful nor portable.
+(define test-omit-paths
+  '("glaze/sys/sys-linux.rkt"
+    "glaze/sys/sys-macos.rkt"
+    "glaze/sys/sys-windows.rkt"
+    "glaze/tray/tray-linux.rkt"
+    "glaze/tray/tray-macos.rkt"
+    "glaze/tray/tray-windows.rkt"
+    "glaze/webview/webview-linux.rkt"
+    "glaze/webview/webview-macos.rkt"
+    "glaze/webview/webview-windows.rkt"))
+
 (define pkg-desc "Build desktop apps with Racket backend and web frontend — a Tauri-like framework for Racket")
 (define pkg-authors '(turinglambdaai))
 (define license 'MIT)

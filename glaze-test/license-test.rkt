@@ -8,6 +8,7 @@
          racket/file
          racket/list
          racket/path
+         racket/port
          racket/string
          racket/system
          glaze/build
@@ -32,6 +33,16 @@
 
 (define openssl? (find-executable-path "openssl" #f))
 
+(define (quiet-system* exe . args)
+  (parameterize ([current-output-port (open-output-nowhere)]
+                 [current-error-port (open-output-nowhere)])
+    (apply system* exe args)))
+
+(define (quiet-system*/exit-code exe . args)
+  (parameterize ([current-output-port (open-output-nowhere)]
+                 [current-error-port (open-output-nowhere)])
+    (apply system*/exit-code exe args)))
+
 ;; ---- license issue / validate roundtrip ----
 
 (when openssl?
@@ -42,10 +53,10 @@
 
   (check-not-exn
    (lambda ()
-     (system* openssl "genpkey" "-algorithm" "RSA"
-              "-pkeyopt" "rsa_keygen_bits:2048" "-out" priv))
+     (quiet-system* openssl "genpkey" "-algorithm" "RSA"
+                    "-pkeyopt" "rsa_keygen_bits:2048" "-out" priv))
    "keygen runs")
-  (check-true (zero? (system*/exit-code openssl "pkey" "-in" priv "-pubout" "-out" pub))
+  (check-true (zero? (quiet-system*/exit-code openssl "pkey" "-in" priv "-pubout" "-out" pub))
               "pubkey derivation succeeds")
 
   (define license-path (build-path dir "app.license"))
@@ -145,10 +156,10 @@
 
   ;; wrong public key -> signature failure
   (define other-priv (build-path dir "other-private.pem"))
-  (system* openssl "genpkey" "-algorithm" "RSA"
-           "-pkeyopt" "rsa_keygen_bits:2048" "-out" other-priv)
+  (quiet-system* openssl "genpkey" "-algorithm" "RSA"
+                 "-pkeyopt" "rsa_keygen_bits:2048" "-out" other-priv)
   (define other-pub (build-path dir "other-public.pem"))
-  (system*/exit-code openssl "pkey" "-in" other-priv "-pubout" "-out" other-pub)
+  (quiet-system*/exit-code openssl "pkey" "-in" other-priv "-pubout" "-out" other-pub)
   (check-equal? (hash-ref (validate-license license-path
                                             #:public-key other-pub
                                             #:product "TestApp")
@@ -168,7 +179,8 @@
   (define hex
     (let ()
       (define out (open-output-string))
-      (parameterize ([current-output-port out])
+      (parameterize ([current-output-port out]
+                     [current-error-port (open-output-nowhere)])
         (system*/exit-code (find-executable-path "openssl" #f)
                            "dgst" "-sha256" "-r" (path->string artifact)))
       (second (regexp-match #px"^([0-9a-f]{64})" (get-output-string out)))))
