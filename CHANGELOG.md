@@ -8,16 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.7.0] - 2026-09-29
 
 ### Added
-- **`glaze/signing` — Ed25519 artifact signing for self-updating apps**
-  (openssl CLI, zero compiled dependencies): `signing-keygen` (optional
-  AES-256-CBC private-key encryption), `sign-file` (Ed25519 over the
-  artifact's sha256 digest, base64 output), `verify-signature`, plus
-  `raco glaze updater-keygen` / `update-sign` / `update-verify` commands.
-  This is the Tauri-updater trust property: the signing key never lives on
-  the distribution server, and the public key pins inside the installed
-  app — a compromised release server cannot publish an accepted malicious
-  update. 14 tests cover roundtrip, tamper, wrong-key and encrypted-keygen
-  cases.
+- Add `glaze/signing` and `raco glaze updater-keygen`, `update-sign`, and
+  `update-verify` for Ed25519-signed update artifacts. Private keys may be
+  password-encrypted, the installed application can pin the public key, and
+  signatures cover the artifact's SHA-256 digest without loading it in memory.
 
 ### Fixed
 - Build the Scribble reference manual in CI and group modules that share a
