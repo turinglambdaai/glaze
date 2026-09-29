@@ -28,8 +28,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$(git cat-file -t "$GITHUB_REF_NAME")" != "tag" ]]; then
+          # actions/checkout resolves a tag event to GITHUB_SHA and may replace
+          # the local refs/tags/<name> with that peeled commit. Fetch the real
+          # remote tag into a private namespace before inspecting its object.
+          release_tag_ref="refs/release-tags/$GITHUB_REF_NAME"
+          git fetch --force origin \
+            "refs/tags/$GITHUB_REF_NAME:$release_tag_ref"
+          if [[ "$(git cat-file -t "$release_tag_ref")" != "tag" ]]; then
             echo "release tag must be annotated" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse "$release_tag_ref^{}")" != "$GITHUB_SHA" ]]; then
+            echo "release tag does not point at the workflow commit" >&2
             exit 1
           fi
           git fetch origin main
