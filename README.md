@@ -102,6 +102,9 @@ raco glaze init <name>       # Create a native Glaze desktop project
 raco glaze dev               # Run this project's native desktop app
 raco glaze build             # Build a distributable (exe + bundled assets)
 raco glaze keygen            # Create an RSA keypair for license signing
+raco glaze updater-keygen    # Create an Ed25519 update-signing keypair
+raco glaze update-sign       # Sign an update artifact
+raco glaze update-verify     # Verify an artifact and pinned-key signature
 raco glaze license           # Sign or verify offline license files
 raco glaze help              # Show help
 ```
@@ -170,6 +173,17 @@ Failure reasons are stable tags (`missing-file`, `malformed`, `signature`, `prod
 ```racket
 (define info (check-update manifest-url #:current-version "1.0.0"))
 (verify-file-sha256 artifact (hash-ref info 'sha256))
+```
+
+For publisher authenticity as well as download integrity, pin an Ed25519
+public key inside the application and verify the release signature before
+installing it:
+
+```bash
+raco glaze updater-keygen --out updater-keys
+raco glaze update-sign app.zip --key updater-keys/private.pem --out app.zip.sig
+raco glaze update-verify app.zip --pub updater-keys/public.pem \
+  --signature app.zip.sig --sha256 <manifest-sha256>
 ```
 
 ## Project Structure

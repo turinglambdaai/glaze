@@ -318,6 +318,11 @@
 
 ;; ---- updater artifact signing (Ed25519) -------------------------------------
 
+(define (require-option-value who option args)
+  (unless (pair? (cdr args))
+    (error who "~a requires a value" option))
+  (cadr args))
+
 (define (updater-sign-command rest)
   (let loop ([args rest] [artifact #f] [key #f] [password #f] [out #f])
     (cond
@@ -331,11 +336,24 @@
          (lambda () (displayln sig))
          #:exists 'replace)
        (printf "signed ~a -> ~a\n" artifact out)]
-      [(equal? (car args) "--artifact") (loop (cdr args) (cadr args) key password out)]
-      [(equal? (car args) "--key") (loop (cdr args) artifact (cadr args) password out)]
-      [(equal? (car args) "--password") (loop (cdr args) artifact key (cadr args) out)]
-      [(equal? (car args) "--out") (loop (cdr args) artifact key password (cadr args))]
-      [else (loop (cdr args) (or artifact (car args)) key password out)])))
+      [(equal? (car args) "--artifact")
+       (loop (cddr args)
+             (require-option-value 'update-sign "--artifact" args)
+             key password out)]
+      [(equal? (car args) "--key")
+       (loop (cddr args) artifact
+             (require-option-value 'update-sign "--key" args)
+             password out)]
+      [(equal? (car args) "--password")
+       (loop (cddr args) artifact key
+             (require-option-value 'update-sign "--password" args)
+             out)]
+      [(equal? (car args) "--out")
+       (loop (cddr args) artifact key password
+             (require-option-value 'update-sign "--out" args))]
+      [artifact
+       (error 'update-sign "unexpected argument: ~a" (car args))]
+      [else (loop (cdr args) (car args) key password out)])))
 
 (define (updater-verify-command rest)
   (let loop ([args rest] [artifact #f] [pub #f] [signature #f] [sha256 #f])
@@ -355,11 +373,24 @@
            (begin (printf "VALID\n")
                   (exit 0))
            (begin (printf "INVALID\n") (exit 1)))]
-      [(equal? (car args) "--artifact") (loop (cdr args) (cadr args) pub signature sha256)]
-      [(equal? (car args) "--pub") (loop (cdr args) artifact (cadr args) signature sha256)]
-      [(equal? (car args) "--signature") (loop (cdr args) artifact pub (cadr args) sha256)]
-      [(equal? (car args) "--sha256") (loop (cdr args) artifact pub signature (cadr args))]
-      [else (loop (cdr args) (or artifact (car args)) pub signature sha256)])))
+      [(equal? (car args) "--artifact")
+       (loop (cddr args)
+             (require-option-value 'update-verify "--artifact" args)
+             pub signature sha256)]
+      [(equal? (car args) "--pub")
+       (loop (cddr args) artifact
+             (require-option-value 'update-verify "--pub" args)
+             signature sha256)]
+      [(equal? (car args) "--signature")
+       (loop (cddr args) artifact pub
+             (require-option-value 'update-verify "--signature" args)
+             sha256)]
+      [(equal? (car args) "--sha256")
+       (loop (cddr args) artifact pub signature
+             (require-option-value 'update-verify "--sha256" args))]
+      [artifact
+       (error 'update-verify "unexpected argument: ~a" (car args))]
+      [else (loop (cdr args) (car args) pub signature sha256)])))
 
 (define (updater-keygen-command rest)
   (let loop ([args rest] [out "updater-keys"] [password #f])
@@ -373,9 +404,15 @@
        (printf "Updater Ed25519 keypair written:\n  private: ~a  (keep secret — signs update artifacts)\n  public:  ~a  (pin inside the app — verifies update artifacts)\n"
                priv pub)
        (printf "public key fingerprint: ~a\n" (public-key-fingerprint pub))]
-      [(equal? (car args) "--out") (loop (cdr args) (cadr args) password)]
-      [(equal? (car args) "--password") (loop (cdr args) out (cadr args))]
-      [else (loop (cdr args) out password)])))
+      [(equal? (car args) "--out")
+       (loop (cddr args)
+             (require-option-value 'updater-keygen "--out" args)
+             password)]
+      [(equal? (car args) "--password")
+       (loop (cddr args) out
+             (require-option-value 'updater-keygen "--password" args))]
+      [else
+       (error 'updater-keygen "unexpected argument: ~a" (car args))])))
 
 ;; Dispatch CLI commands
 (define args (vector->list (current-command-line-arguments)))
