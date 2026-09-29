@@ -55,11 +55,13 @@
 
 ;; Run the openssl CLI with `args`; returns the exit code, or #f when the
 ;; executable is missing or the process could not be spawned.
-(define (openssl-exit-code . args)
+(define (openssl-exit-code #:stdout [stdout (open-output-nowhere)] . args)
   (define exe (openssl-path))
   (and exe
        (with-handlers ([exn:fail? (lambda (e) #f)])
-         (apply system*/exit-code exe args))))
+         (parameterize ([current-output-port stdout]
+                        [current-error-port (open-output-nowhere)])
+           (apply system*/exit-code exe args)))))
 
 ;; ---- hashing ----
 
@@ -73,8 +75,7 @@
   (begin0
     (with-handlers ([exn:fail? (lambda (e) #f)])
       (define out (open-output-string))
-      (parameterize ([current-output-port out])
-        (openssl-exit-code "dgst" "-sha256" "-r" (path->string f)))
+      (openssl-exit-code #:stdout out "dgst" "-sha256" "-r" (path->string f))
       ;; #px, not #rx: the {64} quantifier needs Perl-style syntax
       (define m (regexp-match #px"^([0-9a-fA-F]{64})\\b" (get-output-string out)))
       (and m (string-downcase (second m))))

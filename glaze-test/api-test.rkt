@@ -20,6 +20,9 @@
   #:exists 'replace)
 
 (define count (box 0))
+(define reported-api-error (box #f))
+(current-glaze-error-reporter
+ (lambda (exn uri) (set-box! reported-api-error (cons exn uri))))
 
 (define-values (port shutdown)
   (start-server
@@ -69,6 +72,9 @@
 (let-values ([(st body) (call "GET" "/api/boom")])
   (check-true (string-contains? st "500") "handler raise -> 500")
   (check-true (hash? (bytes->jsexpr body)) "500 body is JSON"))
+(check-pred pair? (unbox reported-api-error) "handler error is reported")
+(when (pair? (unbox reported-api-error))
+  (check-true (exn:fail? (car (unbox reported-api-error)))))
 
 ;; Full-response passthrough.
 (let-values ([(st body) (call "GET" "/api/raw")])

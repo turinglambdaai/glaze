@@ -17,6 +17,7 @@
          racket/format
          racket/file
          racket/path
+         racket/port
          racket/string
          racket/system)
 
@@ -77,7 +78,8 @@
        (with-handlers ([exn:fail? (lambda (e) #f)])
          (define out (open-output-string))
          (define code
-           (parameterize ([current-output-port out])
+           (parameterize ([current-output-port out]
+                          [current-error-port (open-output-nowhere)])
              (system*/exit-code reg "query" win-run-key "/v" name)))
          (and (zero? code) #t))))
 
@@ -87,12 +89,16 @@
   (cond
     [enabled?
      (define exe (path->string (find-system-path 'run-file)))
-     (unless (zero? (system*/exit-code reg "add" win-run-key "/v" name
-                                       "/d" (format "\"~a\"" exe) "/f"))
+     (unless (zero? (parameterize ([current-output-port (open-output-nowhere)]
+                                   [current-error-port (open-output-nowhere)])
+                       (system*/exit-code reg "add" win-run-key "/v" name
+                                          "/d" (format "\"~a\"" exe) "/f")))
        (error 'auto-launch "failed to write Run key"))
      #t]
     [else
-     (system*/exit-code reg "delete" win-run-key "/v" name "/f")
+     (parameterize ([current-output-port (open-output-nowhere)]
+                    [current-error-port (open-output-nowhere)])
+       (system*/exit-code reg "delete" win-run-key "/v" name "/f"))
      #t]))
 
 ;; ---- Linux (autostart desktop entry) ----

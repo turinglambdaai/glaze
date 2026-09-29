@@ -21,6 +21,7 @@
          bus-broadcast!
          bus-subscribe!
          bus-unsubscribe!
+         bus-subscriber-count
          bus-wait)
 
 ;; Subscribers are bounded async channels of (list name jsexpr). A bounded
@@ -42,6 +43,10 @@
 (define (bus-unsubscribe! bus ch)
   (call-with-semaphore (event-bus-sema bus)
                        (lambda () (hash-remove! (event-bus-channels bus) ch))))
+
+(define (bus-subscriber-count bus)
+  (call-with-semaphore (event-bus-sema bus)
+                       (lambda () (hash-count (event-bus-channels bus)))))
 
 ;; Deliver (name . jsexpr) to every subscriber. Non-blocking: a full
 ;; backlog drops the event for that subscriber only.

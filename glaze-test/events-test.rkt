@@ -5,7 +5,6 @@
 
 (require rackunit
          racket/file
-         racket/system
          racket/port
          racket/string
          json
@@ -44,12 +43,13 @@
 (check-equal? (begin (bump* 10) (unbox count)) 10 "macro defines plain proc")
 
 (define dir (make-temporary-file "events-t-~a" 'directory))
+(current-glaze-error-reporter (lambda (_exn _uri) (void)))
 (define-values (port shutdown)
   (start-server #:port 18990 #:public-dir dir #:api api #:events bus))
 
 (define (call method path [data #f] #:host [host #f])
   (define-values (st _h in)
-    (http-sendrecv "127.0.0.1" path #:port 18990 #:ssl? #f #:method method
+    (http-sendrecv "127.0.0.1" path #:port port #:ssl? #f #:method method
                    #:data data
                    #:headers (append '("Content-Type: application/json")
                                      (if host (list (format "Host: ~a" host)) '()))))
@@ -78,7 +78,7 @@
 (let-values ([(st _) (call "GET" "/" #:host "evil.example.com")])
   (check-true (string-contains? st "403") "hostile Host -> 403"))
 ;; normal host passes (a path that serves 200 without an index.html)
-(let-values ([(st _) (call "GET" "/glaze/api.js" #:host "localhost:18990")])
+(let-values ([(st _) (call "GET" "/glaze/api.js" #:host (format "localhost:~a" port))])
   (check-true (string-contains? st "200") "localhost Host passes"))
 
 ;; ---- generated JS client ----
@@ -90,25 +90,34 @@
   (check-true (string-contains? js "EventSource('/glaze/events')") "SSE endpoint"))
 
 ;; ---- SSE over HTTP ----
-;; ---- SSE over HTTP (curl as a real streaming client) ----
-(define out-path (make-temporary-file "sse-out-~a.txt"))
-(define curl-exe (or (find-executable-path "curl.exe" #f)
-                     (find-executable-path "curl" #f)
-                     "/usr/bin/curl"))
-(define curl
-  (thread (lambda ()
-            (system* curl-exe "-sN" "--no-buffer" "--max-time" "3"
-                     "-o" (path->string out-path)
-                     "http://127.0.0.1:18990/glaze/events"))))
-;; CI hosts are slower to establish the SSE connection; keep
-;; broadcasting until the stream has had time to subscribe.
-(for ([i (in-range 8)])
-  (sleep 0.5)
-  (bus-broadcast! bus 'hello (hasheq 'msg "world")))
+;; Use Racket's HTTP client so the test has no external `curl` dependency.
+;; Synchronize on the event-bus subscription instead of racing a fixed sleep.
+(define sse-result (make-channel))
+(define sse-reader
+  (thread
+   (lambda ()
+     (with-handlers ([exn:fail? (lambda (e) (channel-put sse-result e))])
+       (define-values (_st _headers in)
+         (http-sendrecv "127.0.0.1" "/glaze/events"
+                        #:port port #:ssl? #f #:method "GET"))
+       (define event-line (read-line in 'any))
+       (define data-line (read-line in 'any))
+       (close-input-port in)
+       (channel-put sse-result (format "~a\n~a\n" event-line data-line))))))
+(define subscribed?
+  (let ([deadline (+ (current-inexact-milliseconds) 5000)])
+    (let loop ()
+      (cond
+        [(positive? (bus-subscriber-count bus)) #t]
+        [(>= (current-inexact-milliseconds) deadline) #f]
+        [else (sleep 0.01) (loop)]))))
+(check-true subscribed? "SSE client subscribed")
+(when subscribed? (bus-broadcast! bus 'hello (hasheq 'msg "world")))
+(define sse-value (sync/timeout 5 sse-result))
+(check-false (exn:fail? sse-value) "SSE reader completed without an exception")
+(define sse-text (if (string? sse-value) sse-value ""))
+(unless sse-value (kill-thread sse-reader))
 (shutdown)
-(sync/timeout 12 curl)
-(define sse-text (file->string out-path))
-(delete-file out-path)
 (check-true (string-contains? sse-text "event: hello") "SSE event name delivered")
 (check-true (string-contains? sse-text "\"msg\":\"world\"") "SSE payload delivered")
 
