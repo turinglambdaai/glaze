@@ -68,7 +68,7 @@ is the empty string when API-token protection is disabled.
 
 @section{Local Server}
 
-@defmodule[glaze/server]
+@defmodule*[(glaze/server glaze/browser)]
 
 @defproc[(start-server
           [#:port port exact-nonnegative-integer? 8080]
@@ -88,8 +88,6 @@ application mode.
 
 @defproc[(stop-server [shutdown-proc procedure?]) void?]{Stops the server.}
 
-@defmodule[glaze/browser]
-
 @defproc[(open-browser [url string?]) void?]{
 Explicitly opens an external URL in the user's default browser. This helper is
 appropriate for documentation, OAuth, support pages, and similar external
@@ -99,7 +97,7 @@ do not use it as a fallback.
 
 @section[#:tag "js-bridge"]{JavaScript Bridge}
 
-@defmodule[glaze/api]
+@defmodule*[(glaze/api glaze/api-macros)]
 
 The embedded frontend calls Racket through ordinary same-origin HTTP requests.
 This keeps the bridge easy to inspect and test with normal developer tools.
@@ -123,8 +121,6 @@ Racket jsexprs are symbols, for example @racket[(hash-ref body 'delta)].
 @defproc[(api-response [data jsexpr?]) response?]{}
 @defproc[(error-response [status exact-nonnegative-integer?]
                          [message string?]) response?]{}
-
-@defmodule[glaze/api-macros]
 
 @defform[(define-api-routes id clause ...)]{
 Declares a callable Racket procedure, a validated HTTP route, and a generated
@@ -364,7 +360,7 @@ system @exec{openssl} command.
 
 @section{Deep Links and Launch at Login}
 
-@defmodule[glaze/deeplink]
+@defmodule*[(glaze/deeplink glaze/autolaunch)]
 
 @defproc[(ensure-url-scheme! [scheme string?]
                              [#:app-name app-name string? scheme])
@@ -373,8 +369,6 @@ Windows registers a user-scope URL protocol, Linux writes a desktop entry and
 uses @exec{xdg-mime} when available, and macOS URL schemes are declared in the
 bundle at build time.
 }
-
-@defmodule[glaze/autolaunch]
 
 @defproc[(auto-launch-set! [name string?] [enabled? boolean?]) void?]{}
 @defproc[(auto-launch-enabled? [name string?]) any/c]{}
