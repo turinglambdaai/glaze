@@ -278,11 +278,20 @@
     [("sign")
      (unless (and key product subject)
        (error 'license "usage: raco glaze license sign --key <private.pem> --product <name> --subject <who> [--expiry YYYY-MM-DD] [--machine-id] --out <file>"))
+     ;; --machine-id accepts the raw OS machine identifier or the (machine-id)
+     ;; digest; validate-license compares against the digest, so a raw value
+     ;; must be normalized here or the license could never verify on the
+     ;; target machine.
+     (define machine*
+       (and machine
+            (if (regexp-match? #px"^[0-9a-fA-F]{64}$" machine)
+                machine
+                (sha256-hex (string->bytes/utf-8 machine)))))
      (issue-license #:private-key key
                     #:product product
                     #:subject subject
                     #:expiry expiry
-                    #:machine-id machine
+                    #:machine-id machine*
                     #:out out)
      (printf "License written: ~a\n" out)]
     [("verify")

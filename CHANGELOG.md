@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Build the Scribble reference manual in CI and group modules that share a
   manual section, eliminating duplicate exporting-library warnings during
   package-catalog documentation builds.
+- **`raco glaze license sign --machine-id <id>` produced licenses that
+  could never verify**: sign stored the given raw machine identifier
+  verbatim while validate compares against the `(machine-id)` digest, so
+  every CLI-signed machine-bound license failed with reason "machine".
+  Sign now normalizes the value (raw id hashed; a 64-hex digest passes
+  through); `sha256-hex` is exported from `glaze/license` for this.
 - **`#:check-update` stalled app startup**: run-app performed the update
   check synchronously before opening the window, so a slow or blocked
   network held first paint for the manifest timeout (seconds). The check

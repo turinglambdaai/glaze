@@ -42,6 +42,7 @@
          racket/system)
 
 (provide machine-id
+         sha256-hex
          issue-license
          validate-license
          license-valid?
