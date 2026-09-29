@@ -7,7 +7,8 @@
 (require ffi/unsafe
          racket/path
          racket/string
-         racket/system)
+         racket/system
+         "../ffi-discovery.rkt")
 
 (provide supported?
          clipboard-set!
@@ -16,22 +17,12 @@
          open-path
          reveal-path)
 
-;; Racket's ffi-lib misses Debian/Ubuntu multiarch dirs on some hosts.
-(define lib-search-dirs
-  '("" "/lib/x86_64-linux-gnu/" "/usr/lib/x86_64-linux-gnu/"
-    "/lib/aarch64-linux-gnu/" "/usr/lib/aarch64-linux-gnu/"
-    "/usr/lib64/" "/usr/lib/" "/lib/"))
+;; Racket's ffi-lib misses Debian/Ubuntu multiarch dirs on some hosts —
+;; shared with the other backends via ../ffi-discovery.rkt.
+(define try-ffi-lib ffi-lib*)
 
-(define (try-ffi-lib name version)
-  (for/or ([dir (in-list lib-search-dirs)])
-    (with-handlers ([exn:fail? (lambda (e) #f)])
-      (if (string=? dir "")
-          (ffi-lib name (list version #f))
-          (ffi-lib (format "~alib~a.so~a" dir name
-                           (if version (format ".~a" version) "")))))))
-
-(define gtk-lib (try-ffi-lib "gtk-3" "0"))
-(define gobject-lib (try-ffi-lib "gobject-2.0" "0"))
+(define gtk-lib (try-ffi-lib "gtk-3" '("0")))
+(define gobject-lib (try-ffi-lib "gobject-2.0" '("0")))
 
 (define (maybe-bind lib name type)
   (and lib (get-ffi-obj name lib type (lambda () #f))))

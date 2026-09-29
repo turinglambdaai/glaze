@@ -11,6 +11,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Build the Scribble reference manual in CI and group modules that share a
   manual section, eliminating duplicate exporting-library warnings during
   package-catalog documentation builds.
+- **`raco glaze license sign --machine-id <id>` produced licenses that
+  could never verify**: sign stored the given raw machine identifier
+  verbatim while validate compares against the `(machine-id)` digest, so
+  every CLI-signed machine-bound license failed with reason "machine".
+  Sign now normalizes the value (raw id hashed; a 64-hex digest passes
+  through); `sha256-hex` is exported from `glaze/license` for this.
+- **`#:check-update` stalled app startup**: run-app performed the update
+  check synchronously before opening the window, so a slow or blocked
+  network held first paint for the manifest timeout (seconds). The check
+  now runs in a background thread; the `'update-available` broadcast
+  contract is unchanged.
+- **Linux tray aborted standalone processes**: `tray-linux` never called
+  `gtk_init` — inside a webview app the window backend had already done it,
+  but tray-only processes (and `raco test glaze-test/` on a Linux desktop)
+  aborted inside appindicator with "Can't create a GtkStyleContext without
+  a display connection". `make-tray` now initializes GTK once per process.
+- **Linux WebView backend broke the packaged app at the first
+  `open-window`**: `webview-linux` implements the full backend contract but
+  its `provide` list was missing `focus!`, `set-menu!`, and `closed?` — the
+  dispatcher `dynamic-require`s all 13 names, so every Linux app died with
+  "name is not provided" the moment a window opened (headless CI never
+  exercises the dispatch path). The backend-contract test now asserts the
+  current platform's backend provides all 13 dispatcher names.
+- **Packaged apps shipped without the platform backend modules**: the
+  webview/sys/tray schedulers pick their backend via `dynamic-require` at
+  runtime, which `raco exe`'s static walk cannot see. `build-app`
+  (`raco glaze build`) now embeds the current platform's backends
+  explicitly (`++lib`), and exports `platform-backend-modules` for scripts
+  that call `raco exe` directly. Symptom before: the app started and every
+  headless check passed, then the first native window (or alarm
+  notification) died with "collection not found:
+  glaze/webview/webview-linux" — found while packaging gPTP Studio v1.0.0.
+- **`glaze/ffi-discovery`** (new): shared foreign-library discovery,
+  replacing the three copy-pasted `try-ffi-lib` implementations in the
+  webview/sys/tray Linux backends. It takes multi-soname candidates — the
+  single-suffix trap (libpcap.so.1 on Fedora/Arch vs libpcap.so.0.8 on
+  Debian/Ubuntu) is exactly what crashed gPTP Studio v1.0.0 at startup on
+  Ubuntu — never raises, and reports failures through `ffi-lib-reason` so a
+  missing native dependency is a reportable capability instead of a startup
+  crash.
 
 ## [0.6.0] - 2026-09-15
 

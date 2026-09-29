@@ -292,6 +292,23 @@ tray 是**可选能力**，语义与 WebView 不同：
 
 Windows GUI 构建使用 `raco exe --gui`，因此用户可能看不到 stderr；这是 startup error dialog 必须存在的重要原因。
 
+- **运行时调度的后端模块必须显式嵌入**：webview/sys/tray 三个调度器用 `dynamic-require`
+  按 `(system-type 'os)` 挑后端，`raco exe` 的静态分析看不到这些引用——不 `++lib` 显式嵌入，
+  产物就是"能启动、headless 冒烟全过、原生窗口/托盘/通知一用就 collection not found"。
+  `build-app` 已自动 `++lib` 当前平台三后端（`platform-backend-modules` 是唯一事实来源）；
+  绕开 build-app 直接调 `raco exe` 的项目（如 gPTP Studio）用同一导出自行拼接。
+  这类洞只有覆盖调度路径的冒烟能拦住：headless 即可——`dynamic-require` 后端并调
+  `supported?`，不开窗（gPTP Studio v1.0.0 的 deb 就是这样漏出去的）
+
+### 加载外部原生库（ffi-discovery）
+
+- 一律走 `glaze/ffi-discovery` 的 `ffi-lib*`，不要手写裸 `ffi-lib`：多 soname 候选
+  （libpcap 在 Fedora/Arch 是 `.so.1`、Debian/Ubuntu 因 ABI 历史是 `.so.0.8`——单后缀
+  曾让 gPTP Studio v1.0.0 在 Ubuntu 装着依赖仍启动即崩）、multiarch 绝对路径兜底、
+  永不 raise，失败原因经 `ffi-lib-reason` 单行可读
+- 缺失的原生依赖是**可降级的能力**（`supported?` -> #f + 原因），不是启动崩溃：
+  `--version`/`--doctor`/GUI 必须能在没有它的情况下起来并如实报告
+
 ### macOS
 
 - build-app 自己组装标准 `.app`；
