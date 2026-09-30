@@ -43,32 +43,42 @@
   (define key (format "HKCU\\Software\\Classes\\~a" scheme))
   (and (run-ok? reg "add" key "/ve" "/d" (format "URL:~a" scheme) "/f")
        (run-ok? reg "add" key "/v" "URL Protocol" "/d" "" "/f")
-       (run-ok? reg "add" (format "~a\\shell\\open\\command" key)
-                "/ve" "/d" (format "\"~a\" \"%1\"" exe-path) "/f")
+       (run-ok? reg
+                "add"
+                (format "~a\\shell\\open\\command" key)
+                "/ve"
+                "/d"
+                (format "\"~a\" \"%1\"" exe-path)
+                "/f")
        #t))
 
 ;; Linux: a desktop entry advertising the scheme, registered as its default
 ;; handler via xdg-mime when available.
 (define (lin-register! scheme exe-path app-name)
   (define config-dir
-    (or (getenv "XDG_CONFIG_HOME")
-        (build-path (find-system-path 'home-dir) ".config")))
+    (or (getenv "XDG_CONFIG_HOME") (build-path (find-system-path 'home-dir) ".config")))
   (define data-dir
-    (or (getenv "XDG_DATA_HOME")
-        (build-path (find-system-path 'home-dir) ".local" "share")))
+    (or (getenv "XDG_DATA_HOME") (build-path (find-system-path 'home-dir) ".local" "share")))
   (define apps-dir (build-path data-dir "applications"))
   (make-directory* apps-dir)
   (define desktop-name (format "glaze-~a.desktop" scheme))
   (define desktop-path (build-path apps-dir desktop-name))
-  (call-with-output-file desktop-path
-    (lambda (o)
-      (fprintf o "[Desktop Entry]\nType=Application\nName=~a\nExec=\"~a\" %u\nMimeType=x-scheme-handler/~a;\nNoDisplay=true\n"
-               app-name exe-path scheme))
-    #:exists 'replace)
+  (call-with-output-file
+   desktop-path
+   (lambda (o)
+     (fprintf
+      o
+      "[Desktop Entry]\nType=Application\nName=~a\nExec=\"~a\" %u\nMimeType=x-scheme-handler/~a;\nNoDisplay=true\n"
+      app-name
+      exe-path
+      scheme))
+   #:exists 'replace)
   ;; Best-effort: without xdg-mime the entry is in place but may not be
   ;; picked up until the next desktop-environment rescan.
   (run-ok? (find-executable-path "xdg-mime" #f)
-           "default" desktop-name (format "x-scheme-handler/~a" scheme))
+           "default"
+           desktop-name
+           (format "x-scheme-handler/~a" scheme))
   desktop-path)
 
 ;; macOS handlers come from CFBundleURLTypes in the packaged Info.plist —

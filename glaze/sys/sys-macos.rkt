@@ -43,8 +43,7 @@
   (define pb (tell NSPasteboard generalPasteboard))
   (and pb
        (let ()
-         (define s (tell pb stringForType:
-                         #:type _id (->nsstring "public.utf8-plain-text")))
+         (define s (tell pb stringForType: #:type _id (->nsstring "public.utf8-plain-text")))
          (if (cast s _id _pointer)
              (tell #:type _string s UTF8String)
              ""))))
@@ -52,7 +51,8 @@
 (define (notify! title body subtitle)
   (define script
     (format "display notification ~s with title ~s~a"
-            body title
+            body
+            title
             (if (non-empty-string? subtitle)
                 (format " subtitle ~s" subtitle)
                 "")))

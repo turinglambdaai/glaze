@@ -55,7 +55,9 @@
   (unless (string? path)
     (raise-argument-error 'api-route "path string with :params" path))
   (for/list ([seg (in-list (string-split path "/" #:trim? #f))])
-    (if (string-prefix? seg ":") (param (substring seg 1)) seg)))
+    (if (string-prefix? seg ":")
+        (param (substring seg 1))
+        seg)))
 
 (define ((make-route-method method) path handler)
   (unless (procedure? handler)
@@ -78,7 +80,9 @@
 (define (route-match r method segments)
   (and (eq? (route-method r) method)
        (= (length segments) (length (route-segments r)))
-       (let loop ([segs segments] [pats (route-segments r)] [args '()])
+       (let loop ([segs segments]
+                  [pats (route-segments r)]
+                  [args '()])
          (cond
            [(null? segs) (reverse args)]
            [else
@@ -95,8 +99,11 @@
 
 (define (api-response data)
   (define json-bytes (string->bytes/utf-8 (jsexpr->string data)))
-  (response/full 200 #"OK" (current-seconds)
-                 #"application/json; charset=utf-8" '()
+  (response/full 200
+                 #"OK"
+                 (current-seconds)
+                 #"application/json; charset=utf-8"
+                 '()
                  (list json-bytes)))
 
 ;; Parse the request body as JSON. Missing/empty/invalid body -> the empty
@@ -113,9 +120,14 @@
   (define parsed
     (with-handlers ([exn:fail? (lambda (e) (hasheq))])
       (bytes->jsexpr bs)))
-  (if (eof-object? parsed) (hasheq) parsed))
+  (if (eof-object? parsed)
+      (hasheq)
+      parsed))
 
 (define (error-response status msg)
-  (response/full status #"Error" (current-seconds)
-                 #"application/json; charset=utf-8" '()
+  (response/full status
+                 #"Error"
+                 (current-seconds)
+                 #"application/json; charset=utf-8"
+                 '()
                  (list (string->bytes/utf-8 (jsexpr->string (hasheq 'error msg))))))

@@ -36,17 +36,14 @@
 
 (define (bus-subscribe! bus)
   (define ch (make-async-channel backlog))
-  (call-with-semaphore (event-bus-sema bus)
-                       (lambda () (hash-set! (event-bus-channels bus) ch #t)))
+  (call-with-semaphore (event-bus-sema bus) (lambda () (hash-set! (event-bus-channels bus) ch #t)))
   ch)
 
 (define (bus-unsubscribe! bus ch)
-  (call-with-semaphore (event-bus-sema bus)
-                       (lambda () (hash-remove! (event-bus-channels bus) ch))))
+  (call-with-semaphore (event-bus-sema bus) (lambda () (hash-remove! (event-bus-channels bus) ch))))
 
 (define (bus-subscriber-count bus)
-  (call-with-semaphore (event-bus-sema bus)
-                       (lambda () (hash-count (event-bus-channels bus)))))
+  (call-with-semaphore (event-bus-sema bus) (lambda () (hash-count (event-bus-channels bus)))))
 
 ;; Deliver (name . jsexpr) to every subscriber. Non-blocking: a full
 ;; backlog drops the event for that subscriber only.
@@ -54,10 +51,12 @@
   (unless (or (symbol? name) (string? name))
     (raise-argument-error 'bus-broadcast! "(or/c symbol? string?)" name))
   (define payload
-    (list (if (string? name) (string->symbol name) name) data))
+    (list (if (string? name)
+              (string->symbol name)
+              name)
+          data))
   (define snapshot
-    (call-with-semaphore (event-bus-sema bus)
-                         (lambda () (hash-keys (event-bus-channels bus)))))
+    (call-with-semaphore (event-bus-sema bus) (lambda () (hash-keys (event-bus-channels bus)))))
   (for ([ch (in-list snapshot)])
     (sync/timeout 0 (async-channel-put-evt ch payload))))
 

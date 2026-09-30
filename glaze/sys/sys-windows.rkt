@@ -26,18 +26,12 @@
 (define OpenClipboard (get-ffi-obj "OpenClipboard" user32 (_fun _pointer -> _bool)))
 (define CloseClipboard (get-ffi-obj "CloseClipboard" user32 (_fun -> _bool)))
 (define EmptyClipboard (get-ffi-obj "EmptyClipboard" user32 (_fun -> _bool)))
-(define GetClipboardData
-  (get-ffi-obj "GetClipboardData" user32 (_fun _uintptr -> _pointer)))
-(define SetClipboardData
-  (get-ffi-obj "SetClipboardData" user32 (_fun _uintptr _pointer -> _pointer)))
-(define GlobalAlloc
-  (get-ffi-obj "GlobalAlloc" kernel32 (_fun _uint _uintptr -> _pointer)))
-(define GlobalLock
-  (get-ffi-obj "GlobalLock" kernel32 (_fun _pointer -> _pointer)))
-(define GlobalUnlock
-  (get-ffi-obj "GlobalUnlock" kernel32 (_fun _pointer -> _bool)))
-(define GlobalSize
-  (get-ffi-obj "GlobalSize" kernel32 (_fun _pointer -> _uintptr)))
+(define GetClipboardData (get-ffi-obj "GetClipboardData" user32 (_fun _uintptr -> _pointer)))
+(define SetClipboardData (get-ffi-obj "SetClipboardData" user32 (_fun _uintptr _pointer -> _pointer)))
+(define GlobalAlloc (get-ffi-obj "GlobalAlloc" kernel32 (_fun _uint _uintptr -> _pointer)))
+(define GlobalLock (get-ffi-obj "GlobalLock" kernel32 (_fun _pointer -> _pointer)))
+(define GlobalUnlock (get-ffi-obj "GlobalUnlock" kernel32 (_fun _pointer -> _bool)))
+(define GlobalSize (get-ffi-obj "GlobalSize" kernel32 (_fun _pointer -> _uintptr)))
 
 (define CF_UNICODETEXT 13)
 (define GMEM_MOVEABLE 2)
@@ -53,7 +47,8 @@
   p)
 (define (wstr->string p)
   (and p
-       (let loop ([i 0] [chars '()])
+       (let loop ([i 0]
+                  [chars '()])
          (define u (ptr-ref p _uint16 i))
          (if (zero? u)
              (list->string (reverse chars))
@@ -64,35 +59,33 @@
 
 (define (clipboard-set! text)
   (and (OpenClipboard #f)
-       (dynamic-wind
-         (lambda () (void))
-         (lambda ()
-           (EmptyClipboard)
-           (define p (wstr text))
-           (define bytes-n (+ 2 (* 2 (length (string->list text)))))
-           (define h (GlobalAlloc GMEM_MOVEABLE bytes-n))
-           (define dst (GlobalLock h))
-           (memcpy dst p bytes-n)
-           (GlobalUnlock h)
-           (not (zero? (cast (SetClipboardData CF_UNICODETEXT h) _pointer _intptr))))
-         (lambda () (CloseClipboard)))))
+       (dynamic-wind (lambda () (void))
+                     (lambda ()
+                       (EmptyClipboard)
+                       (define p (wstr text))
+                       (define bytes-n (+ 2 (* 2 (length (string->list text)))))
+                       (define h (GlobalAlloc GMEM_MOVEABLE bytes-n))
+                       (define dst (GlobalLock h))
+                       (memcpy dst p bytes-n)
+                       (GlobalUnlock h)
+                       (not (zero? (cast (SetClipboardData CF_UNICODETEXT h) _pointer _intptr))))
+                     (lambda () (CloseClipboard)))))
 
 (define (clipboard-get)
   (cond
     [(not (OpenClipboard #f)) ""]
     [else
-     (dynamic-wind
-       (lambda () (void))
-       (lambda ()
-         (define h (GetClipboardData CF_UNICODETEXT))
-         (if (not h)
-             ""
-             (let ()
-               (define p (GlobalLock h))
-               (define s (wstr->string p))
-               (GlobalUnlock h)
-               (or s ""))))
-       (lambda () (CloseClipboard)))]))
+     (dynamic-wind (lambda () (void))
+                   (lambda ()
+                     (define h (GetClipboardData CF_UNICODETEXT))
+                     (if (not h)
+                         ""
+                         (let ()
+                           (define p (GlobalLock h))
+                           (define s (wstr->string p))
+                           (GlobalUnlock h)
+                           (or s ""))))
+                   (lambda () (CloseClipboard)))]))
 
 ;; The AppUserModelID of the inbox PowerShell shortcut — toasts from an
 ;; unregistered AUMID are dropped, but this one ships registered on every
@@ -105,57 +98,66 @@
 (define (xml-escape s)
   (string-replace
    (string-replace
-    (string-replace
-     (string-replace (string-replace s "&" "&amp;") "<" "&lt;")
-     ">" "&gt;")
-    "\"" "&quot;")
-   "'" "&apos;"))
+    (string-replace (string-replace (string-replace s "&" "&amp;") "<" "&lt;") ">" "&gt;")
+    "\""
+    "&quot;")
+   "'"
+   "&apos;"))
 
 (define (toast-visual title body subtitle)
   (define lines
     (append (list title body)
-            (if (non-empty-string? subtitle) (list subtitle) '())))
+            (if (non-empty-string? subtitle)
+                (list subtitle)
+                '())))
   (define texts
     (apply string-append
-           (for/list ([l (in-list lines)]) (format "<text>~a</text>" (xml-escape l)))))
-  (format "<toast><visual><binding template=\"ToastGeneric\">~a</binding></visual></toast>"
-          texts))
+           (for/list ([l (in-list lines)])
+             (format "<text>~a</text>" (xml-escape l)))))
+  (format "<toast><visual><binding template=\"ToastGeneric\">~a</binding></visual></toast>" texts))
 
 ;; PowerShell single-quoted literal: '' is the only escape.
-(define (ps-quote s) (string-replace s "'" "''"))
+(define (ps-quote s)
+  (string-replace s "'" "''"))
 
 (define (notify! title body subtitle)
   (define ps (find-executable-path "powershell.exe"))
-  (and ps
-       (let ()
-         (define script
-           (string-append
-            "$ErrorActionPreference = 'Stop'\n"
-            "try {\n"
-            "  [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
-            "  [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null\n"
-            "  $xml = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
-            (format "  $xml.LoadXml('~a')\n" (ps-quote (toast-visual title body subtitle)))
-            "  $toast = New-Object Windows.UI.Notifications.ToastNotification $xml\n"
-            (format "  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('~a').Show($toast)\n"
-                    (ps-quote powershell-aumid))
-            "  exit 0\n"
-            "} catch {\n"
-            "  exit 1\n"
-            "}\n"))
-         ;; The script file sidesteps command-line quoting for arbitrary
-         ;; title/body text (xml-escape already made the XML safe).
-         (define path (make-temporary-file "glaze-notify-~a.ps1"))
-         (dynamic-wind
-           (lambda () (with-output-to-file path
-                        (lambda () (display script))
-                        #:exists 'replace))
-           (lambda ()
-             (= 0 (system*/exit-code ps "-NoProfile" "-NonInteractive"
-                                     "-ExecutionPolicy" "Bypass"
-                                     "-WindowStyle" "Hidden"
-                                     "-File" (path->string path))))
-           (lambda () (delete-file path))))))
+  (and
+   ps
+   (let ()
+     (define script
+       (string-append
+        "$ErrorActionPreference = 'Stop'\n"
+        "try {\n"
+        "  [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
+        "  [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null\n"
+        "  $xml = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
+        (format "  $xml.LoadXml('~a')\n" (ps-quote (toast-visual title body subtitle)))
+        "  $toast = New-Object Windows.UI.Notifications.ToastNotification $xml\n"
+        (format
+         "  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('~a').Show($toast)\n"
+         (ps-quote powershell-aumid))
+        "  exit 0\n"
+        "} catch {\n"
+        "  exit 1\n"
+        "}\n"))
+     ;; The script file sidesteps command-line quoting for arbitrary
+     ;; title/body text (xml-escape already made the XML safe).
+     (define path (make-temporary-file "glaze-notify-~a.ps1"))
+     (dynamic-wind (lambda ()
+                     (with-output-to-file path (lambda () (display script)) #:exists 'replace))
+                   (lambda ()
+                     (= 0
+                        (system*/exit-code ps
+                                           "-NoProfile"
+                                           "-NonInteractive"
+                                           "-ExecutionPolicy"
+                                           "Bypass"
+                                           "-WindowStyle"
+                                           "Hidden"
+                                           "-File"
+                                           (path->string path))))
+                   (lambda () (delete-file path))))))
 
 (define (open-path p)
   (define e (find-executable-path "explorer.exe"))

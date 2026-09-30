@@ -27,8 +27,7 @@
 (define (maybe-bind lib name type)
   (and lib (get-ffi-obj name lib type (lambda () #f))))
 
-(define gtk_clipboard_get
-  (maybe-bind gtk-lib "gtk_clipboard_get" (_fun _int -> _pointer)))
+(define gtk_clipboard_get (maybe-bind gtk-lib "gtk_clipboard_get" (_fun _int -> _pointer)))
 (define gtk_clipboard_set_text
   (maybe-bind gtk-lib "gtk_clipboard_set_text" (_fun _pointer _string _int -> _void)))
 (define gtk_clipboard_wait_for_text
@@ -40,7 +39,10 @@
 
 (define (clipboard-set! text)
   (define cb (gtk_clipboard_get CLIPBOARD))
-  (and cb (begin (gtk_clipboard_set_text cb text (string-length text)) #t)))
+  (and cb
+       (begin
+         (gtk_clipboard_set_text cb text (string-length text))
+         #t)))
 
 (define (clipboard-get)
   (define cb (gtk_clipboard_get CLIPBOARD))

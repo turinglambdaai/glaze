@@ -38,8 +38,7 @@
 
 (define (mac-service)
   (and servicemgmt
-       (let ([svc (tell SMAppService mainAppService)])
-         (and (cast svc _id _pointer) svc))))
+       (let ([svc (tell SMAppService mainAppService)]) (and (cast svc _id _pointer) svc))))
 
 ;; => #t / #f / 'requires-approval / 'not-registered / #f (unavailable host)
 (define (mac-enabled?)
@@ -59,13 +58,14 @@
   (if enabled?
       (let ([err (tell #:type _id svc register)])
         (unless (cast err _id _pointer) ; nil NSError = success
-          (error 'auto-launch "register failed: ~a"
-                 (tell #:type _string err localizedDescription)))
+          (error 'auto-launch "register failed: ~a" (tell #:type _string err localizedDescription)))
         (when (eq? (mac-enabled?) 'requires-approval)
-          (error 'auto-launch "registration needs approval in System Settings > General > Login Items")))
+          (error 'auto-launch
+                 "registration needs approval in System Settings > General > Login Items")))
       (let ([err (tell #:type _id svc unregister)])
         (unless (cast err _id _pointer)
-          (error 'auto-launch "unregister failed: ~a"
+          (error 'auto-launch
+                 "unregister failed: ~a"
                  (tell #:type _string err localizedDescription))))))
 
 ;; ---- Windows (HKCU Run key via reg.exe) ----
@@ -85,14 +85,15 @@
 
 (define (win-set! name enabled?)
   (define reg (find-executable-path "reg.exe" #f))
-  (unless reg (error 'auto-launch "reg.exe not found"))
+  (unless reg
+    (error 'auto-launch "reg.exe not found"))
   (cond
     [enabled?
      (define exe (path->string (find-system-path 'run-file)))
-     (unless (zero? (parameterize ([current-output-port (open-output-nowhere)]
-                                   [current-error-port (open-output-nowhere)])
-                       (system*/exit-code reg "add" win-run-key "/v" name
-                                          "/d" (format "\"~a\"" exe) "/f")))
+     (unless (zero?
+              (parameterize ([current-output-port (open-output-nowhere)]
+                             [current-error-port (open-output-nowhere)])
+                (system*/exit-code reg "add" win-run-key "/v" name "/d" (format "\"~a\"" exe) "/f")))
        (error 'auto-launch "failed to write Run key"))
      #t]
     [else
@@ -105,16 +106,14 @@
 
 (define (lin-desktop-path name)
   (define config-dir
-    (or (getenv "XDG_CONFIG_HOME")
-        (build-path (find-system-path 'home-dir) ".config")))
+    (or (getenv "XDG_CONFIG_HOME") (build-path (find-system-path 'home-dir) ".config")))
   (build-path config-dir "autostart" (format "~a.desktop" (safe-name name))))
 
 (define (safe-name s)
-  (string-join
-   (for/list ([c (in-string s)]
-              #:when (or (char-alphabetic? c) (char-numeric? c) (eq? c #\-)))
-     (string c))
-   ""))
+  (string-join (for/list ([c (in-string s)]
+                          #:when (or (char-alphabetic? c) (char-numeric? c) (eq? c #\-)))
+                 (string c))
+               ""))
 
 (define (lin-enabled? name)
   (file-exists? (lin-desktop-path name)))
@@ -124,11 +123,15 @@
   (if enabled?
       (begin
         (make-directory* (path-only p))
-        (call-with-output-file p
-          (lambda (o)
-            (fprintf o "[Desktop Entry]\nType=Application\nName=~a\nExec=\"~a\"\nX-GNOME-Autostart-enabled=true\n"
-                     name (path->string (find-system-path 'run-file))))
-          #:exists 'replace))
+        (call-with-output-file
+         p
+         (lambda (o)
+           (fprintf
+            o
+            "[Desktop Entry]\nType=Application\nName=~a\nExec=\"~a\"\nX-GNOME-Autostart-enabled=true\n"
+            name
+            (path->string (find-system-path 'run-file))))
+         #:exists 'replace))
       (when (file-exists? p)
         (delete-file p)))
   #t)

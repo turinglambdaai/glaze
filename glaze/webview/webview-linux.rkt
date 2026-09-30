@@ -56,8 +56,7 @@
 (define try-ffi-lib ffi-lib*)
 
 (define gtk-lib (try-ffi-lib "gtk-3" '("0")))
-(define webkit-lib (or (try-ffi-lib "webkit2gtk-4.1" '("0"))
-                       (try-ffi-lib "webkit2gtk-4.0" '("37"))))
+(define webkit-lib (or (try-ffi-lib "webkit2gtk-4.1" '("0")) (try-ffi-lib "webkit2gtk-4.0" '("37"))))
 (define glib-lib (try-ffi-lib "glib-2.0" '("0")))
 (define gobject-lib (try-ffi-lib "gobject-2.0" '("0")))
 
@@ -91,8 +90,7 @@
               "g_signal_connect_data"
               (_fun _pointer _string _fpointer _pointer _pointer _uint -> _uintptr)))
 
-(struct lin:webview (window webview [url #:mutable] closed?-box [thread #:mutable])
-  #:transparent)
+(struct lin:webview (window webview [url #:mutable] closed?-box [thread #:mutable]) #:transparent)
 
 (define (supported?)
   (define components
@@ -108,10 +106,10 @@
   (unless (andmap cdr components)
     (fprintf (current-error-port)
              "[glaze-linux-webview] unsupported; missing: ~a\n"
-             (string-join
-              (for/list ([c (in-list components)] #:unless (cdr c))
-                (symbol->string (car c)))
-              ", "))
+             (string-join (for/list ([c (in-list components)]
+                                     #:unless (cdr c))
+                            (symbol->string (car c)))
+                          ", "))
     ;; Surface why dlopen refused the first missing library — dependency
     ;; resolution failures otherwise stay invisible.
     (unless gtk-lib
@@ -130,9 +128,11 @@
 
 (define (connect-on-close! window on-close)
   (define (on-destroy widget data)
-    (define proc (call-with-semaphore callbacks-sema
-                                  (lambda () (hash-ref close-callbacks (cast widget _pointer _uintptr) #f))))
-    (when (procedure? proc) (proc)))
+    (define proc
+      (call-with-semaphore callbacks-sema
+                           (lambda () (hash-ref close-callbacks (cast widget _pointer _uintptr) #f))))
+    (when (procedure? proc)
+      (proc)))
   (define cptr (function-ptr on-destroy (_fun _pointer _pointer -> _void)))
   (set! callback-ptrs (cons cptr callback-ptrs))
   (call-with-semaphore callbacks-sema
@@ -158,16 +158,16 @@
                       #:on-close [on-close (lambda () (void))])
   (define (show-devtools-later!)
     ;; The inspector window needs the webview realized; retry briefly.
-    (thread
-     (lambda ()
-       (let retry ([deadline (+ (current-inexact-milliseconds) 3000)])
-         (define insp (and webkit_web_view_get_inspector
-                           (webkit_web_view_get_inspector webview)))
-         (cond
-           [(and insp webkit_web_inspector_show)
-            (webkit_web_inspector_show insp)]
-           [(> (current-inexact-milliseconds) deadline) (void)]
-           [else (sleep 0.1) (retry deadline)])))))
+    (thread (lambda ()
+              (let retry ([deadline (+ (current-inexact-milliseconds) 3000)])
+                (define insp
+                  (and webkit_web_view_get_inspector (webkit_web_view_get_inspector webview)))
+                (cond
+                  [(and insp webkit_web_inspector_show) (webkit_web_inspector_show insp)]
+                  [(> (current-inexact-milliseconds) deadline) (void)]
+                  [else
+                   (sleep 0.1)
+                   (retry deadline)])))))
   (unless (supported?)
     (error 'open-webview "Linux WebView backend not available"))
   (gtk_init #f #f)
@@ -178,10 +178,14 @@
   (gtk_container_add window webview)
   (webkit_web_view_load_uri webview url)
   (gtk_widget_show_all window)
-  (when devtools? (show-devtools-later!))
+  (when devtools?
+    (show-devtools-later!))
 
   (define closed? (box #f))
-  (connect-on-close! window (lambda () (set-box! closed? #t) (on-close)))
+  (connect-on-close! window
+                     (lambda ()
+                       (set-box! closed? #t)
+                       (on-close)))
 
   (define wv (lin:webview window webview url closed? #f))
   (set-lin:webview-thread! wv (thread (lambda () (pump-loop wv))))
@@ -222,24 +226,15 @@
                     (_fun _pointer _int _int _int _int -> _pointer)
                     (lambda () #f))))
 (define gdk_window_get_width
-  (and gtk-lib
-       (get-ffi-obj "gdk_window_get_width"
-                    gtk-lib
-                    (_fun _pointer -> _int)
-                    (lambda () #f))))
+  (and gtk-lib (get-ffi-obj "gdk_window_get_width" gtk-lib (_fun _pointer -> _int) (lambda () #f))))
 (define gdk_window_get_height
-  (and gtk-lib
-       (get-ffi-obj "gdk_window_get_height"
-                    gtk-lib
-                    (_fun _pointer -> _int)
-                    (lambda () #f))))
+  (and gtk-lib (get-ffi-obj "gdk_window_get_height" gtk-lib (_fun _pointer -> _int) (lambda () #f))))
 (define gdk_pixbuf_savev
   (and gdk-pixbuf-lib
        (get-ffi-obj "gdk_pixbuf_savev"
                     gdk-pixbuf-lib
                     (_fun _pointer _string _string _pointer _pointer _pointer -> _bool)
                     (lambda () #f))))
-
 
 (define (capture! wv [dest #f])
   (and (not (unbox (lin:webview-closed?-box wv)))
@@ -249,8 +244,7 @@
        (let ()
          (define gdkwin (gtk_widget_get_window (lin:webview-window wv)))
          (unless gdkwin
-           (fprintf (current-error-port)
-                    "[glaze-linux-webview] capture: window not realized\n"))
+           (fprintf (current-error-port) "[glaze-linux-webview] capture: window not realized\n"))
          (and gdkwin
               (let ()
                 (define pixbuf
@@ -266,22 +260,18 @@
                      (let ()
                        (define path
                          (if dest
-                             (if (string? dest) (string->path dest) dest)
+                             (if (string? dest)
+                                 (string->path dest)
+                                 dest)
                              (make-temporary-file "glaze-capture-~a.png")))
-                       (define ok?
-                         (gdk_pixbuf_savev pixbuf
-                                           (path->string path)
-                                           "png"
-                                           #f #f #f))
+                       (define ok? (gdk_pixbuf_savev pixbuf (path->string path) "png" #f #f #f))
                        (unless ok?
                          (fprintf (current-error-port)
                                   "[glaze-linux-webview] capture: savev failed\n"))
                        (and ok? path))))))))
 
-
 ;; ---- window controls ----
-(define gtk_window_fullscreen
-  (maybe-bind gtk-lib "gtk_window_fullscreen" (_fun _pointer -> _void)))
+(define gtk_window_fullscreen (maybe-bind gtk-lib "gtk_window_fullscreen" (_fun _pointer -> _void)))
 (define gtk_window_unfullscreen
   (maybe-bind gtk-lib "gtk_window_unfullscreen" (_fun _pointer -> _void)))
 
@@ -296,9 +286,9 @@
       (gtk_window_fullscreen (lin:webview-window wv))
       (gtk_window_unfullscreen (lin:webview-window wv))))
 
-(define gtk_window_present
-  (maybe-bind gtk-lib "gtk_window_present" (_fun _pointer -> _pointer)))
-(define (focus! wv) (gtk_window_present (lin:webview-window wv)))
+(define gtk_window_present (maybe-bind gtk-lib "gtk_window_present" (_fun _pointer -> _pointer)))
+(define (focus! wv)
+  (gtk_window_present (lin:webview-window wv)))
 
 ;; ---- menu bar ----
 ;; GTK layout change: the webview leaves the window, a vertical GtkBox with
@@ -307,14 +297,11 @@
 ;; the "activate" signal through function pointers kept alive in
 ;; callback-ptrs.
 
-(define gtk_box_new
-  (maybe-bind gtk-lib "gtk_box_new" (_fun _int _int -> _pointer)))
+(define gtk_box_new (maybe-bind gtk-lib "gtk_box_new" (_fun _int _int -> _pointer)))
 (define gtk_box_pack_start
   (maybe-bind gtk-lib "gtk_box_pack_start" (_fun _pointer _pointer _bool _bool _int -> _void)))
-(define gtk_menu_bar_new
-  (maybe-bind gtk-lib "gtk_menu_bar_new" (_fun -> _pointer)))
-(define gtk_menu_new
-  (maybe-bind gtk-lib "gtk_menu_new" (_fun -> _pointer)))
+(define gtk_menu_bar_new (maybe-bind gtk-lib "gtk_menu_bar_new" (_fun -> _pointer)))
+(define gtk_menu_new (maybe-bind gtk-lib "gtk_menu_new" (_fun -> _pointer)))
 (define gtk_menu_item_new_with_label
   (maybe-bind gtk-lib "gtk_menu_item_new_with_label" (_fun _string -> _pointer)))
 (define gtk_separator_menu_item_new
@@ -330,9 +317,13 @@
 (define lin-menu-allocator (make-id-allocator))
 
 (define (set-menu! wv menus)
-  (unless (and gtk_box_new gtk_menu_bar_new gtk_menu_item_new_with_label
-               gtk_menu_shell_append gtk_menu_item_set_submenu
-               gtk_container_remove gtk_box_pack_start)
+  (unless (and gtk_box_new
+               gtk_menu_bar_new
+               gtk_menu_item_new_with_label
+               gtk_menu_shell_append
+               gtk_menu_item_set_submenu
+               gtk_container_remove
+               gtk_box_pack_start)
     (error 'set-menu! "GTK menu API unavailable"))
   (define window (lin:webview-window wv))
   (define webview-widget (lin:webview-webview wv))
@@ -345,15 +336,16 @@
     (define submenu (gtk_menu_new))
     (for ([e (in-list (menu-items m))])
       (cond
-        [(menu-separator? e)
-         (gtk_menu_shell_append submenu (gtk_separator_menu_item_new))]
+        [(menu-separator? e) (gtk_menu_shell_append submenu (gtk_separator_menu_item_new))]
         [else
-         (define item (gtk_menu_item_new_with_label
-                       (if (menu-item-accel e)
-                           (format "~a  (~a)" (menu-item-label e) (menu-item-accel e))
-                           (menu-item-label e))))
+         (define item
+           (gtk_menu_item_new_with_label
+            (if (menu-item-accel e)
+                (format "~a  (~a)" (menu-item-label e) (menu-item-accel e))
+                (menu-item-label e))))
          (define thunk (menu-item-action e))
-         (define (fire widget data) (thunk))
+         (define (fire widget data)
+           (thunk))
          (define cptr (function-ptr fire (_fun _pointer _pointer -> _void)))
          (set! callback-ptrs (cons cptr callback-ptrs))
          (g_signal_connect_data item "activate" cptr #f #f 0)

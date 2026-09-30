@@ -44,35 +44,28 @@
 
 (define existing-dir (path->string (find-system-path 'temp-dir)))
 (define missing-dir
-  (path->string (build-path (find-system-path 'temp-dir)
-                            "definitely-not-here-9f3a")))
+  (path->string (build-path (find-system-path 'temp-dir) "definitely-not-here-9f3a")))
 
 (test-case "healthy table has no problems"
-  (check-equal?
-   (doctor-problems (hash "glaze" (list 'link existing-dir)))
-   '()))
+  (check-equal? (doctor-problems (hash "glaze" (list 'link existing-dir))) '()))
 
 (test-case "legacy links are flagged however healthy their target"
   (define problems
-    (doctor-problems (hash "glaze" (list 'link existing-dir)
-                             "glaze-lib" (list 'link existing-dir))))
+    (doctor-problems (hash "glaze" (list 'link existing-dir) "glaze-lib" (list 'link existing-dir))))
   (check-equal? (length problems) 1)
   (check-true (string-contains? (first problems) "glaze-lib")))
 
 (test-case "link to a deleted checkout is flagged"
-  (define problems
-    (doctor-problems (hash "glaze" (list 'link missing-dir))))
+  (define problems (doctor-problems (hash "glaze" (list 'link missing-dir))))
   (check-equal? (length problems) 1)
   (check-true (string-contains? (first problems) "missing path")))
 
 (test-case "missing root package is flagged"
-  (define problems
-    (doctor-problems (hash "glaze" '(not-installed)
-                             "glaze-lib" '(not-installed))))
+  (define problems (doctor-problems (hash "glaze" '(not-installed) "glaze-lib" '(not-installed))))
   (check-true (ormap (lambda (p) (string-contains? p "no package named")) problems)))
 
 (test-case "non-link installs of legacy names are flagged"
   (define problems
-    (doctor-problems (hash "glaze" (list 'link existing-dir)
-                             "glaze-doc" (list 'other "glaze-doc 1.0 catalog"))))
+    (doctor-problems
+     (hash "glaze" (list 'link existing-dir) "glaze-doc" (list 'other "glaze-doc 1.0 catalog"))))
   (check-true (ormap (lambda (p) (string-contains? p "glaze-doc")) problems)))

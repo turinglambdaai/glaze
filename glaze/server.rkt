@@ -39,9 +39,7 @@
 (define current-glaze-error-reporter
   (make-parameter
    (lambda (exn uri)
-     (fprintf (current-error-port)
-              "[glaze] handler error on ~a: ~a\n"
-              uri (exn-message exn)))))
+     (fprintf (current-error-port) "[glaze] handler error on ~a: ~a\n" uri (exn-message exn)))))
 
 (define sse-path "glaze/events")
 (define api-client-path "glaze/api.js")
@@ -65,8 +63,8 @@
     (raise-argument-error 'start-server "event-bus?" event-bus))
   (when (and api-token (not (string? api-token)))
     (raise-argument-error 'start-server "(or/c #f string?)" api-token))
-  (define dispatcher
-    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))  (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
+  (define dispatcher (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))
+  (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
   ;; only "connection refused" much later. Prove the listener is accepting
@@ -95,14 +93,16 @@
       (cond
         [up? #t]
         [(> (current-inexact-milliseconds) deadline) #f]
-        [else (sleep 0.02) (loop)])))
+        [else
+         (sleep 0.02)
+         (loop)])))
   (unless accepting?
     (shutdown-server)
     (raise-arguments-error
      'start-server
-     (format "listener on port ~a did not start accepting within ~as"
-             port listen-wait-secs)
-     "port" port)))
+     (format "listener on port ~a did not start accepting within ~as" port listen-wait-secs)
+     "port"
+     port)))
 
 ;; ---- Host-header validation (DNS-rebinding guard) ----
 
@@ -113,13 +113,17 @@
     [(not h) #t]
     [else
      (define host (bytes->string/latin-1 (header-value h)))
-     (define bare (if (string-contains? host ":")
-                      (substring host 0 (string-index-of host #\:))
-                      host))
+     (define bare
+       (if (string-contains? host ":")
+           (substring host 0 (string-index-of host #\:))
+           host))
      (member bare (list "127.0.0.1" "localhost" "[::1]" "::1"))]))
 
 (define (string-index-of s ch)
-  (for/or ([c (in-string s)] [i (in-naturals)] #:when (char=? c ch)) i))
+  (for/or ([c (in-string s)]
+           [i (in-naturals)]
+           #:when (char=? c ch))
+    i))
 
 ;; ---- dispatcher ----
 
@@ -133,30 +137,27 @@
         ;; to the clean path. api.js no longer hands the token out, so a
         ;; casual local prober that can read openly-served endpoints still
         ;; cannot mint a cookie.
-        [(and api-token (bootstrap-request? req api-token))
-         (bootstrap-response req)]
+        [(and api-token (bootstrap-request? req api-token)) (bootstrap-response req)]
         ;; The token guards capabilities (API routes + the event stream),
         ;; not resources: static files and the api.js bootstrap stay open —
         ;; the page received its cookie via the bootstrap redirect above.
-        [(and api-token (pair? api-routes) (not (token-ok? req api-token))
-              (or (api-matches? api-routes req)
-                  (and event-bus (sse-request? req))))
+        [(and api-token
+              (pair? api-routes)
+              (not (token-ok? req api-token))
+              (or (api-matches? api-routes req) (and event-bus (sse-request? req))))
          (error-response 401 "missing or invalid glaze token")]
         [(find-api-response api-routes req)]
         [(and event-bus (sse-request? req)) (sse-response event-bus)]
-        [(and serve-client? (api-client-request? req))
-         (api-client-response api-routes api-token)]
+        [(and serve-client? (api-client-request? req)) (api-client-response api-routes api-token)]
         [(directory-exists? public-dir) (serve-static-file public-dir req)]
         [else (make-404-response)]))
     (output-response conn resp)))
 
 ;; Does any route match this request (method + path shape)?
 (define (api-matches? api-routes req)
-  (define method
-    (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
+  (define method (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
   (define segments
-    (filter (lambda (s) (not (equal? s "")))
-            (map path/param-path (url-path (request-uri req)))))
+    (filter (lambda (s) (not (equal? s ""))) (map path/param-path (url-path (request-uri req)))))
   (for/or ([r (in-list api-routes)])
     (and (route-match r method segments) #t)))
 
@@ -167,8 +168,7 @@
   (define h (headers-assq #"X-Glaze-Token" (request-headers/raw req)))
   (or (and h (string=? (bytes->string/latin-1 (header-value h)) expected))
       (let* ([cookie-h (headers-assq #"Cookie" (request-headers/raw req))]
-             [cookie-str (and cookie-h
-                              (bytes->string/latin-1 (header-value cookie-h)))])
+             [cookie-str (and cookie-h (bytes->string/latin-1 (header-value cookie-h)))])
         (and cookie-str
              (for/or ([part (in-list (string-split cookie-str ";"))])
                (define kv (string-split (string-trim part) "="))
@@ -182,32 +182,29 @@
 
 (define (bootstrap-request? req expected)
   (for/or ([kv (in-list (url-query (request-uri req)))])
-    (and (eq? (car kv) bootstrap-param)
-         (string? (cdr kv))
-         (string=? (cdr kv) expected))))
+    (and (eq? (car kv) bootstrap-param) (string? (cdr kv)) (string=? (cdr kv) expected))))
 
 ;; 302 back to the same path (query dropped), setting the cookie the page
 ;; will use for API + SSE calls. A wrong token in the query never matches
 ;; and falls through to the normal flow — no cookie is minted.
 (define (bootstrap-response req)
-  (define target
-    (string-append "/" (url-path-string (request-uri req))))
+  (define target (string-append "/" (url-path-string (request-uri req))))
   (define token
     (for/or ([kv (in-list (url-query (request-uri req)))]
              #:when (eq? (car kv) bootstrap-param))
       (cdr kv)))
-  (response/full 302 #"Found" (current-seconds)
+  (response/full 302
+                 #"Found"
+                 (current-seconds)
                  #"text/plain; charset=utf-8"
                  (list (header #"Location" (string->bytes/latin-1 target))
                        (header #"Set-Cookie"
                                (string->bytes/latin-1
-                                (format "glaze_token=~a; Path=/; HttpOnly; SameSite=Strict"
-                                        token))))
+                                (format "glaze_token=~a; Path=/; HttpOnly; SameSite=Strict" token))))
                  (list (string->bytes/utf-8 (format "Redirecting to ~a\n" target)))))
 
 (define (sse-request? req)
-  (and (bytes=? (request-method req) #"GET")
-       (equal? (url-path-string (request-uri req)) sse-path)))
+  (and (bytes=? (request-method req) #"GET") (equal? (url-path-string (request-uri req)) sse-path)))
 
 (define (api-client-request? req)
   (and (bytes=? (request-method req) #"GET")
@@ -222,27 +219,27 @@
 
 (define (sse-response bus)
   (define ch (bus-subscribe! bus))
-  (response 200 #"OK" (current-seconds)
+  (response 200
+            #"OK"
+            (current-seconds)
             #"text/event-stream"
             (list (header #"Cache-Control" #"no-cache"))
             (lambda (out)
-              (dynamic-wind
-                (lambda () (void))
-                (lambda ()
-                  (let loop ()
-                    (define v (sync/timeout sse-keepalive-secs ch))
-                    (cond
-                      [(eq? v 'timeout)
-                       (fprintf out ": keepalive\n\n")
-                       (flush-output out)
-                       (loop)]
-                      [else
-                       (match-define (list name data) v)
-                       (fprintf out "event: ~a\ndata: ~a\n\n"
-                                name (jsexpr->string data))
-                       (flush-output out)
-                       (loop)])))
-                (lambda () (bus-unsubscribe! bus ch))))))
+              (dynamic-wind (lambda () (void))
+                            (lambda ()
+                              (let loop ()
+                                (define v (sync/timeout sse-keepalive-secs ch))
+                                (cond
+                                  [(eq? v 'timeout)
+                                   (fprintf out ": keepalive\n\n")
+                                   (flush-output out)
+                                   (loop)]
+                                  [else
+                                   (match-define (list name data) v)
+                                   (fprintf out "event: ~a\ndata: ~a\n\n" name (jsexpr->string data))
+                                   (flush-output out)
+                                   (loop)])))
+                            (lambda () (bus-unsubscribe! bus ch))))))
 
 ;; ---- generated JS client ----
 
@@ -260,7 +257,9 @@
   ;; mint credentials. The page gets its cookie via the ?glaze-token=
   ;; bootstrap redirect instead (run-app opens that URL automatically).
   (define js (generate-api-client api-routes))
-  (response/full 200 #"OK" (current-seconds)
+  (response/full 200
+                 #"OK"
+                 (current-seconds)
                  #"application/javascript; charset=utf-8"
                  '()
                  (list (string->bytes/utf-8 js))))
@@ -271,15 +270,15 @@
       (define method (route-method r))
       (define segments (route-segments r))
       (define args
-        (for/list ([seg (in-list segments)] #:when (param? seg))
+        (for/list ([seg (in-list segments)]
+                   #:when (param? seg))
           (param-id seg)))
       (define url-expr
-        (string-join
-         (for/list ([seg (in-list segments)])
-           (if (param? seg)
-               (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
-               seg))
-         "/"))
+        (string-join (for/list ([seg (in-list segments)])
+                       (if (param? seg)
+                           (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
+                           seg))
+                     "/"))
       (define method-str (symbol->string method))
       (format "  ~a: function(~a) { return glaze.call('~a', '~a', ~a); },"
               (route->js-name segments)
@@ -287,28 +286,29 @@
               method-str
               url-expr
               (if (string=? method-str "GET") "null" "body"))))
-  (string-append
-   "/* Generated by glaze — do not edit. */\n"
-   "window.glaze = window.glaze || {};\n"
-   "glaze.call = async function(method, path, body) {\n"
-   "  const opts = {method: method};\n"
-   "  if (body !== null && body !== undefined) {\n"
-   "    opts.headers = {'Content-Type': 'application/json'};\n"
-   "    opts.body = JSON.stringify(body);\n"
-   "  }\n"
-   "  const r = await fetch('/' + path, opts);\n"
-   "  if (!r.ok) { const t = await r.text(); throw new Error(t); }\n"
-   "  const text = await r.text();\n"
-   "  return text ? JSON.parse(text) : null;\n"
-   "};\n"
-   "glaze.on = function(name, fn) {\n"
-   "  if (!glaze._es) glaze._es = new EventSource('/" sse-path "');\n"
-   "  glaze._es.addEventListener(name, e => fn(JSON.parse(e.data), e));\n"
-   "  return glaze._es;\n"
-   "};\n"
-   "glaze.api = {\n"
-   (string-join entries "\n")
-   "\n};\n"))
+  (string-append "/* Generated by glaze — do not edit. */\n"
+                 "window.glaze = window.glaze || {};\n"
+                 "glaze.call = async function(method, path, body) {\n"
+                 "  const opts = {method: method};\n"
+                 "  if (body !== null && body !== undefined) {\n"
+                 "    opts.headers = {'Content-Type': 'application/json'};\n"
+                 "    opts.body = JSON.stringify(body);\n"
+                 "  }\n"
+                 "  const r = await fetch('/' + path, opts);\n"
+                 "  if (!r.ok) { const t = await r.text(); throw new Error(t); }\n"
+                 "  const text = await r.text();\n"
+                 "  return text ? JSON.parse(text) : null;\n"
+                 "};\n"
+                 "glaze.on = function(name, fn) {\n"
+                 "  if (!glaze._es) glaze._es = new EventSource('/"
+                 sse-path
+                 "');\n"
+                 "  glaze._es.addEventListener(name, e => fn(JSON.parse(e.data), e));\n"
+                 "  return glaze._es;\n"
+                 "};\n"
+                 "glaze.api = {\n"
+                 (string-join entries "\n")
+                 "\n};\n"))
 
 ;; "api/counter/bump" -> counterBump ; "api/items/:id/bump" -> itemsIdBump
 ;; "api/clip-copy" -> clipCopy. Hyphenated segments camel-case (a bare
@@ -317,7 +317,8 @@
 (define (js-camel seg first-lower?)
   (define parts (filter non-empty-string? (string-split seg "-")))
   (apply string-append
-         (for/list ([p (in-list parts)] [i (in-naturals)])
+         (for/list ([p (in-list parts)]
+                    [i (in-naturals)])
            (if (and (zero? i) first-lower? (regexp-match? #rx"^[a-z]" p))
                p
                (string-append (string-upcase (substring p 0 1)) (substring p 1))))))
@@ -328,7 +329,8 @@
         (rest segments)
         segments))
   (apply string-append
-         (for/list ([seg (in-list drop-api)] [i (in-naturals)])
+         (for/list ([seg (in-list drop-api)]
+                    [i (in-naturals)])
            (cond
              [(param? seg) (string-titlecase (param-id seg))]
              [(zero? i) (js-camel seg #t)]
@@ -338,21 +340,16 @@
 ;; normalize its result (jsexpr -> 200 JSON; response -> itself; exception ->
 ;; 500 JSON). No match -> #f (fall through to static).
 (define (find-api-response api-routes req)
-  (define method
-    (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
+  (define method (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
   (define segments
-    (filter (lambda (s) (not (equal? s "")))
-            (map path/param-path (url-path (request-uri req)))))
+    (filter (lambda (s) (not (equal? s ""))) (map path/param-path (url-path (request-uri req)))))
   (for/or ([r (in-list api-routes)])
     (define captured (route-match r method segments))
     (and captured
-         (with-handlers ([exn:fail:glaze:bad-param?
-                          (lambda (e) (error-response 400 (exn-message e)))]
+         (with-handlers ([exn:fail:glaze:bad-param? (lambda (e) (error-response 400 (exn-message e)))]
                          [exn:fail?
                           (lambda (e)
-                            ((current-glaze-error-reporter)
-                             e
-                             (url-path-string (request-uri req)))
+                            ((current-glaze-error-reporter) e (url-path-string (request-uri req)))
                             (error-response 500 (exn-message e)))])
            (define result (apply (route-handler r) req captured))
            (cond

@@ -9,9 +9,16 @@
          glaze/webview/main)
 
 ;; ---- surface (all platforms) ----
-(for ([p (in-list (list clipboard-set! clipboard-get notify! open-path
-                       reveal-path single-instance? sys-supported?
-                       webview-set-title! webview-set-size! webview-set-fullscreen!))])
+(for ([p (in-list (list clipboard-set!
+                        clipboard-get
+                        notify!
+                        open-path
+                        reveal-path
+                        single-instance?
+                        sys-supported?
+                        webview-set-title!
+                        webview-set-size!
+                        webview-set-fullscreen!))])
   (check-true (procedure? p)))
 
 ;; ---- single-instance ----
@@ -36,9 +43,8 @@
 ;; ---- window controls through the public API (macOS live) ----
 (when (and (eq? (system-type 'os) 'macosx) (webview-supported?))
   (define closed? (box #f))
-  (define wv (open-window "about:blank"
-                          #:title "ctrl-before"
-                          #:on-close (lambda () (set-box! closed? #t))))
+  (define wv
+    (open-window "about:blank" #:title "ctrl-before" #:on-close (lambda () (set-box! closed? #t))))
   (check-true (webview? wv))
   (check-not-exn (lambda () (webview-set-title! wv "ctrl-after")))
   (check-not-exn (lambda () (webview-set-size! wv 640 480)))

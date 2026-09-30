@@ -51,26 +51,30 @@
   (define pub (build-path dir "public.pem"))
   (define openssl (find-executable-path "openssl" #f))
 
-  (check-not-exn
-   (lambda ()
-     (quiet-system* openssl "genpkey" "-algorithm" "RSA"
-                    "-pkeyopt" "rsa_keygen_bits:2048" "-out" priv))
-   "keygen runs")
+  (check-not-exn (lambda ()
+                   (quiet-system* openssl
+                                  "genpkey"
+                                  "-algorithm"
+                                  "RSA"
+                                  "-pkeyopt"
+                                  "rsa_keygen_bits:2048"
+                                  "-out"
+                                  priv))
+                 "keygen runs")
   (check-true (zero? (quiet-system*/exit-code openssl "pkey" "-in" priv "-pubout" "-out" pub))
               "pubkey derivation succeeds")
 
   (define license-path (build-path dir "app.license"))
 
   ;; valid license with all claims
-  (check-not-exn
-   (lambda ()
-     (issue-license #:private-key priv
-                    #:product "TestApp"
-                    #:subject "customer@example.com"
-                    #:expiry "2099-12-31"
-                    #:machine-id mid
-                    #:out license-path))
-   "issuing a license runs")
+  (check-not-exn (lambda ()
+                   (issue-license #:private-key priv
+                                  #:product "TestApp"
+                                  #:subject "customer@example.com"
+                                  #:expiry "2099-12-31"
+                                  #:machine-id mid
+                                  #:out license-path))
+                 "issuing a license runs")
   (define ok (validate-license license-path #:public-key pub #:product "TestApp"))
   (check-true (hash-ref ok 'valid) "license validates")
   (check-equal? (hash-ref ok 'subject) "customer@example.com" "subject round-trips")
@@ -79,25 +83,19 @@
               "boolean wrapper agrees")
 
   ;; wrong product
-  (check-equal? (hash-ref (validate-license license-path
-                                            #:public-key pub
-                                            #:product "Other")
-                          'reason)
+  (check-equal? (hash-ref (validate-license license-path #:public-key pub #:product "Other") 'reason)
                 "product"
                 "wrong product -> reason product")
 
   ;; tampered payload -> signature failure
   (define tampered-path (build-path dir "tampered.license"))
-  (call-with-output-file tampered-path
-                         (lambda (o)
-                           (display (string-replace
-                                     (file->string license-path)
-                                     "customer@example.com" "attacker@evil.com")
-                                    o))
-                         #:exists 'replace)
-  (check-equal? (hash-ref (validate-license tampered-path
-                                            #:public-key pub
-                                            #:product "TestApp")
+  (call-with-output-file
+   tampered-path
+   (lambda (o)
+     (display (string-replace (file->string license-path) "customer@example.com" "attacker@evil.com")
+              o))
+   #:exists 'replace)
+  (check-equal? (hash-ref (validate-license tampered-path #:public-key pub #:product "TestApp")
                           'reason)
                 "signature"
                 "tampered payload -> reason signature")
@@ -109,9 +107,7 @@
                  #:subject "x"
                  #:expiry "2000-01-01"
                  #:out expired-path)
-  (check-equal? (hash-ref (validate-license expired-path
-                                            #:public-key pub
-                                            #:product "TestApp")
+  (check-equal? (hash-ref (validate-license expired-path #:public-key pub #:product "TestApp")
                           'reason)
                 "expired"
                 "past expiry -> reason expired")
@@ -123,46 +119,41 @@
                  #:subject "x"
                  #:machine-id "deadbeef"
                  #:out bound-path)
-  (check-equal? (hash-ref (validate-license bound-path
-                                            #:public-key pub
-                                            #:product "TestApp")
-                          'reason)
+  (check-equal? (hash-ref (validate-license bound-path #:public-key pub #:product "TestApp") 'reason)
                 "machine"
                 "foreign machine-id -> reason machine")
-  (check-true (hash-ref (validate-license bound-path
-                                          #:public-key pub
-                                          #:product "TestApp"
-                                          #:machine-id "deadbeef")
-                        'valid)
-              "matching machine-id validates")
+  (check-true
+   (hash-ref
+    (validate-license bound-path #:public-key pub #:product "TestApp" #:machine-id "deadbeef")
+    'valid)
+   "matching machine-id validates")
 
   ;; missing file + malformed file
-  (check-equal? (hash-ref (validate-license (build-path dir "nope.license")
-                                            #:public-key pub
-                                            #:product "TestApp")
-                          'reason)
-                "missing-file"
-                "missing license -> reason missing-file")
+  (check-equal?
+   (hash-ref (validate-license (build-path dir "nope.license") #:public-key pub #:product "TestApp")
+             'reason)
+   "missing-file"
+   "missing license -> reason missing-file")
   (define garbage-path (build-path dir "garbage.license"))
-  (call-with-output-file garbage-path
-                         (lambda (o) (display "{{{not json" o))
-                         #:exists 'replace)
-  (check-equal? (hash-ref (validate-license garbage-path
-                                            #:public-key pub
-                                            #:product "TestApp")
+  (call-with-output-file garbage-path (lambda (o) (display "{{{not json" o)) #:exists 'replace)
+  (check-equal? (hash-ref (validate-license garbage-path #:public-key pub #:product "TestApp")
                           'reason)
                 "malformed"
                 "non-JSON license -> reason malformed")
 
   ;; wrong public key -> signature failure
   (define other-priv (build-path dir "other-private.pem"))
-  (quiet-system* openssl "genpkey" "-algorithm" "RSA"
-                 "-pkeyopt" "rsa_keygen_bits:2048" "-out" other-priv)
+  (quiet-system* openssl
+                 "genpkey"
+                 "-algorithm"
+                 "RSA"
+                 "-pkeyopt"
+                 "rsa_keygen_bits:2048"
+                 "-out"
+                 other-priv)
   (define other-pub (build-path dir "other-public.pem"))
   (quiet-system*/exit-code openssl "pkey" "-in" other-priv "-pubout" "-out" other-pub)
-  (check-equal? (hash-ref (validate-license license-path
-                                            #:public-key other-pub
-                                            #:product "TestApp")
+  (check-equal? (hash-ref (validate-license license-path #:public-key other-pub #:product "TestApp")
                           'reason)
                 "signature"
                 "wrong public key -> reason signature")
@@ -172,8 +163,7 @@
 ;; ---- update artifact integrity ----
 
 (define artifact (make-temporary-file "glaze-sha-test-~a"))
-(call-with-output-file artifact (lambda (o) (display #"update artifact bytes" o))
-                       #:exists 'replace)
+(call-with-output-file artifact (lambda (o) (display #"update artifact bytes" o)) #:exists 'replace)
 
 (when openssl?
   (define hex
@@ -182,16 +172,17 @@
       (parameterize ([current-output-port out]
                      [current-error-port (open-output-nowhere)])
         (system*/exit-code (find-executable-path "openssl" #f)
-                           "dgst" "-sha256" "-r" (path->string artifact)))
+                           "dgst"
+                           "-sha256"
+                           "-r"
+                           (path->string artifact)))
       (second (regexp-match #px"^([0-9a-f]{64})" (get-output-string out)))))
   (check-true (verify-file-sha256 artifact hex) "correct digest verifies")
-  (check-false (verify-file-sha256 artifact (make-string 64 #\0))
-               "wrong digest fails")
+  (check-false (verify-file-sha256 artifact (make-string 64 #\0)) "wrong digest fails")
   (check-true (verify-file-sha256 artifact (string-upcase hex))
               "digest comparison is case-insensitive"))
 
 (check-false (verify-file-sha256 artifact #f) "missing manifest digest fails safely")
-(check-false (verify-file-sha256 "/no/such/file" (make-string 64 #\a))
-             "missing file fails safely")
+(check-false (verify-file-sha256 "/no/such/file" (make-string 64 #\a)) "missing file fails safely")
 
 (delete-directory/files artifact)

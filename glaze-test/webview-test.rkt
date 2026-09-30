@@ -39,24 +39,23 @@
 
   ;; Direct backend handle.
   (define closed? (box #f))
-  (define bw (mod-open "about:blank"
-                       #:title "glaze test"
-                       #:width 320
-                       #:height 240
-                       #:on-close (lambda () (set-box! closed? #t))))
+  (define bw
+    (mod-open "about:blank"
+              #:title "glaze test"
+              #:width 320
+              #:height 240
+              #:on-close (lambda () (set-box! closed? #t))))
   (check-true (mod-mac:webview? bw) "direct backend returns mac:webview?")
   (check-not-exn (lambda () (mod-navigate bw "about:blank")) "backend navigate does not raise")
   (check-not-exn (lambda () (mod-close bw)) "backend close does not raise")
   (sleep 0.2)
   (check-true (unbox closed?) "on-close callback fired")
-  (check-not-false (sync/timeout 3 (thread-dead-evt (mod-thread bw)))
-                   "pump thread exits after close")
+  (check-not-false (sync/timeout 3 (thread-dead-evt (mod-thread bw))) "pump thread exits after close")
 
   ;; Public dispatcher path.
   (define closed2? (box #f))
-  (define wv (open-window "about:blank"
-                          #:title "glaze public"
-                          #:on-close (lambda () (set-box! closed2? #t))))
+  (define wv
+    (open-window "about:blank" #:title "glaze public" #:on-close (lambda () (set-box! closed2? #t))))
   (check-true (webview? wv) "open-window returns a webview? on macOS")
   (check-equal? (webview-backend wv) 'macos "backend tag is macos")
   (check-not-exn (lambda () (webview-navigate wv "about:blank")) "navigate does not raise")
@@ -67,7 +66,9 @@
       (cond
         [(equal? (webview-url wv) "about:blank") #t]
         [(> (current-inexact-milliseconds) deadline) #f]
-        [else (sleep 0.1) (deadline-loop deadline)])))
+        [else
+         (sleep 0.1)
+         (deadline-loop deadline)])))
   (check-true url-ok? "webview-url reports the committed page")
   (define tmp-png (make-temporary-file "glaze-test-cap-~a.png"))
   ;; CGWindowListCreateImage returns NULL until the window has actually been
@@ -79,10 +80,13 @@
       (cond
         [(and s (>= (file-size s) 1000)) s]
         [(> (current-inexact-milliseconds) deadline) s]
-        [else (sleep 0.2) (retry deadline)])))
+        [else
+         (sleep 0.2)
+         (retry deadline)])))
   (check-not-false shot "webview-capture! returns a path")
   (check-true (and shot (>= (file-size shot) 1000)) "capture PNG is non-trivial")
-  (when (and shot (file-exists? shot)) (delete-file shot))
+  (when (and shot (file-exists? shot))
+    (delete-file shot))
   (check-not-exn (lambda () (webview-close wv)) "close does not raise")
   (sleep 0.2)
   (check-true (unbox closed2?) "public open-window on-close fired")
@@ -98,29 +102,32 @@
   (make-directory* (build-path mv-dir "b"))
   (make-directory* (build-path mv-dir "c"))
   (call-with-output-file (build-path mv-dir "a" "index.html")
-    (lambda (o) (display "<html><head><title>alpha</title></head></html>" o)))
+                         (lambda (o) (display "<html><head><title>alpha</title></head></html>" o)))
   (call-with-output-file (build-path mv-dir "b" "index.html")
-    (lambda (o) (display "<html><head><title>beta</title></head></html>" o)))
+                         (lambda (o) (display "<html><head><title>beta</title></head></html>" o)))
   (call-with-output-file (build-path mv-dir "c" "index.html")
-    (lambda (o) (display "<html><head><title>gamma</title></head></html>" o)))
-  (define-values (mv-port mv-stop)
-    (start-server #:port 18993 #:public-dir mv-dir))
+                         (lambda (o) (display "<html><head><title>gamma</title></head></html>" o)))
+  (define-values (mv-port mv-stop) (start-server #:port 18993 #:public-dir mv-dir))
   (define mod-title (dynamic-require 'glaze/webview/webview-macos 'title))
   (define closed-a? (box #f))
   (define closed-b? (box #f))
   (define wa
     (mod-open (format "http://127.0.0.1:~a/a/index.html" mv-port)
-              #:title "multi-a" #:on-close (lambda () (set-box! closed-a? #t))))
+              #:title "multi-a"
+              #:on-close (lambda () (set-box! closed-a? #t))))
   (define wb
     (mod-open (format "http://127.0.0.1:~a/b/index.html" mv-port)
-              #:title "multi-b" #:on-close (lambda () (set-box! closed-b? #t))))
+              #:title "multi-b"
+              #:on-close (lambda () (set-box! closed-b? #t))))
   ;; both pages commit through the one pump (deadline: slow CI hosts)
   (define both-loaded?
     (let dl ([deadline (+ (current-inexact-milliseconds) 10000)])
       (cond
         [(and (equal? (mod-title wa) "alpha") (equal? (mod-title wb) "beta")) #t]
         [(> (current-inexact-milliseconds) deadline) #f]
-        [else (sleep 0.1) (dl deadline)])))
+        [else
+         (sleep 0.1)
+         (dl deadline)])))
   (check-true both-loaded? "shared pump services both windows")
   (mod-close wa)
   (sleep 0.2)
@@ -134,7 +141,9 @@
       (cond
         [(equal? (mod-title wb) "gamma") #t]
         [(> (current-inexact-milliseconds) deadline) #f]
-        [else (sleep 0.1) (dl deadline)])))
+        [else
+         (sleep 0.1)
+         (dl deadline)])))
   (check-true survivor-serviced? "survivor still serviced after first close")
   (mod-close wb)
   (sleep 0.2)

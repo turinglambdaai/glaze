@@ -40,8 +40,18 @@ jobs:
             glaze-doc/scribblings/glaze.scrbl
 
       - name: Check formatting
-        run: raco fmt --check glaze/ glaze-cli/ glaze-test/
-        continue-on-error: true
+        shell: bash
+        run: |
+          raco pkg install --auto --no-docs fmt
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          for root in ("glaze", "glaze-cli", "glaze-test"):
+              for path in Path(root).rglob("*.rkt"):
+                  subprocess.run(["raco", "fmt", "-i", str(path)], check=True)
+          PY
+          git diff --exit-code -- glaze glaze-cli glaze-test
 
   webview-e2e:
     # Real-window WebView end-to-end on each OS: open -> load (title

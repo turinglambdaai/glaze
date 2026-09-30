@@ -21,8 +21,7 @@
 
 ;; ---- menu protocol (shared with the tray) ----
 
-(define mi (make-menu-item "Open…" #:action (lambda () 'opened)
-                           #:accel "CmdOrCtrl+O"))
+(define mi (make-menu-item "Open…" #:action (lambda () 'opened) #:accel "CmdOrCtrl+O"))
 (check-true (menu-item? mi) "menu-item? recognizes items")
 (check-equal? (menu-item-accel mi) "CmdOrCtrl+O" "accel round-trips")
 (check-true (menu-separator? (menu-separator)) "separator detection")
@@ -35,7 +34,8 @@
 
 (define filter-blob (win-filter-string (list (list "Text" "*.txt" "*.md"))))
 (check-true (string-contains? filter-blob "Text\0*.txt;*.md\0") "win filter encodes name+patterns")
-(check-true (string-contains? filter-blob "All files\0*.*\0") "win filter appends the all-files entry")
+(check-true (string-contains? filter-blob "All files\0*.*\0")
+            "win filter appends the all-files entry")
 
 ;; UTF-16 round trip incl. a code unit whose low byte is NUL (U+0100) —
 ;; the parts splitter must be unit-aware, not byte-aware.
@@ -44,14 +44,11 @@
 
 ;; ---- deep links ----
 
-(check-exn exn:fail?
-           (lambda () (ensure-url-scheme! "1bad-scheme"))
-           "invalid scheme raises")
-(check-exn exn:fail?
-           (lambda () (ensure-url-scheme! "Bad Scheme"))
-           "uppercase scheme raises")
+(check-exn exn:fail? (lambda () (ensure-url-scheme! "1bad-scheme")) "invalid scheme raises")
+(check-exn exn:fail? (lambda () (ensure-url-scheme! "Bad Scheme")) "uppercase scheme raises")
 (when (eq? (system-type 'os) 'macosx)
-  (check-equal? (ensure-url-scheme! "glaze-test-scheme") 'build-time
+  (check-equal? (ensure-url-scheme! "glaze-test-scheme")
+                'build-time
                 "macOS defers registration to the packaged Info.plist"))
 
 ;; ---- auto-launch state queries ----
@@ -68,9 +65,10 @@
   (check-false (auto-launch-enabled? "glaze-api-test") "linux: not registered initially")
   (auto-launch-set! "glaze-api-test" #t)
   (check-true (auto-launch-enabled? "glaze-api-test") "linux: registered")
-  (check-true (string-contains? (file->string (build-path tmp-cfg "autostart" "glaze-api-test.desktop"))
-                                "X-GNOME-Autostart-enabled=true")
-              "linux: desktop entry written")
+  (check-true
+   (string-contains? (file->string (build-path tmp-cfg "autostart" "glaze-api-test.desktop"))
+                     "X-GNOME-Autostart-enabled=true")
+   "linux: desktop entry written")
   (auto-launch-set! "glaze-api-test" #f)
   (check-false (auto-launch-enabled? "glaze-api-test") "linux: unregistered")
   (delete-directory/files tmp-cfg))
@@ -80,23 +78,21 @@
 ;; action (the same dispatch a real click takes) -> marker file appears ->
 ;; close -> wait-for-webviews.
 
-(when (and (eq? (system-type 'os) 'macosx)
-           (webview-supported?))
+(when (and (eq? (system-type 'os) 'macosx) (webview-supported?))
   ;; AppKit is loaded by the backend; register the class binding locally so
   ;; the test can query NSApp for the main menu.
   (import-class NSApplication)
   (define e2e-dir (make-temporary-file "glaze-menu-e2e-~a" 'directory))
-  (call-with-output-file (build-path e2e-dir "index.html")
-                         (lambda (o) (display "<html><head><title>MenuE2E</title></head><body>hi</body></html>" o))
-                         #:exists 'replace)
+  (call-with-output-file
+   (build-path e2e-dir "index.html")
+   (lambda (o) (display "<html><head><title>MenuE2E</title></head><body>hi</body></html>" o))
+   #:exists 'replace)
   (define-values (port shutdown) (start-server #:port 18942 #:public-dir e2e-dir))
 
   (define marker (make-temporary-file "glaze-menu-marker-~a" 'directory))
   (define marker-file (build-path marker "clicked"))
   (define wv
-    (open-window (format "http://127.0.0.1:~a/" port)
-                 #:title "Menu E2E"
-                 #:width 640 #:height 400))
+    (open-window (format "http://127.0.0.1:~a/" port) #:title "Menu E2E" #:width 640 #:height 400))
   (check-not-false wv "macOS window opened")
   (when wv
     ;; page commit poll (verification-API discipline)
@@ -113,9 +109,10 @@
                        (list (make-menu "Test"
                                         (list (make-menu-item "Ping"
                                                               #:action (lambda ()
-                                                                         (call-with-output-file marker-file
-                                                                           (lambda (o) (display "x" o))
-                                                                           #:exists 'replace))
+                                                                         (call-with-output-file
+                                                                          marker-file
+                                                                          (lambda (o) (display "x" o))
+                                                                          #:exists 'replace))
                                                               #:accel "Cmd+Shift+P")))))
     ;; Fire the same native dispatch a real menu click uses: NSApp
     ;; sendAction:to:from: with the item's own target (a menu-bar click calls
@@ -128,13 +125,21 @@
     (check-true (> idx 0) "custom menu appended to the main menu")
     (define top-item (tell #:type _id main-menu itemAtIndex: #:type _int idx))
     (check-equal? (tell #:type _string (tell #:type _id top-item title) UTF8String)
-                  "Test" "custom menu title round-trips")
+                  "Test"
+                  "custom menu title round-trips")
     (define ping (tell #:type _id (tell #:type _id top-item submenu) itemAtIndex: #:type _int 0))
     (define sent
-      (tell #:type _bool app
-            sendAction: #:type _SEL (tell #:type _SEL ping action)
-            to: #:type _id (tell #:type _id ping target)
-            from: #:type _id ping))
+      (tell #:type _bool
+            app
+            sendAction:
+            #:type _SEL
+            (tell #:type _SEL ping action)
+            to:
+            #:type _id
+            (tell #:type _id ping target)
+            from:
+            #:type _id
+            ping))
     (check-true sent "native dispatch accepted")
     (check-true (file-exists? marker-file) "menu action dispatched into Racket")
 
