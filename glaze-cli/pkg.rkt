@@ -11,7 +11,8 @@
 ;; project hand-rolled a clone-and-link script; this module is that script,
 ;; done once, with the failure modes named out loud.
 
-(require racket/file
+(require json
+         racket/file
          racket/format
          racket/list
          racket/match
@@ -198,7 +199,7 @@
 
 ;; ---- doctor ----------------------------------------------------------------------
 
-;; Usage: raco glaze doctor [--fix]
+;; Usage: raco glaze doctor [--fix] [--json]
 ;; Audits the raco package table for everything that breaks glaze starts:
 ;; legacy pre-rename links, links to deleted checkouts, and a missing root
 ;; package. --fix removes the offending links (an install follows).
@@ -216,6 +217,28 @@
       [(list 'other raw) (printf "  ~a: installed (non-link): ~a\n" name raw)]
       [(list 'not-installed) (printf "  ~a: not installed\n" name)])))
 
+(define (doctor-entry->jsexpr parsed)
+  (match parsed
+    [(list 'link target)
+     (hash 'state "link"
+           'target target
+           'target-exists (or (directory-exists? target) (file-exists? target)))]
+    [(list 'other raw) (hash 'state "installed" 'description raw)]
+    [(list 'not-installed) (hash 'state "not-installed")]))
+
+(define (webview-report)
+  ;; Load the public API dynamically so `doctor --json` can still explain a
+  ;; damaged Glaze installation instead of failing while this CLI module loads.
+  (with-handlers ([exn:fail?
+                   (lambda (e)
+                     (hash 'supported #f
+                           'diagnostic (exn-message e)))])
+    (define supported? (dynamic-require 'glaze 'webview-supported?))
+    (define diagnostic (dynamic-require 'glaze 'webview-diagnostic))
+    (define ok? (supported?))
+    (hash 'supported ok?
+          'diagnostic (if ok? #f (diagnostic)))))
+
 ;; Parsed entries -> non-canonical owners of glaze bits: any discovered
 ;; glaze-related package whose registry name is not exactly "glaze".
 (define (non-canonical-glaze-packages)
@@ -225,6 +248,12 @@
 
 (define (doctor-command rest)
   (define fix? (member "--fix" rest))
+  (define json? (member "--json" rest))
+  (when (and fix? json?)
+    (error 'doctor "--json is read-only and cannot be combined with --fix"))
+  (for ([arg (in-list rest)])
+    (unless (member arg '("--fix" "--json"))
+      (error 'doctor "unexpected argument: ~a" arg)))
   (define raco (need-exe "raco"))
   (define discovered (discover-glaze-packages))
   (define names (remove-duplicates (append glaze-pkg-names discovered)))
@@ -233,12 +262,9 @@
   (define entries
     (for/hash ([name (in-list names)])
       (values name (doctor-entry name))))
-  (printf "glaze package table:\n")
-  (doctor-report entries)
   (define resolved
     (with-handlers ([exn:fail? (lambda (_) #f)])
       (collection-path "glaze")))
-  (printf "glaze collection resolves to: ~a\n" (or resolved "NOT FOUND"))
   (define non-canonical (non-canonical-glaze-packages))
   (define problems
     (append
@@ -250,12 +276,39 @@
      (for/list ([name (in-list non-canonical)])
        (format "~a owns glaze files under a non-canonical name (link installs are named after their directory); remove it and reinstall with `raco glaze install <rev>`" name))
      (if resolved '() (list "the glaze collection does not resolve — reinstall with: raco glaze install <rev>"))))
+  (define webview (webview-report))
+  (define all-problems
+    (append problems
+            (if (hash-ref webview 'supported)
+                '()
+                (list (format "native WebView unavailable: ~a"
+                              (hash-ref webview 'diagnostic "unknown backend error"))))))
+  (when json?
+    (write-json
+     (hash 'contract-version 1
+           'product "Glaze"
+           'usable (null? all-problems)
+           'collection (and resolved (path->string resolved))
+           'packages
+           (for/hash ([(name parsed) (in-hash entries)])
+             (values (string->symbol name) (doctor-entry->jsexpr parsed)))
+           'webview webview
+           'problems all-problems))
+    (newline)
+    (exit (if (null? all-problems) 0 1)))
+  (printf "glaze package table:\n")
+  (doctor-report entries)
+  (printf "glaze collection resolves to: ~a\n" (or resolved "NOT FOUND"))
+  (printf "native WebView: ~a\n"
+          (if (hash-ref webview 'supported)
+              "available"
+              (format "unavailable — ~a" (hash-ref webview 'diagnostic))))
   (cond
-    [(null? problems)
+    [(null? all-problems)
      (printf "OK: no glaze package problems found\n")]
     [else
      (printf "Problems:\n")
-     (for ([p (in-list problems)]) (printf "  - ~a\n" p))
+     (for ([p (in-list all-problems)]) (printf "  - ~a\n" p))
      (when fix?
        (define broken-link?
          (match (hash-ref entries "glaze" (list 'not-installed))

@@ -2,6 +2,8 @@
 
 用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，最终运行在真正的桌面窗口中。
 
+**Human-first. Agent-native. Local by design. —— 为人而生，为 Agent 原生设计，本地优先。**
+
 [![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.7.0-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
@@ -117,12 +119,17 @@ raco glaze dev
 
 ```bash
 raco glaze init <name>   # 创建原生 Glaze 桌面项目
+raco glaze inspect --json # 读取项目、编辑点与验证契约
+raco glaze doctor --json  # 检查包与原生 WebView 就绪状态
 raco glaze dev           # 运行当前项目的原生桌面应用
+raco glaze verify        # 断言 title/URL 并捕获原生窗口截图
 raco glaze build         # 构建可分发包（exe + 内置资源）
 raco glaze keygen        # 生成用于许可证签名的 RSA 密钥对
 raco glaze license       # 签发 / 校验离线许可证文件
 raco glaze help          # 显示帮助
 ```
+
+`init` 同时生成 `AGENTS.md` 与可直接运行的 `verify.rkt`：Agent 能先读取机器可读的项目地图与诊断结果，再以真实原生窗口的 title、URL、PNG 截图和退出码验收修改。详见 [Agent-native 工作流](docs/agent-native.md)。
 
 Glaze **不提供浏览器模式的 `dev` / `serve` 命令**。开发和发布走同一条 Native WebView 路径，这样依赖缺失或原生后端故障会在开发阶段立即暴露，而不是被 browser fallback 隐藏。
 

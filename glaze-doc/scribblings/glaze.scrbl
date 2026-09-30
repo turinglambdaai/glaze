@@ -7,12 +7,20 @@ Glaze builds desktop applications with a Racket backend and a Web frontend
 rendered inside a native OS window. Windows uses WebView2, macOS uses
 WKWebView, and Linux uses WebKitGTK.
 
+@bold{Human-first. Agent-native. Local by design.} New projects include an
+agent instruction contract and native-window verification script. The CLI
+exposes machine-readable project inspection and runtime diagnostics without
+changing Glaze's human-readable workflow.
+
 @section{Quick Start}
 
 @verbatim{
  $ raco pkg install --auto glaze
  $ raco glaze init myapp
  $ cd myapp
+ $ raco glaze inspect --json
+ $ raco glaze doctor --json
+ $ raco glaze verify
  $ racket main.rkt
  # or: raco glaze dev
 }
