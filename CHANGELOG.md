@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-30
+
 ### Changed
 - Require Racket 9.0+ with the CS runtime (`base #:version "9.0"`). The BC
   engine and pre-9.0 releases are no longer supported or tested.

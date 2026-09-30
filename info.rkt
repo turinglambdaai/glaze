@@ -23,9 +23,9 @@
 ;; they live in glaze-cli/info.rkt and glaze-doc/info.rkt respectively.
 
 ;; NOTE: Racket's `valid-version?` rejects a trailing ".0" component
-;; ("0.7.0" is invalid; "0.7" is the same release).
-(define version "0.7")
-(define release-version "0.7.0")
+;; ("0.8.0" is invalid; "0.8" is the same release).
+(define version "0.8")
+(define release-version "0.8.0")
 
 ;; `raco test --package` otherwise executes every backend implementation as a
 ;; standalone test module. The dispatcher and platform CI exercise these
