@@ -51,7 +51,7 @@ jobs:
       - name: Install Racket
         uses: Bogdanp/setup-racket@v1.11
         with:
-          version: '8.12'
+          version: '9.3'
 
       - name: Validate release metadata
         shell: bash

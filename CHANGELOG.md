@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Require Racket 9.0+ with the CS runtime (`base #:version "9.0"`). The BC
+  engine and pre-9.0 releases are no longer supported or tested.
+
 ### Added
 - Make new projects agent-native with a generated `AGENTS.md`, a native UI
   `verify.rkt`, `raco glaze inspect --json`, and `raco glaze verify`.

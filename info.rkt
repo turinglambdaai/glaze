@@ -10,7 +10,7 @@
 (define collection 'multi)
 
 (define deps
-  '(["base" #:version "8.0"]
+  '(["base" #:version "9.0"]
     "web-server"
     "web-server-lib"
     ;; Tests ship inside this package, so rackunit is a runtime dep.

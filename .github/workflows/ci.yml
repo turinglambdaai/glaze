@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
-        racket-version: ['8.12']
+        racket-version: ['9.3']
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
-        racket-version: ['8.12']
+        racket-version: ['9.3']
 
     steps:
       - uses: actions/checkout@v4
@@ -122,7 +122,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
-        racket-version: ['8.12']
+        racket-version: ['9.3']
 
     steps:
       - uses: actions/checkout@v4
