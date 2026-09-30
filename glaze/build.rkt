@@ -30,22 +30,21 @@
 ;; target platform, so keying on (system-type 'os) here is exact.
 (define (platform-backend-modules)
   (define os (system-type 'os))
-  (list
-   (case os
-     [(windows) 'glaze/webview/webview-windows]
-     [(macosx) 'glaze/webview/webview-macos]
-     [(unix) 'glaze/webview/webview-linux]
-     [else 'glaze/webview/webview-stub])
-   (case os
-     [(windows) 'glaze/sys/sys-windows]
-     [(macosx) 'glaze/sys/sys-macos]
-     [(unix) 'glaze/sys/sys-linux]
-     [else 'glaze/sys/sys-stub])
-   (case os
-     [(windows) 'glaze/tray/tray-windows]
-     [(macosx) 'glaze/tray/tray-macos]
-     [(unix) 'glaze/tray/tray-linux]
-     [else 'glaze/tray/tray-stub])))
+  (list (case os
+          [(windows) 'glaze/webview/webview-windows]
+          [(macosx) 'glaze/webview/webview-macos]
+          [(unix) 'glaze/webview/webview-linux]
+          [else 'glaze/webview/webview-stub])
+        (case os
+          [(windows) 'glaze/sys/sys-windows]
+          [(macosx) 'glaze/sys/sys-macos]
+          [(unix) 'glaze/sys/sys-linux]
+          [else 'glaze/sys/sys-stub])
+        (case os
+          [(windows) 'glaze/tray/tray-windows]
+          [(macosx) 'glaze/tray/tray-macos]
+          [(unix) 'glaze/tray/tray-linux]
+          [else 'glaze/tray/tray-stub])))
 
 ;; Build a Glaze project into a distributable.
 ;;
@@ -134,7 +133,9 @@
     ;; consume; the documented flow is a bare executable, which distribute
     ;; wraps into dist/<name>.app itself.
     (append (list "exe")
-            (if (eq? os 'windows) (list "--gui") '())
+            (if (eq? os 'windows)
+                (list "--gui")
+                '())
             (if (and (eq? os 'windows) embed-dlls?)
                 (list "--embed-dlls")
                 '())
@@ -157,9 +158,9 @@
   ;; raco exe emits a read-only launcher; `raco distribute` needs to rewrite
   ;; the copy it makes (Mach-O/ELF segment patching) and fails with EACCES
   ;; on some Racket versions otherwise.
-  (file-or-directory-permissions
-   out-exe-path
-   (bitwise-ior (file-or-directory-permissions out-exe-path 'bits) user-write-bit))
+  (file-or-directory-permissions out-exe-path
+                                 (bitwise-ior (file-or-directory-permissions out-exe-path 'bits)
+                                              user-write-bit))
 
   ;; Distribute. On Windows --embed-dlls already yields a near-standalone exe,
   ;; but we still run distribute to collect any remaining runtime files and to
@@ -198,10 +199,7 @@
   ;; (shipping an unsigned "signed" dist is worse than a failed build);
   ;; a missing TOOL degrades with a warning, matching the installer steps.
   (when sign
-    (sign-dist os out-dir-path app-name
-               sign entitlements
-               (not no-hardened-runtime?)
-               timestamp-url))
+    (sign-dist os out-dir-path app-name sign entitlements (not no-hardened-runtime?) timestamp-url))
 
   ;; Optional installer step. Each platform helper probes for the required
   ;; external tooling and warns (without failing the build) when it's absent;
@@ -405,7 +403,9 @@ NSI
         (and (parameterize ([current-directory parent])
                (run (find-executable-path "zip" #f) "-r" (path->string archive-path) base))
              archive-path)]
-       [else (displayln "[glaze] No zip tool found; skipping archive." (current-error-port)) #f])]
+       [else
+        (displayln "[glaze] No zip tool found; skipping archive." (current-error-port))
+        #f])]
     ;; .tar.gz via tar -czf.
     [(and (equal? fmt "tar.gz") (find-executable-path "tar" #f))
      (and (run (find-executable-path "tar" #f)
@@ -462,8 +462,12 @@ NSI
    ";; embeds the full dependency closure and runs top-level code once; the\n"
    ";; main submodule itself is only instantiated for the program's top module,\n"
    ";; which is this wrapper — so run it explicitly here.\n"
-   "(when (module-declared? '(submod \"" entry-filename "\" main) #t)\n"
-   "  (dynamic-require '(submod \"" entry-filename "\" main) 0))\n"))
+   "(when (module-declared? '(submod \""
+   entry-filename
+   "\" main) #t)\n"
+   "  (dynamic-require '(submod \""
+   entry-filename
+   "\" main) 0))\n"))
 
 ;; Assemble a canonical macOS .app bundle from whatever `raco distribute`
 ;; produced. Current versions lay out <dist>/bin/<name> + <dist>/lib/; older
@@ -486,8 +490,7 @@ NSI
   (rename-file-or-directory exe-src (build-path macos-dir app-name))
   (file-or-directory-permissions
    (build-path macos-dir app-name)
-   (bitwise-ior (file-or-directory-permissions (build-path macos-dir app-name) 'bits)
-                user-write-bit))
+   (bitwise-ior (file-or-directory-permissions (build-path macos-dir app-name) 'bits) user-write-bit))
   (when (directory-exists? dist-lib)
     (rename-file-or-directory dist-lib (build-path contents "lib")))
   (delete-directory/files dist-bin)
@@ -516,20 +519,23 @@ NSI
 </dict>
 </plist>
 PLIST
-          app-name app-name app-name app-name version version
+          app-name
+          app-name
+          app-name
+          app-name
+          version
+          version
           (if (null? url-schemes)
               ""
-              (string-append
-               "\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n"
-               "      <key>CFBundleURLName</key><string>io.glaze."
-               app-name
-               "</string>\n"
-               "      <key>CFBundleURLSchemes</key>\n      <array>\n"
-               (string-join
-                (for/list ([sc (in-list url-schemes)])
-                  (format "        <string>~a</string>\n" sc))
-                "")
-               "      </array>\n    </dict>\n  </array>"))))
+              (string-append "\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n"
+                             "      <key>CFBundleURLName</key><string>io.glaze."
+                             app-name
+                             "</string>\n"
+                             "      <key>CFBundleURLSchemes</key>\n      <array>\n"
+                             (string-join (for/list ([sc (in-list url-schemes)])
+                                            (format "        <string>~a</string>\n" sc))
+                                          "")
+                             "      </array>\n    </dict>\n  </array>"))))
 ;; Copy the project's public/ into the distribution next to the executable.
 ;; On macOS, assets live in <app>.app/Contents/Resources/public; elsewhere in
 ;; <dist>/public. The generated entry sets current-directory to the exe's dir
@@ -632,19 +638,18 @@ PLIST
   ;; IS no Team ID, so the runtime option would make the app refuse its own
   ;; framework. Hardened runtime only matters for notarization, which needs
   ;; a real identity anyway; skip it for ad-hoc.
-  (define hardened?
-    (and hardened-runtime? (not (equal? identity "-"))))
+  (define hardened? (and hardened-runtime? (not (equal? identity "-"))))
   ;; codesign rewrites the main executable — make sure it is writable.
-  (define main-exe
-    (build-path bundle "Contents" "MacOS"
-                (path->string (file-name-from-path bundle))))
+  (define main-exe (build-path bundle "Contents" "MacOS" (path->string (file-name-from-path bundle))))
   (when (file-exists? main-exe)
-    (file-or-directory-permissions
-     main-exe
-     (bitwise-ior (file-or-directory-permissions main-exe 'bits) user-write-bit)))
+    (file-or-directory-permissions main-exe
+                                   (bitwise-ior (file-or-directory-permissions main-exe 'bits)
+                                                user-write-bit)))
   (define common-args
     (append (list "--force" "--sign" identity)
-            (if hardened? (list "--options" "runtime") '())))
+            (if hardened?
+                (list "--options" "runtime")
+                '())))
   ;; 1. nested libraries: frameworks ship as versioned dylibs that codesign
   ;;    may not recognize as bundles, so sign each file; non-code files
   ;;    fail harmlessly and are skipped.
@@ -652,8 +657,7 @@ PLIST
   (when (directory-exists? lib-dir)
     (for ([p (in-directory lib-dir)]
           #:when (file-exists? p))
-      (apply system*/exit-code codesign
-             (append common-args (list (path->string p))))))
+      (apply system*/exit-code codesign (append common-args (list (path->string p))))))
   ;; 2. the bundle itself: signs the main executable and seals resources.
   (define args
     (append common-args
@@ -663,8 +667,7 @@ PLIST
             (list (path->string bundle))))
   (unless (zero? (apply system*/exit-code codesign args))
     (error 'build-app "codesign failed for ~a (identity ~a)" bundle identity))
-  (unless (zero? (system*/exit-code codesign "--verify" "--strict"
-                                    (path->string bundle)))
+  (unless (zero? (system*/exit-code codesign "--verify" "--strict" (path->string bundle)))
     (error 'build-app "codesign verify failed for ~a" bundle))
   (fprintf (current-error-port) "[glaze] signed: ~a (identity ~a)\n" bundle identity))
 
@@ -687,7 +690,9 @@ PLIST
       (if (regexp-match? #px"^[0-9a-fA-F]{40}$" cert-spec) "/sha1" "/n"))
     (define args
       (append (list "sign" "/fd" "SHA256" cert-flag cert-spec)
-              (if timestamp-url (list "/tr" timestamp-url "/td" "SHA256") '())
+              (if timestamp-url
+                  (list "/tr" timestamp-url "/td" "SHA256")
+                  '())
               (list (path->string (path->complete-path file)))))
     (unless (zero? (apply system*/exit-code (find-executable-path signtool #f) args))
       (error 'build-app "signtool failed for ~a" file))
@@ -699,8 +704,7 @@ PLIST
 ;; Raises on failure — a failed notarization must not ship silently.
 (define (notarize-macos os out-dir app-name keychain-profile)
   (unless (eq? os 'macosx)
-    (displayln "[glaze] notarization only applies to macOS builds; ignoring."
-               (current-error-port))
+    (displayln "[glaze] notarization only applies to macOS builds; ignoring." (current-error-port))
     #f)
   (when (eq? os 'macosx)
     (define dist (path->complete-path out-dir))
@@ -717,17 +721,20 @@ PLIST
             (define zip (make-temporary-file "glaze-notarize-~a.zip"))
             (parameterize ([current-directory dist])
               (unless (zero? (system*/exit-code (find-executable-path "zip" #f)
-                                                "-qr" (path->string zip)
+                                                "-qr"
+                                                (path->string zip)
                                                 (string-append app-name ".app")))
                 (error 'build-app "could not zip the .app for notarization")))
             zip)))
-    (unless (zero? (system*/exit-code xcrun "notarytool" "submit"
-                                        (path->string artifact)
-                                        "--keychain-profile" keychain-profile
-                                        "--wait"))
+    (unless (zero? (system*/exit-code xcrun
+                                      "notarytool"
+                                      "submit"
+                                      (path->string artifact)
+                                      "--keychain-profile"
+                                      keychain-profile
+                                      "--wait"))
       (error 'build-app "notarization failed for ~a (profile ~a)" artifact keychain-profile))
-    (define staple-target
-      (if (file-exists? dmg) dmg bundle))
+    (define staple-target (if (file-exists? dmg) dmg bundle))
     (system*/exit-code xcrun "stapler" "staple" (path->string staple-target))
     (fprintf (current-error-port) "[glaze] notarized: ~a\n" staple-target)
     #t))

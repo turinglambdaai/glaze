@@ -73,15 +73,13 @@ VERIFY
   (printf "Creating Glaze project: ~a\n" name)
   (make-directory* name)
   (make-directory* (build-path name "public"))
-  (write-file
-   (build-path name "main.rkt")
-   (string-append
-    "#lang racket/base\n\n"
-    "(require racket/runtime-path\n"
-    "         glaze)\n\n"
-    "(define-runtime-path public \"public\")\n\n"
-    "(run-app #:public-dir public\n"
-    (format "         #:title ~s)\n" name)))
+  (write-file (build-path name "main.rkt")
+              (string-append "#lang racket/base\n\n"
+                             "(require racket/runtime-path\n"
+                             "         glaze)\n\n"
+                             "(define-runtime-path public \"public\")\n\n"
+                             "(run-app #:public-dir public\n"
+                             (format "         #:title ~s)\n" name)))
   (write-file
    (build-path name "public" "index.html")
    #"<!DOCTYPE html>
@@ -112,8 +110,7 @@ VERIFY
 ")
   (write-file (build-path name "AGENTS.md") agent-instructions)
   (write-file (build-path name "verify.rkt") verification-template)
-  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n\nOr use:\n  cd ~a\n  raco glaze dev\n"
-          name name))
+  (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n\nOr use:\n  cd ~a\n  raco glaze dev\n" name name))
 
 ;; `dev` runs the project's real entry point, so routes/events/window options
 ;; in main.rkt are preserved. Glaze development follows the same native GUI
@@ -121,7 +118,8 @@ VERIFY
 (define (dev-app)
   (define entry (build-path (current-directory) "main.rkt"))
   (unless (file-exists? entry)
-    (error 'dev "main.rkt not found in ~a; run this command from a Glaze project"
+    (error 'dev
+           "main.rkt not found in ~a; run this command from a Glaze project"
            (path->string (current-directory))))
   (define racket-exe (find-executable-path "racket" #f))
   (unless racket-exe
@@ -164,56 +162,245 @@ VERIFY
              [schemes '()])
     (cond
       [(null? args)
-       (values name version icon entry out embed installer
-               sign entitlements no-hardened ts-url notarize (reverse schemes))]
+       (values name
+               version
+               icon
+               entry
+               out
+               embed
+               installer
+               sign
+               entitlements
+               no-hardened
+               ts-url
+               notarize
+               (reverse schemes))]
       [(and (equal? (car args) "--name") (pair? (cdr args)))
-       (loop (cddr args) (cadr args) version icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize schemes)]
+       (loop (cddr args)
+             (cadr args)
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(and (equal? (car args) "--version") (pair? (cdr args)))
-       (loop (cddr args) name (cadr args) icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize schemes)]
+       (loop (cddr args)
+             name
+             (cadr args)
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(and (equal? (car args) "--icon") (pair? (cdr args)))
-       (loop (cddr args) name version (cadr args) entry out embed installer
-             sign entitlements no-hardened ts-url notarize schemes)]
+       (loop (cddr args)
+             name
+             version
+             (cadr args)
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(and (equal? (car args) "--entry") (pair? (cdr args)))
-       (loop (cddr args) name version icon (cadr args) out embed installer
-             sign entitlements no-hardened ts-url notarize schemes)]
+       (loop (cddr args)
+             name
+             version
+             icon
+             (cadr args)
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(and (equal? (car args) "--out") (pair? (cdr args)))
-       (loop (cddr args) name version icon entry (cadr args) embed installer
-             sign entitlements no-hardened ts-url notarize schemes)]
+       (loop (cddr args)
+             name
+             version
+             icon
+             entry
+             (cadr args)
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(equal? (car args) "--embed-dlls")
-       (loop (cdr args) name version icon entry out #t installer
-             sign entitlements no-hardened ts-url notarize schemes)]
+       (loop (cdr args)
+             name
+             version
+             icon
+             entry
+             out
+             #t
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(equal? (car args) "--installer")
-       (loop (cdr args) name version icon entry out embed #t
-             sign entitlements no-hardened ts-url notarize schemes)]
+       (loop (cdr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             #t
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(and (equal? (car args) "--sign") (pair? (cdr args)))
-       (loop (cddr args) name version icon entry out embed installer
-             (cadr args) entitlements no-hardened ts-url notarize schemes)]
+       (loop (cddr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             (cadr args)
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(and (equal? (car args) "--entitlements") (pair? (cdr args)))
-       (loop (cddr args) name version icon entry out embed installer
-             sign (cadr args) no-hardened ts-url notarize schemes)]
+       (loop (cddr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             (cadr args)
+             no-hardened
+             ts-url
+             notarize
+             schemes)]
       [(equal? (car args) "--no-hardened-runtime")
-       (loop (cdr args) name version icon entry out embed installer
-             sign entitlements #t ts-url notarize schemes)]
+       (loop (cdr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             #t
+             ts-url
+             notarize
+             schemes)]
       [(and (equal? (car args) "--timestamp-url") (pair? (cdr args)))
-       (loop (cddr args) name version icon entry out embed installer
-             sign entitlements no-hardened (cadr args) notarize schemes)]
+       (loop (cddr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             (cadr args)
+             notarize
+             schemes)]
       [(and (equal? (car args) "--notarize") (pair? (cdr args)))
-       (loop (cddr args) name version icon entry out embed installer
-             sign entitlements no-hardened ts-url (cadr args) schemes)]
+       (loop (cddr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             (cadr args)
+             schemes)]
       [(and (equal? (car args) "--url-scheme") (pair? (cdr args)))
-       (loop (cddr args) name version icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize
+       (loop (cddr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
              (cons (cadr args) schemes))]
       [else
        (printf "Warning: ignoring unknown build argument: ~a\n" (car args))
-       (loop (cdr args) name version icon entry out embed installer
-             sign entitlements no-hardened ts-url notarize schemes)])))
+       (loop (cdr args)
+             name
+             version
+             icon
+             entry
+             out
+             embed
+             installer
+             sign
+             entitlements
+             no-hardened
+             ts-url
+             notarize
+             schemes)])))
 
 (define (build-command rest)
-  (define-values (name version icon entry out embed installer
-                 sign entitlements no-hardened ts-url notarize schemes)
+  (define-values (name
+                  version
+                  icon
+                  entry
+                  out
+                  embed
+                  installer
+                  sign
+                  entitlements
+                  no-hardened
+                  ts-url
+                  notarize
+                  schemes)
     (parse-build-opts rest))
   (printf "Building Glaze app (entry=~a, name=~a)...\n" entry (or name "<project dir>"))
   (define dist-path
@@ -279,11 +466,11 @@ VERIFY
 ;; ---- keygen: create an RSA keypair for license signing ----
 
 (define (parse-keygen-opts rest)
-  (let loop ([args rest] [out "keys"])
+  (let loop ([args rest]
+             [out "keys"])
     (cond
       [(null? args) out]
-      [(and (equal? (car args) "--out") (pair? (cdr args)))
-       (loop (cddr args) (cadr args))]
+      [(and (equal? (car args) "--out") (pair? (cdr args))) (loop (cddr args) (cadr args))]
       [else (loop (cdr args) out)])))
 
 (define (keygen-command rest)
@@ -295,27 +482,43 @@ VERIFY
   (define priv (build-path out "private.pem"))
   (define pub (build-path out "public.pem"))
   (printf "Generating RSA-2048 keypair in ~a/...\n" out)
-  (unless (zero? (system*/exit-code openssl "genpkey" "-algorithm" "RSA"
-                                     "-pkeyopt" "rsa_keygen_bits:2048"
-                                     "-out" (path->string priv)))
+  (unless (zero? (system*/exit-code openssl
+                                    "genpkey"
+                                    "-algorithm"
+                                    "RSA"
+                                    "-pkeyopt"
+                                    "rsa_keygen_bits:2048"
+                                    "-out"
+                                    (path->string priv)))
     (error 'keygen "openssl genpkey failed"))
-  (unless (zero? (system*/exit-code openssl "pkey" "-in" (path->string priv)
-                                     "-pubout" "-out" (path->string pub)))
+  (unless (zero? (system*/exit-code openssl
+                                    "pkey"
+                                    "-in"
+                                    (path->string priv)
+                                    "-pubout"
+                                    "-out"
+                                    (path->string pub)))
     (error 'keygen "openssl pkey -pubout failed"))
-  (printf "Done.\n  private: ~a  (keep secret — signs licenses)\n  public:  ~a  (ship with the app — verifies licenses)\n"
-          priv pub))
+  (printf
+   "Done.\n  private: ~a  (keep secret — signs licenses)\n  public:  ~a  (ship with the app — verifies licenses)\n"
+   priv
+   pub))
 
 ;; ---- license: sign / verify license files ----
 
 (define (parse-license-opts rest)
   (let loop ([args rest]
              [sub #f]
-             [key #f] [pub #f] [product #f] [subject #f]
-             [expiry #f] [machine #f] [out "app.license"]
+             [key #f]
+             [pub #f]
+             [product #f]
+             [subject #f]
+             [expiry #f]
+             [machine #f]
+             [out "app.license"]
              [positional '()])
     (cond
-      [(null? args)
-       (values sub key pub product subject expiry machine out (reverse positional))]
+      [(null? args) (values sub key pub product subject expiry machine out (reverse positional))]
       [(and (not sub) (member (car args) '("sign" "verify")))
        (loop (cdr args) (car args) key pub product subject expiry machine out positional)]
       [(and (equal? (car args) "--key") (pair? (cdr args)))
@@ -335,7 +538,15 @@ VERIFY
       [(and (equal? (car args) "--out") (pair? (cdr args)))
        (loop (cddr args) sub key pub product subject expiry machine (cadr args) positional)]
       [else
-       (loop (cdr args) sub key pub product subject expiry machine out
+       (loop (cdr args)
+             sub
+             key
+             pub
+             product
+             subject
+             expiry
+             machine
+             out
              (cons (car args) positional))])))
 
 (define (license-command rest)
@@ -344,7 +555,9 @@ VERIFY
   (case sub
     [("sign")
      (unless (and key product subject)
-       (error 'license "usage: raco glaze license sign --key <private.pem> --product <name> --subject <who> [--expiry YYYY-MM-DD] [--machine-id] --out <file>"))
+       (error
+        'license
+        "usage: raco glaze license sign --key <private.pem> --product <name> --subject <who> [--expiry YYYY-MM-DD] [--machine-id] --out <file>"))
      ;; --machine-id accepts the raw OS machine identifier or the (machine-id)
      ;; digest; validate-license compares against the digest, so a raw value
      ;; must be normalized here or the license could never verify on the
@@ -363,7 +576,8 @@ VERIFY
      (printf "License written: ~a\n" out)]
     [("verify")
      (unless (and pub product (pair? positional))
-       (error 'license "usage: raco glaze license verify --pub <public.pem> --product <name> <file.license>"))
+       (error 'license
+              "usage: raco glaze license verify --pub <public.pem> --product <name> <file.license>"))
      (define r (validate-license (last positional) #:public-key pub #:product product))
      (if (hash-ref r 'valid)
          (begin
@@ -372,7 +586,8 @@ VERIFY
                    (or (hash-ref r 'expiry) "(no expiry)")
                    (or (hash-ref r 'machine-id) "(not machine-bound)")))
          (printf "INVALID (reason: ~a)\n" (hash-ref r 'reason)))
-     (unless (hash-ref r 'valid) (exit 1))]
+     (unless (hash-ref r 'valid)
+       (exit 1))]
     [else
      (displayln "usage: raco glaze license sign|verify [options]")
      (displayln "  sign:   --key <private.pem> --product <name> --subject <who>")
@@ -387,76 +602,86 @@ VERIFY
   (cadr args))
 
 (define (updater-sign-command rest)
-  (let loop ([args rest] [artifact #f] [key #f] [password #f] [out #f])
+  (let loop ([args rest]
+             [artifact #f]
+             [key #f]
+             [password #f]
+             [out #f])
     (cond
       [(null? args)
        (unless (and artifact key out)
-         (error 'update-sign "usage: raco glaze update-sign --artifact <file> --key <private.pem> --out <signature.txt> [--password <pw>]"))
-       (define sig (sign-file artifact
-                              #:private-key key
-                              #:password password))
-       (with-output-to-file out
-         (lambda () (displayln sig))
-         #:exists 'replace)
+         (error
+          'update-sign
+          "usage: raco glaze update-sign --artifact <file> --key <private.pem> --out <signature.txt> [--password <pw>]"))
+       (define sig (sign-file artifact #:private-key key #:password password))
+       (with-output-to-file out (lambda () (displayln sig)) #:exists 'replace)
        (printf "signed ~a -> ~a\n" artifact out)]
       [(equal? (car args) "--artifact")
-       (loop (cddr args)
-             (require-option-value 'update-sign "--artifact" args)
-             key password out)]
+       (loop (cddr args) (require-option-value 'update-sign "--artifact" args) key password out)]
       [(equal? (car args) "--key")
-       (loop (cddr args) artifact
-             (require-option-value 'update-sign "--key" args)
-             password out)]
+       (loop (cddr args) artifact (require-option-value 'update-sign "--key" args) password out)]
       [(equal? (car args) "--password")
-       (loop (cddr args) artifact key
-             (require-option-value 'update-sign "--password" args)
-             out)]
+       (loop (cddr args) artifact key (require-option-value 'update-sign "--password" args) out)]
       [(equal? (car args) "--out")
-       (loop (cddr args) artifact key password
-             (require-option-value 'update-sign "--out" args))]
-      [artifact
-       (error 'update-sign "unexpected argument: ~a" (car args))]
+       (loop (cddr args) artifact key password (require-option-value 'update-sign "--out" args))]
+      [artifact (error 'update-sign "unexpected argument: ~a" (car args))]
       [else (loop (cdr args) (car args) key password out)])))
 
 (define (updater-verify-command rest)
-  (let loop ([args rest] [artifact #f] [pub #f] [signature #f] [sha256 #f])
+  (let loop ([args rest]
+             [artifact #f]
+             [pub #f]
+             [signature #f]
+             [sha256 #f])
     (cond
       [(null? args)
        (unless (and artifact pub signature)
-         (error 'update-verify "usage: raco glaze update-verify --artifact <file> --pub <public.pem> --signature <signature.txt|base64> [--sha256 <hex>]"))
+         (error
+          'update-verify
+          "usage: raco glaze update-verify --artifact <file> --pub <public.pem> --signature <signature.txt|base64> [--sha256 <hex>]"))
        (define sig-text
          (if (file-exists? signature)
              (string-trim (file->string signature))
              signature))
        (printf "Verifying ~a...\n" artifact)
-       (if (verify-signature artifact
-                             #:public-key pub
-                             #:signature sig-text
-                             #:expected-sha256 sha256)
-           (begin (printf "VALID\n")
-                  (exit 0))
-           (begin (printf "INVALID\n") (exit 1)))]
+       (if (verify-signature artifact #:public-key pub #:signature sig-text #:expected-sha256 sha256)
+           (begin
+             (printf "VALID\n")
+             (exit 0))
+           (begin
+             (printf "INVALID\n")
+             (exit 1)))]
       [(equal? (car args) "--artifact")
        (loop (cddr args)
              (require-option-value 'update-verify "--artifact" args)
-             pub signature sha256)]
+             pub
+             signature
+             sha256)]
       [(equal? (car args) "--pub")
-       (loop (cddr args) artifact
+       (loop (cddr args)
+             artifact
              (require-option-value 'update-verify "--pub" args)
-             signature sha256)]
+             signature
+             sha256)]
       [(equal? (car args) "--signature")
-       (loop (cddr args) artifact pub
+       (loop (cddr args)
+             artifact
+             pub
              (require-option-value 'update-verify "--signature" args)
              sha256)]
       [(equal? (car args) "--sha256")
-       (loop (cddr args) artifact pub signature
+       (loop (cddr args)
+             artifact
+             pub
+             signature
              (require-option-value 'update-verify "--sha256" args))]
-      [artifact
-       (error 'update-verify "unexpected argument: ~a" (car args))]
+      [artifact (error 'update-verify "unexpected argument: ~a" (car args))]
       [else (loop (cdr args) (car args) pub signature sha256)])))
 
 (define (updater-keygen-command rest)
-  (let loop ([args rest] [out "updater-keys"] [password #f])
+  (let loop ([args rest]
+             [out "updater-keys"]
+             [password #f])
     (cond
       [(null? args)
        (make-directory* out)
@@ -464,18 +689,16 @@ VERIFY
          (signing-keygen #:private-key (build-path out "private.pem")
                          #:public-key (build-path out "public.pem")
                          #:password password))
-       (printf "Updater Ed25519 keypair written:\n  private: ~a  (keep secret — signs update artifacts)\n  public:  ~a  (pin inside the app — verifies update artifacts)\n"
-               priv pub)
+       (printf
+        "Updater Ed25519 keypair written:\n  private: ~a  (keep secret — signs update artifacts)\n  public:  ~a  (pin inside the app — verifies update artifacts)\n"
+        priv
+        pub)
        (printf "public key fingerprint: ~a\n" (public-key-fingerprint pub))]
       [(equal? (car args) "--out")
-       (loop (cddr args)
-             (require-option-value 'updater-keygen "--out" args)
-             password)]
+       (loop (cddr args) (require-option-value 'updater-keygen "--out" args) password)]
       [(equal? (car args) "--password")
-       (loop (cddr args) out
-             (require-option-value 'updater-keygen "--password" args))]
-      [else
-       (error 'updater-keygen "unexpected argument: ~a" (car args))])))
+       (loop (cddr args) out (require-option-value 'updater-keygen "--password" args))]
+      [else (error 'updater-keygen "unexpected argument: ~a" (car args))])))
 
 ;; Dispatch CLI commands
 (define args (vector->list (current-command-line-arguments)))
@@ -494,9 +717,10 @@ VERIFY
      ["verify"
       (define verifier (build-path (current-directory) "verify.rkt"))
       (unless (file-exists? verifier)
-        (error 'verify "verify.rkt not found; add a native UI acceptance script or rerun `raco glaze init`"))
-      (define racket-exe (or (find-executable-path "racket" #f)
-                             (error 'verify "racket executable not found on PATH")))
+        (error 'verify
+               "verify.rkt not found; add a native UI acceptance script or rerun `raco glaze init`"))
+      (define racket-exe
+        (or (find-executable-path "racket" #f) (error 'verify "racket executable not found on PATH")))
       (exit (system*/exit-code racket-exe (path->string verifier)))]
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]

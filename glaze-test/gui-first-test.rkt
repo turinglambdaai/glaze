@@ -36,8 +36,7 @@
   [(unix)
    (check-true (string-contains? guidance "WebKitGTK"))
    (check-true (string-contains? guidance "apt install"))]
-  [(macosx)
-   (check-true (string-contains? guidance "WKWebView"))]
+  [(macosx) (check-true (string-contains? guidance "WKWebView"))]
   [else (void)])
 
 (define diagnostic (webview-diagnostic "test backend failure"))

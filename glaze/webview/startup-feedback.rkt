@@ -22,11 +22,9 @@
 
 (define (string->utf16-pointer s)
   (define cv (bytes-open-converter "UTF-8" "UTF-16LE"))
-  (define-values (out consumed status)
-    (bytes-convert cv (string->bytes/utf-8 s)))
+  (define-values (out consumed status) (bytes-convert cv (string->bytes/utf-8 s)))
   (bytes-close-converter cv)
-  (unless (and (eq? status 'complete)
-               (= consumed (bytes-length (string->bytes/utf-8 s))))
+  (unless (and (eq? status 'complete) (= consumed (bytes-length (string->bytes/utf-8 s))))
     (error 'startup-feedback "UTF-16 conversion failed"))
   (define p (malloc (+ (bytes-length out) 2) 'raw))
   (memcpy p out (bytes-length out))
@@ -36,48 +34,48 @@
 (define (windows-dialog title message)
   (define user32 (ffi-lib "user32"))
   (define MessageBoxW
-    (get-ffi-obj "MessageBoxW"
-                 user32
-                 (_fun _pointer _pointer _pointer _uint -> _int)))
+    (get-ffi-obj "MessageBoxW" user32 (_fun _pointer _pointer _pointer _uint -> _int)))
   (define title-p (string->utf16-pointer title))
   (define message-p (string->utf16-pointer message))
-  (dynamic-wind
-    void
-    (lambda ()
-      ;; MB_OK | MB_ICONERROR | MB_SETFOREGROUND
-      (MessageBoxW #f message-p title-p (bitwise-ior #x00000000 #x00000010 #x00010000)))
-    (lambda ()
-      (free title-p)
-      (free message-p))))
+  (dynamic-wind void
+                (lambda ()
+                  ;; MB_OK | MB_ICONERROR | MB_SETFOREGROUND
+                  (MessageBoxW #f message-p title-p (bitwise-ior #x00000000 #x00000010 #x00010000)))
+                (lambda ()
+                  (free title-p)
+                  (free message-p))))
 
 ;; ---- macOS: osascript uses the system dialog service -------------------
 
 (define (applescript-escape s)
-  (string-replace (string-replace (string-replace s "\\" "\\\\") "\"" "\\\"")
-                  "\n" "\\n"))
+  (string-replace (string-replace (string-replace s "\\" "\\\\") "\"" "\\\"") "\n" "\\n"))
 
 (define (macos-dialog title message)
   (define osa (find-executable-path "osascript" #f))
   (and osa
-       (system* osa
-                "-e"
-                (format "display alert \"~a\" message \"~a\" as critical buttons {\"OK\"} default button \"OK\""
-                        (applescript-escape title)
-                        (applescript-escape message)))))
+       (system*
+        osa
+        "-e"
+        (format
+         "display alert \"~a\" message \"~a\" as critical buttons {\"OK\"} default button \"OK\""
+         (applescript-escape title)
+         (applescript-escape message)))))
 
 ;; ---- Linux: use the desktop's ordinary dialog helper when available ----
 
 (define (linux-dialog title message)
   (cond
     [(find-executable-path "zenity" #f)
-     => (lambda (zenity)
-          (system* zenity "--error"
-                   (string-append "--title=" title)
-                   "--width=640"
-                   (string-append "--text=" message)))]
+     =>
+     (lambda (zenity)
+       (system* zenity
+                "--error"
+                (string-append "--title=" title)
+                "--width=640"
+                (string-append "--text=" message)))]
     [(find-executable-path "kdialog" #f)
-     => (lambda (kdialog)
-          (system* kdialog "--error" message "--title" title))]
+     =>
+     (lambda (kdialog) (system* kdialog "--error" message "--title" title))]
     [else #f]))
 
 (define (show-webview-startup-error! message)

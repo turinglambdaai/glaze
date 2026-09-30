@@ -30,9 +30,7 @@
                 #:api-token token))
 
 (define (call path #:headers [headers '()] #:port [p 18995])
-  (define-values (st h in)
-    (http-sendrecv "127.0.0.1" path #:port p #:ssl? #f
-                   #:headers headers))
+  (define-values (st h in) (http-sendrecv "127.0.0.1" path #:port p #:ssl? #f #:headers headers))
   (define b (port->bytes in))
   (close-input-port in)
   (values (bytes->string/utf-8 st) h b))
@@ -44,16 +42,14 @@
 (let*-values ([(_s2 _h2 _b2) (call "/api/ping" #:headers (list "X-Glaze-Token: wrong"))])
   (check-true (string-contains? _s2 "401") "wrong token -> 401"))
 ;; header channel
-(let*-values ([(_s3 _h3 _b3)
-               (call "/api/ping" #:headers (list (format "X-Glaze-Token: ~a" token)))])
+(let*-values ([(_s3 _h3 _b3) (call "/api/ping" #:headers (list (format "X-Glaze-Token: ~a" token)))])
   (check-true (string-contains? _s3 "200") "header token -> 200"))
 ;; api.js is openly readable, so it must not mint credentials — no cookie,
 ;; no token anywhere in it
 (let*-values ([(_s4 h4 b4) (call "/glaze/api.js")])
-  (check-false
-   (for/or ([hh (in-list h4)])
-     (string-prefix? (string-downcase (bytes->string/latin-1 hh)) "set-cookie:"))
-   "api.js sets no cookie")
+  (check-false (for/or ([hh (in-list h4)])
+                 (string-prefix? (string-downcase (bytes->string/latin-1 hh)) "set-cookie:"))
+               "api.js sets no cookie")
   (check-false (string-contains? (bytes->string/utf-8 b4) token)
                "api.js body does not contain the token"))
 
@@ -61,28 +57,24 @@
 ;; cookie and redirects to the clean path
 (let*-values ([(_s5 h5 _b5) (call (format "/?glaze-token=~a" token))])
   (check-true (string-contains? _s5 "302") "bootstrap redirects")
-  (check-true
-   (for/or ([hh (in-list h5)])
-     (string-contains? (string-downcase (bytes->string/latin-1 hh))
-                       (format "glaze_token=~a" token)))
-   "bootstrap sets glaze_token cookie")
-  (check-true
-   (for/or ([hh (in-list h5)])
-     (define s (string-downcase (bytes->string/latin-1 hh)))
-     (and (string-prefix? s "set-cookie:")
-          (string-contains? s "httponly")))
-   "bootstrap cookie is HttpOnly")
+  (check-true (for/or ([hh (in-list h5)])
+                (string-contains? (string-downcase (bytes->string/latin-1 hh))
+                                  (format "glaze_token=~a" token)))
+              "bootstrap sets glaze_token cookie")
+  (check-true (for/or ([hh (in-list h5)])
+                (define s (string-downcase (bytes->string/latin-1 hh)))
+                (and (string-prefix? s "set-cookie:") (string-contains? s "httponly")))
+              "bootstrap cookie is HttpOnly")
   ;; cookie channel: replay the minted cookie as a Cookie header
   (let*-values ([(_s6 _h6 _b6) (call "/api/ping"
-                         #:headers (list (format "Cookie: glaze_token=~a" token)))])
+                                     #:headers (list (format "Cookie: glaze_token=~a" token)))])
     (check-true (string-contains? _s6 "200") "cookie token -> 200")))
 
 ;; wrong token in the query never mints anything
 (let*-values ([(_s7 h7 _b7) (call "/?glaze-token=wrong")])
-  (check-false
-   (for/or ([hh (in-list h7)])
-     (string-prefix? (string-downcase (bytes->string/latin-1 hh)) "set-cookie:"))
-   "wrong bootstrap token mints nothing"))
+  (check-false (for/or ([hh (in-list h7)])
+                 (string-prefix? (string-downcase (bytes->string/latin-1 hh)) "set-cookie:"))
+               "wrong bootstrap token mints nothing"))
 
 ;; ---- on-error reporting through the 500 path ----
 (define reported '())
@@ -90,11 +82,11 @@
   ;; The reporter must be installed BEFORE start-server: connection threads
   ;; inherit the parameterization of the server's accept loop.
   (define-values (p2 stop2)
-    (parameterize ([current-glaze-error-reporter
-                    (lambda (exn uri) (set! reported (list (exn-message exn) uri)))])
-      (start-server #:port 18996 #:public-dir "/tmp"
-                    #:api (list (GET "api/boom"
-                                     (lambda (req) (raise-user-error 'kaboom "x")))))))
+    (parameterize ([current-glaze-error-reporter (lambda (exn uri)
+                                                   (set! reported (list (exn-message exn) uri)))])
+      (start-server #:port 18996
+                    #:public-dir "/tmp"
+                    #:api (list (GET "api/boom" (lambda (req) (raise-user-error 'kaboom "x")))))))
   (let*-values ([(_s6 _h6 _b6) (call "/api/boom" #:port 18996)])
     (check-true (string-contains? _s6 "500") "boom still answers 500"))
   (check-equal? (second reported) "api/boom" "reporter sees the URI")
@@ -110,20 +102,17 @@
 (check-false (newer-version? "1.2" "1.2.1") "older is not newer")
 
 (define dir (make-temporary-file "upd-~a" 'directory))
-(call-with-output-file (build-path dir "manifest.json")
-  (lambda (o)
-    (write-bytes #"{\"version\":\"9.9.9\",\"url\":\"https://x/9.9.9\",\"notes\":\"big\"}" o))
-  #:exists 'replace)
+(call-with-output-file
+ (build-path dir "manifest.json")
+ (lambda (o) (write-bytes #"{\"version\":\"9.9.9\",\"url\":\"https://x/9.9.9\",\"notes\":\"big\"}" o))
+ #:exists 'replace)
 (define-values (p3 stop3) (start-server #:port 18997 #:public-dir dir))
-(define info (check-update "http://127.0.0.1:18997/manifest.json"
-                           #:current-version "1.0.0"))
+(define info (check-update "http://127.0.0.1:18997/manifest.json" #:current-version "1.0.0"))
 (check-equal? (hash-ref info 'version) "9.9.9" "manifest parsed")
 (check-equal? (hash-ref info 'url) "https://x/9.9.9")
-(check-false (check-update "http://127.0.0.1:18997/manifest.json"
-                           #:current-version "9.9.9")
+(check-false (check-update "http://127.0.0.1:18997/manifest.json" #:current-version "9.9.9")
              "same version -> #f")
-(check-false (check-update "http://127.0.0.1:18997/none.json")
-             "missing manifest -> #f")
+(check-false (check-update "http://127.0.0.1:18997/none.json") "missing manifest -> #f")
 (stop3)
 (delete-directory/files dir)
 

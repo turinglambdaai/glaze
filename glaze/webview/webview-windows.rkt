@@ -101,7 +101,8 @@
 ;; Walk the UTF-16 units directly instead.
 (define (wstr->string p)
   (and p
-       (let loop ([i 0] [chars '()])
+       (let loop ([i 0]
+                  [chars '()])
          (define u (ptr-ref p _uint16 i))
          (if (zero? u)
              (list->string (reverse chars))
@@ -202,8 +203,7 @@
 (define GetClientRect
   (get-ffi-obj "GetClientRect" user32 (_fun _pointer _pointer -> _bool) (lambda () #f)))
 (define GetDC (get-ffi-obj "GetDC" user32 (_fun _pointer -> _pointer) (lambda () #f)))
-(define ReleaseDC
-  (get-ffi-obj "ReleaseDC" user32 (_fun _pointer _pointer -> _int) (lambda () #f)))
+(define ReleaseDC (get-ffi-obj "ReleaseDC" user32 (_fun _pointer _pointer -> _int) (lambda () #f)))
 (define CreateCompatibleDC
   (get-ffi-obj "CreateCompatibleDC" gdi32 (_fun _pointer -> _pointer) (lambda () #f)))
 (define DeleteDC (get-ffi-obj "DeleteDC" gdi32 (_fun _pointer -> _bool) (lambda () #f)))
@@ -242,17 +242,16 @@
 (define-cstruct _RECT ([left _long] [top _long] [right _long] [bottom _long]))
 ;; BITMAPINFOHEADER + BITMAPINFO for GetDIBits.
 (define-cstruct _BMIH
-                ([biSize _uint]
-                 [biWidth _long]
-                 [biHeight _long]
-                 [biPlanes _ushort]
-                 [biBitCount _ushort]
-                 [biCompression _uint]
-                 [biSizeImage _uint]
-                 [biXPelsPerMeter _long]
-                 [biYPelsPerMeter _long]
-                 [biClrUsed _uint]
-                 [biClrImportant _uint]))
+                ([biSize _uint] [biWidth _long]
+                                [biHeight _long]
+                                [biPlanes _ushort]
+                                [biBitCount _ushort]
+                                [biCompression _uint]
+                                [biSizeImage _uint]
+                                [biXPelsPerMeter _long]
+                                [biYPelsPerMeter _long]
+                                [biClrUsed _uint]
+                                [biClrImportant _uint]))
 (define-cstruct _BMI ([bmiHeader _BMIH] [bmiColors _uint32]))
 
 (define WM_DESTROY 2)
@@ -269,15 +268,15 @@
 (define DIB_RGB_COLORS 0)
 (define class-name #"GlazeWebView")
 
-(struct win:webview (hwnd-box
-                     [controller-box #:mutable]
-                     [cwv-box #:mutable]
-                     [url #:mutable]
-                     ready?-box
-                     error-box
-                     closed?-box
-                     [thread #:mutable]
-                     on-close)
+(struct win:webview
+        (hwnd-box [controller-box #:mutable]
+                  [cwv-box #:mutable]
+                  [url #:mutable]
+                  ready?-box
+                  error-box
+                  closed?-box
+                  [thread #:mutable]
+                  on-close)
   #:transparent)
 
 (define (supported?)
@@ -291,57 +290,59 @@
   (when controller
     (define rc (make-RECT 0 0 0 0))
     (GetClientRect hwnd rc)
-    (define put-bounds
-      (cast (vtfn controller 6) _fpointer (_fun _pointer _RECT -> _int32)))
+    (define put-bounds (cast (vtfn controller 6) _fpointer (_fun _pointer _RECT -> _int32)))
     (put-bounds controller (make-RECT 0 0 (RECT-right rc) (RECT-bottom rc)))))
 
 (define wndproc-cptr
-  (function-ptr
-   (lambda (hwnd msg w l)
-     (cond
-       [(= msg WM_SIZE)
-        (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
-        (when wv (resize-controller! wv hwnd))
-        0]
-       [(= msg WM_COMMAND)
-        ;; Menu bar selection: LOWORD(wParam) is the menu id.
-        (define id (bitwise-and w #xFFFF))
-        (define thunk (menu-action-lookup id))
-        (when thunk (thunk))
-        0]
-       [(= msg WM_CLOSE)
-        (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
-        (cond
-          [(and wv (not (unbox (win:webview-closed?-box wv))))
-           (set-box! (win:webview-closed?-box wv) #t)
-           ((win:webview-on-close wv))
-           (DestroyWindow-maybe hwnd)]
-          [else (DefWindowProcW hwnd msg w l)])]
-       [(= msg WM_DESTROY) 0]
-       [else (DefWindowProcW hwnd msg w l)]))
-   (_fun _pointer _uint _uintptr _intptr -> _intptr)))
+  (function-ptr (lambda (hwnd msg w l)
+                  (cond
+                    [(= msg WM_SIZE)
+                     (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
+                     (when wv
+                       (resize-controller! wv hwnd))
+                     0]
+                    [(= msg WM_COMMAND)
+                     ;; Menu bar selection: LOWORD(wParam) is the menu id.
+                     (define id (bitwise-and w #xFFFF))
+                     (define thunk (menu-action-lookup id))
+                     (when thunk
+                       (thunk))
+                     0]
+                    [(= msg WM_CLOSE)
+                     (define wv (hash-ref wndprocs (cast hwnd _pointer _uintptr) #f))
+                     (cond
+                       [(and wv (not (unbox (win:webview-closed?-box wv))))
+                        (set-box! (win:webview-closed?-box wv) #t)
+                        ((win:webview-on-close wv))
+                        (DestroyWindow-maybe hwnd)]
+                       [else (DefWindowProcW hwnd msg w l)])]
+                    [(= msg WM_DESTROY) 0]
+                    [else (DefWindowProcW hwnd msg w l)]))
+                (_fun _pointer _uint _uintptr _intptr -> _intptr)))
 
 ;; WM_CLOSE path needs DestroyWindow.
-(define DestroyWindow
-  (get-ffi-obj "DestroyWindow" user32 (_fun _pointer -> _bool) (lambda () #f)))
+(define DestroyWindow (get-ffi-obj "DestroyWindow" user32 (_fun _pointer -> _bool) (lambda () #f)))
 (define (DestroyWindow-maybe hwnd)
-  (when DestroyWindow (DestroyWindow hwnd))
+  (when DestroyWindow
+    (DestroyWindow hwnd))
   0)
 
 ;; COM out-param call helpers: always surface the HRESULT.
 (define (call-with-out obj idx)
-  (define fn (cast (vtfn obj idx)
-                   _fpointer
-                   (_fun _pointer (p : (_ptr o _pointer)) -> (r : _int32) -> (values r p))))
+  (define fn
+    (cast (vtfn obj idx)
+          _fpointer
+          (_fun _pointer (p : (_ptr o _pointer)) -> (r : _int32) -> (values r p))))
   (fn obj))
 
 (define (cwv-getter idx) ; LPCWSTR-returning getters (get_Source / get_DocumentTitle)
   (lambda (cwv)
     (and cwv
          (let ()
-           (define fn (cast (vtfn cwv idx)
-                            _fpointer
-                            (_fun _pointer (p : (_ptr o _pointer)) -> (r : _int32) -> (values r p))))
+           (define fn
+             (cast (vtfn cwv idx)
+                   _fpointer
+                   (_fun _pointer (p : (_ptr o _pointer)) -> (r : _int32) -> (values r p))))
            (define-values (hr p) (fn cwv))
            (and (= hr S_OK) (wstr->string p))))))
 
@@ -367,10 +368,11 @@
      IID-CtrlHandler
      (lambda (errcode controller)
        (if (not (= errcode 0))
-           (begin (log "controller callback error 0x~x" (bitwise-and errcode #xffffffff))
-                  (set-box! (win:webview-error-box wv)
-                            (error 'open-webview "CreateController failed: 0x~x"
-                                   (bitwise-and errcode #xffffffff))))
+           (begin
+             (log "controller callback error 0x~x" (bitwise-and errcode #xffffffff))
+             (set-box!
+              (win:webview-error-box wv)
+              (error 'open-webview "CreateController failed: 0x~x" (bitwise-and errcode #xffffffff))))
            (let ()
              ;; AddRef keeps them valid beyond the callback (same STA thread).
              (define addref (cast (vtfn controller 1) _fpointer (_fun _pointer -> _uint32)))
@@ -378,10 +380,12 @@
              (set-win:webview-controller-box! wv controller)
              (define-values (hr cwv) (call-with-out controller 25)) ; get_CoreWebView2
              (if (not (= hr S_OK))
-                 (begin (log "get_CoreWebView2 failed 0x~x" (bitwise-and hr #xffffffff))
-                        (set-box! (win:webview-error-box wv)
-                                  (error 'open-webview "get_CoreWebView2 failed: 0x~x"
-                                         (bitwise-and hr #xffffffff))))
+                 (begin
+                   (log "get_CoreWebView2 failed 0x~x" (bitwise-and hr #xffffffff))
+                   (set-box! (win:webview-error-box wv)
+                             (error 'open-webview
+                                    "get_CoreWebView2 failed: 0x~x"
+                                    (bitwise-and hr #xffffffff))))
                  (let ()
                    (addref cwv)
                    (set-win:webview-cwv-box! wv cwv)
@@ -391,8 +395,7 @@
                    (GetClientRect (unbox (win:webview-hwnd-box wv)) rc)
                    (define put-bounds
                      (cast (vtfn controller 6) _fpointer (_fun _pointer _RECT -> _int32)))
-                   (put-bounds controller
-                               (make-RECT 0 0 (RECT-right rc) (RECT-bottom rc)))
+                   (put-bounds controller (make-RECT 0 0 (RECT-right rc) (RECT-bottom rc)))
                    (define nav (cast (vtfn cwv 5) _fpointer (_fun _pointer _pointer -> _int32)))
                    (define nav-hr (nav cwv url-ptr))
                    (log "Navigate hr=0x~x" (bitwise-and nav-hr #xffffffff))
@@ -403,31 +406,27 @@
 
   ;; env handler: immediately CreateController.
   (define env-handler
-    (make-com-handler IID-EnvHandler
-                      (lambda (errcode env)
-                        (if (not (= errcode 0))
-                            (begin (log "environment callback error 0x~x"
-                                        (bitwise-and errcode #xffffffff))
-                                   (set-box! (win:webview-error-box wv)
-                                             (error 'open-webview
-                                                    "CreateEnvironment failed: 0x~x"
-                                                    (bitwise-and errcode #xffffffff))))
-                            (let ()
-                              (define create-ctrl
-                                (cast (vtfn env 3)
-                                      _fpointer
-                                      (_fun _pointer _pointer _pointer -> _int32)))
-                              (create-ctrl env
-                                           (unbox (win:webview-hwnd-box wv))
-                                           ctrl-handler))))))
+    (make-com-handler
+     IID-EnvHandler
+     (lambda (errcode env)
+       (if (not (= errcode 0))
+           (begin
+             (log "environment callback error 0x~x" (bitwise-and errcode #xffffffff))
+             (set-box! (win:webview-error-box wv)
+                       (error 'open-webview
+                              "CreateEnvironment failed: 0x~x"
+                              (bitwise-and errcode #xffffffff))))
+           (let ()
+             (define create-ctrl
+               (cast (vtfn env 3) _fpointer (_fun _pointer _pointer _pointer -> _int32)))
+             (create-ctrl env (unbox (win:webview-hwnd-box wv)) ctrl-handler))))))
 
   ;; Init runs on the calling thread so COM callbacks fire during our own
   ;; PeekMessage pump.
   (define (do-init)
     (with-handlers ([exn:fail? (lambda (e) (set-box! (win:webview-error-box wv) e))])
-      (define wc (cast (malloc (ctype-sizeof _WNDCLASSEXW) 'raw _pointer)
-                       _pointer
-                       _WNDCLASSEXW-pointer))
+      (define wc
+        (cast (malloc (ctype-sizeof _WNDCLASSEXW) 'raw _pointer) _pointer _WNDCLASSEXW-pointer))
       (memset wc 0 (ctype-sizeof _WNDCLASSEXW))
       (set-WNDCLASSEXW-cbSize! wc (ctype-sizeof _WNDCLASSEXW))
       (set-WNDCLASSEXW-lpfnWndProc! wc wndproc-cptr)
@@ -507,10 +506,8 @@
     (nav cwv (wstr url))))
 
 ;; Verification APIs: synchronous getters against the retained interface.
-(define title
-  (lambda (wv) ((cwv-getter 48) (win:webview-cwv-box wv)))) ; get_DocumentTitle
-(define url
-  (lambda (wv) ((cwv-getter 4) (win:webview-cwv-box wv)))) ; get_Source
+(define title (lambda (wv) ((cwv-getter 48) (win:webview-cwv-box wv)))) ; get_DocumentTitle
+(define url (lambda (wv) ((cwv-getter 4) (win:webview-cwv-box wv)))) ; get_Source
 
 ;; Window capture: PrintWindow into a DIB, write a BMP, convert to PNG with
 ;; PowerShell's System.Drawing (present on every Windows install).
@@ -518,83 +515,92 @@
   (with-handlers ([exn:fail? (lambda (e)
                                (log "capture failed: ~a" (exn-message e))
                                #f)])
-  (and (not (unbox (win:webview-closed?-box wv)))
-       GetClientRect
-       PrintWindow
-       (let ()
-         (define hwnd (unbox (win:webview-hwnd-box wv)))
-         (define rc (make-RECT 0 0 0 0))
-         (GetClientRect hwnd rc)
-         (define w (- (RECT-right rc) (RECT-left rc)))
-         (define h (- (RECT-bottom rc) (RECT-top rc)))
-         (and (> w 0)
-              (> h 0)
-              (let ()
-                (define hdc (GetDC hwnd))
-                (define mem (CreateCompatibleDC hdc))
-                (define bmp (CreateCompatibleBitmap hdc w h))
-                (define old (SelectObject mem bmp))
-                (define pw-ok? (PrintWindow hwnd mem PW_RENDERFULLCONTENT))
-                (unless pw-ok? (log "capture: PrintWindow failed"))
-                (define bmi (make-BMI
-                             (make-BMIH (ctype-sizeof _BMIH)
-                                        w
-                                        (- h) ; top-down
-                                        1
-                                        32
-                                        BI_RGB
-                                        0 0 0 0 0)
-                             0))
-                (define buf (malloc (* 4 w h) _uint8 'raw))
-                (define got (GetDIBits mem bmp 0 h buf bmi DIB_RGB_COLORS))
-                (unless (> got 0) (log "capture: GetDIBits returned ~a" got))
-                (SelectObject mem old)
-                (DeleteObject bmp)
-                (DeleteDC mem)
-                (ReleaseDC hwnd hdc)
-                (and (> got 0)
-                     (let ()
-                       ;; BMP file: header + (padded) BGRA rows.
-                       (define row (* 4 w))
-                       (define data-size (* row h))
-                       (define file-size (+ 54 data-size))
-                       (define out (make-bytes file-size 0))
-                       (bytes-copy! out 0 (bytes #x42 #x4D))
-                       (integer->integer-bytes file-size 4 #f #f out 2)
-                       (integer->integer-bytes 54 4 #f #f out 10)
-                       (integer->integer-bytes 40 4 #f #f out 14)
-                       (integer->integer-bytes w 4 #f #f out 18)
-                       (integer->integer-bytes h 4 #f #f out 22)
-                       (bytes-set! out 26 1)
-                       (bytes-set! out 28 32)
-                       (integer->integer-bytes data-size 4 #f #f out 34)
-                       (memcpy (ptr-add out 54) buf data-size)
-                       (define bmp-path
-                         (make-temporary-file "glaze-capture-~a.bmp"))
-                       (call-with-output-file bmp-path
-                         (lambda (o) (write-bytes out o))
-                         #:exists 'replace)
-                       (define png-path
-                         (if dest
-                             (if (string? dest) (string->path dest) dest)
-                             (make-temporary-file "glaze-capture-~a.png")))
-                       (define ps
-                         (string-append
-                          "Add-Type -AssemblyName System.Drawing;"
-                          "$b=[System.Drawing.Bitmap]::FromFile('"
-                          (path->string bmp-path)
-                          "');$b.Save('"
-                          (path->string png-path)
-                          "', [System.Drawing.Imaging.ImageFormat]::Png);$b.Dispose()"))
-                       (define ok? (with-handlers ([exn:fail? (lambda (e)
-                                                 (log "capture: powershell failed: ~a"
-                                                      (exn-message e))
-                                                 #f)])
-                                     (parameterize ([current-directory (find-system-path 'temp-dir)])
-                                       (system* (find-executable-path "powershell.exe")
-                                                "-NoProfile" "-NonInteractive" "-Command" ps))))
-                       (delete-file bmp-path)
-                       (and ok? (file-exists? png-path) png-path)))))))))
+    (and
+     (not (unbox (win:webview-closed?-box wv)))
+     GetClientRect
+     PrintWindow
+     (let ()
+       (define hwnd (unbox (win:webview-hwnd-box wv)))
+       (define rc (make-RECT 0 0 0 0))
+       (GetClientRect hwnd rc)
+       (define w (- (RECT-right rc) (RECT-left rc)))
+       (define h (- (RECT-bottom rc) (RECT-top rc)))
+       (and
+        (> w 0)
+        (> h 0)
+        (let ()
+          (define hdc (GetDC hwnd))
+          (define mem (CreateCompatibleDC hdc))
+          (define bmp (CreateCompatibleBitmap hdc w h))
+          (define old (SelectObject mem bmp))
+          (define pw-ok? (PrintWindow hwnd mem PW_RENDERFULLCONTENT))
+          (unless pw-ok?
+            (log "capture: PrintWindow failed"))
+          (define bmi
+            (make-BMI (make-BMIH (ctype-sizeof _BMIH)
+                                 w
+                                 (- h) ; top-down
+                                 1
+                                 32
+                                 BI_RGB
+                                 0
+                                 0
+                                 0
+                                 0
+                                 0)
+                      0))
+          (define buf (malloc (* 4 w h) _uint8 'raw))
+          (define got (GetDIBits mem bmp 0 h buf bmi DIB_RGB_COLORS))
+          (unless (> got 0)
+            (log "capture: GetDIBits returned ~a" got))
+          (SelectObject mem old)
+          (DeleteObject bmp)
+          (DeleteDC mem)
+          (ReleaseDC hwnd hdc)
+          (and (> got 0)
+               (let ()
+                 ;; BMP file: header + (padded) BGRA rows.
+                 (define row (* 4 w))
+                 (define data-size (* row h))
+                 (define file-size (+ 54 data-size))
+                 (define out (make-bytes file-size 0))
+                 (bytes-copy! out 0 (bytes #x42 #x4D))
+                 (integer->integer-bytes file-size 4 #f #f out 2)
+                 (integer->integer-bytes 54 4 #f #f out 10)
+                 (integer->integer-bytes 40 4 #f #f out 14)
+                 (integer->integer-bytes w 4 #f #f out 18)
+                 (integer->integer-bytes h 4 #f #f out 22)
+                 (bytes-set! out 26 1)
+                 (bytes-set! out 28 32)
+                 (integer->integer-bytes data-size 4 #f #f out 34)
+                 (memcpy (ptr-add out 54) buf data-size)
+                 (define bmp-path (make-temporary-file "glaze-capture-~a.bmp"))
+                 (call-with-output-file bmp-path (lambda (o) (write-bytes out o)) #:exists 'replace)
+                 (define png-path
+                   (if dest
+                       (if (string? dest)
+                           (string->path dest)
+                           dest)
+                       (make-temporary-file "glaze-capture-~a.png")))
+                 (define ps
+                   (string-append "Add-Type -AssemblyName System.Drawing;"
+                                  "$b=[System.Drawing.Bitmap]::FromFile('"
+                                  (path->string bmp-path)
+                                  "');$b.Save('"
+                                  (path->string png-path)
+                                  "', [System.Drawing.Imaging.ImageFormat]::Png);$b.Dispose()"))
+                 (define ok?
+                   (with-handlers ([exn:fail? (lambda (e)
+                                                (log "capture: powershell failed: ~a" (exn-message e))
+                                                #f)])
+                     (parameterize ([current-directory (find-system-path 'temp-dir)])
+                       (system* (find-executable-path "powershell.exe")
+                                "-NoProfile"
+                                "-NonInteractive"
+                                "-Command"
+                                ps))))
+                 (delete-file bmp-path)
+                 (and ok? (file-exists? png-path) png-path)))))))))
 
 ;; ---- window controls ----
 (define SetWindowTextW
@@ -607,8 +613,7 @@
 (define GetWindowLongPtrW
   (get-ffi-obj "GetWindowLongPtrW" user32 (_fun _pointer _int -> _intptr) (lambda () #f)))
 (define SetWindowLongPtrW
-  (get-ffi-obj "SetWindowLongPtrW" user32 (_fun _pointer _int _intptr -> _intptr)
-               (lambda () #f)))
+  (get-ffi-obj "SetWindowLongPtrW" user32 (_fun _pointer _int _intptr -> _intptr) (lambda () #f)))
 
 (define SWP_NOMOVE #x0002)
 (define SWP_NOZORDER #x0004)
@@ -624,7 +629,8 @@
 
 (define (set-size! wv width height)
   (define hwnd (unbox (win:webview-hwnd-box wv)))
-  (and hwnd SetWindowPos
+  (and hwnd
+       SetWindowPos
        (SetWindowPos hwnd #f 0 0 width height (bitwise-ior SWP_NOMOVE SWP_NOZORDER))))
 
 (define (set-fullscreen! wv on?)
@@ -648,38 +654,36 @@
 (define menu-allocator (make-id-allocator))
 
 (define (menu-action-lookup id)
-  (call-with-semaphore menu-sema
-    (lambda () (id-allocator-lookup menu-allocator id))))
+  (call-with-semaphore menu-sema (lambda () (id-allocator-lookup menu-allocator id))))
 
-(define MF_STRING   #x00000000)
+(define MF_STRING #x00000000)
 (define MF_SEPARATOR #x00000800)
-(define MF_POPUP    #x00000010)
+(define MF_POPUP #x00000010)
 
-(define CreateMenu
-  (and user32 (get-ffi-obj "CreateMenu" user32 (_fun -> _pointer) (lambda () #f))))
+(define CreateMenu (and user32 (get-ffi-obj "CreateMenu" user32 (_fun -> _pointer) (lambda () #f))))
 (define DestroyMenu
   (and user32 (get-ffi-obj "DestroyMenu" user32 (_fun _pointer -> _bool) (lambda () #f))))
 (define AppendMenuW
-  (and user32 (get-ffi-obj "AppendMenuW" user32
-                           (_fun _pointer _uint _uintptr _pointer -> _bool)
-                           (lambda () #f))))
+  (and user32
+       (get-ffi-obj "AppendMenuW"
+                    user32
+                    (_fun _pointer _uint _uintptr _pointer -> _bool)
+                    (lambda () #f))))
 (define SetMenuW
-  (and user32 (get-ffi-obj "SetMenu" user32 (_fun _pointer _pointer -> _bool)
-                           (lambda () #f))))
+  (and user32 (get-ffi-obj "SetMenu" user32 (_fun _pointer _pointer -> _bool) (lambda () #f))))
 (define DrawMenuBar
-  (and user32 (get-ffi-obj "DrawMenuBar" user32 (_fun _pointer -> _bool)
-                           (lambda () #f))))
+  (and user32 (get-ffi-obj "DrawMenuBar" user32 (_fun _pointer -> _bool) (lambda () #f))))
 
 (define (win-build-menu! m)
   (define hmenu (CreateMenu))
   (for ([e (in-list (menu-items m))])
     (cond
-      [(menu-separator? e)
-       (AppendMenuW hmenu MF_SEPARATOR 0 #f)]
+      [(menu-separator? e) (AppendMenuW hmenu MF_SEPARATOR 0 #f)]
       [else
        (define id
          (call-with-semaphore menu-sema
-           (lambda () (id-allocator-register! menu-allocator (menu-item-action e)))))
+                              (lambda ()
+                                (id-allocator-register! menu-allocator (menu-item-action e)))))
        (define label
          (if (menu-item-accel e)
              (format "~a\t~a" (menu-item-label e) (menu-item-accel e))

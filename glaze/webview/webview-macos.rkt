@@ -87,7 +87,8 @@
   (with-handlers ([exn:fail? (lambda (e) #f)])
     (ffi-lib "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")))
 
-(import-class NSString NSNull
+(import-class NSString
+              NSNull
               NSApplication
               NSProcessInfo
               NSMenu
@@ -148,22 +149,18 @@
 (define close-callbacks (make-hasheq))
 (define callbacks-sema (make-semaphore 1))
 (define (callback-put! window proc)
-  (call-with-semaphore callbacks-sema
-                       (lambda () (hash-set! close-callbacks window proc))))
+  (call-with-semaphore callbacks-sema (lambda () (hash-set! close-callbacks window proc))))
 (define (callback-take! window)
-  (call-with-semaphore callbacks-sema
-                       (lambda () (hash-ref close-callbacks window #f))))
+  (call-with-semaphore callbacks-sema (lambda () (hash-ref close-callbacks window #f))))
 (define (callback-remove! window)
-  (call-with-semaphore callbacks-sema
-                       (lambda () (hash-remove! close-callbacks window))))
+  (call-with-semaphore callbacks-sema (lambda () (hash-remove! close-callbacks window))))
 
 (define-objc-class GlazeWindowDelegate
                    NSObject
                    ()
                    (- _void
                       (windowWillClose: [_id notification])
-                      (define window
-                        (cast (tell notification object) _id _uintptr))
+                      (define window (cast (tell notification object) _id _uintptr))
                       (define proc (callback-take! window))
                       (when (procedure? proc)
                         (callback-remove! window)
@@ -189,7 +186,7 @@
                       (define tag (tell #:type _intptr sender tag))
                       (define thunk
                         (call-with-semaphore menu-sema
-                          (lambda () (id-allocator-lookup menu-allocator tag))))
+                                             (lambda () (id-allocator-lookup menu-allocator tag))))
                       (when (procedure? thunk)
                         (thunk))))
 
@@ -200,10 +197,10 @@
   menu-target)
 
 ;; NSEventModifierFlag* values.
-(define NSModCommand 1048576)  ; 1 << 20
-(define NSModOption 524288)    ; 1 << 19
-(define NSModControl 262144)   ; 1 << 18
-(define NSModShift 131072)     ; 1 << 17
+(define NSModCommand 1048576) ; 1 << 20
+(define NSModOption 524288) ; 1 << 19
+(define NSModControl 262144) ; 1 << 18
+(define NSModShift 131072) ; 1 << 17
 
 ;; "Cmd+Shift+O" / "Ctrl+Alt+T" / "F5" -> (values keyEquivalent mask).
 ;; "Cmd"/"CmdOrCtrl"/"Meta" map to Command, "Ctrl" to the literal Control
@@ -216,12 +213,12 @@
         (define key (last parts))
         (define mask
           (for/sum ([m (in-list mods)])
-            (case (string-downcase m)
-              [("cmd" "command" "cmdorctrl" "meta") NSModCommand]
-              [("ctrl" "control") NSModControl]
-              [("alt" "option" "opt") NSModOption]
-              [("shift") NSModShift]
-              [else 0])))
+                   (case (string-downcase m)
+                     [("cmd" "command" "cmdorctrl" "meta") NSModCommand]
+                     [("ctrl" "control") NSModControl]
+                     [("alt" "option" "opt") NSModOption]
+                     [("shift") NSModShift]
+                     [else 0])))
         (define key-eq
           (cond
             ;; #px: {n} quantifiers and (?i:) groups need Perl-style syntax
@@ -237,7 +234,7 @@
     [else
      (define tag
        (call-with-semaphore menu-sema
-         (lambda () (id-allocator-register! menu-allocator (menu-item-action e)))))
+                            (lambda () (id-allocator-register! menu-allocator (menu-item-action e)))))
      (define-values (key mask) (parse-accel (menu-item-accel e)))
      (define item
        (tell (tell NSMenuItem alloc)
@@ -280,9 +277,9 @@
   (define main-menu (tell #:type _id app mainMenu))
   (define olds
     (call-with-semaphore menu-sema
-      (lambda ()
-        (begin0 custom-menu-items
-          (set! custom-menu-items '())))))
+                         (lambda ()
+                           (begin0 custom-menu-items
+                             (set! custom-menu-items '())))))
   (for ([old (in-list olds)])
     (tellv main-menu removeItem: #:type _id old))
   (for ([m (in-list menus)])
@@ -291,11 +288,8 @@
     (define item (build-top-menu! m))
     (tellv main-menu addItem: #:type _id item)
     (call-with-semaphore menu-sema
-      (lambda ()
-        (set! custom-menu-items (cons item custom-menu-items)))))
-  (call-with-semaphore menu-sema
-    (lambda ()
-      (set! custom-menu-items (reverse custom-menu-items)))))
+                         (lambda () (set! custom-menu-items (cons item custom-menu-items)))))
+  (call-with-semaphore menu-sema (lambda () (set! custom-menu-items (reverse custom-menu-items)))))
 
 (define (closed? wv)
   (unbox (mac:webview-closed?-box wv)))
@@ -323,8 +317,14 @@
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (define pi (tell NSProcessInfo processInfo))
       (define token
-        (tell #:type _id pi beginActivityWithOptions: #:type _uint64 16777215
-              reason: #:type _id (->nsstring "Glaze UI running")))
+        (tell #:type _id
+              pi
+              beginActivityWithOptions:
+              #:type _uint64
+              16777215
+              reason:
+              #:type _id
+              (->nsstring "Glaze UI running")))
       ;; token kept forever; no endActivity counterpart by design
       (void token))))
 
@@ -363,14 +363,12 @@
   (define main-menu (tell (tell NSMenu alloc) init))
   ;; Edit menu.
   (define edit-menu (tell (tell NSMenu alloc) initWithTitle: (->nsstring "Edit")))
-  (for ([item (in-list
-               (list
-                (mi "Undo" (selector undo:) "z")
-                (mi "Redo" (selector redo:) "Z")
-                (mi "Cut" (selector cut:) "x")
-                (mi "Copy" (selector copy:) "c")
-                (mi "Paste" (selector paste:) "v")
-                (mi "Select All" (selector selectAll:) "a")))])
+  (for ([item (in-list (list (mi "Undo" (selector undo:) "z")
+                             (mi "Redo" (selector redo:) "Z")
+                             (mi "Cut" (selector cut:) "x")
+                             (mi "Copy" (selector copy:) "c")
+                             (mi "Paste" (selector paste:) "v")
+                             (mi "Select All" (selector selectAll:) "a")))])
     (tellv edit-menu addItem: #:type _id item))
   (define edit-item (mi "Edit" #f ""))
   (tellv edit-item setSubmenu: #:type _id edit-menu)
@@ -416,22 +414,19 @@
 
 (define (acquire-pump!)
   (call-with-semaphore pump-lock
-    (lambda ()
-      (set! open-windows (add1 open-windows))
-      ;; Start on the 0 -> 1 transition only; a still-dying old pump from the
-      ;; tiny overlap window observes the new count and keeps servicing.
-      (when (= open-windows 1)
-        (set! pump-thread (thread pump-forever))))))
+                       (lambda ()
+                         (set! open-windows (add1 open-windows))
+                         ;; Start on the 0 -> 1 transition only; a still-dying old pump from the
+                         ;; tiny overlap window observes the new count and keeps servicing.
+                         (when (= open-windows 1)
+                           (set! pump-thread (thread pump-forever))))))
 
 (define (release-pump!)
-  (call-with-semaphore pump-lock
-    (lambda ()
-      (set! open-windows (max 0 (sub1 open-windows))))))
+  (call-with-semaphore pump-lock (lambda () (set! open-windows (max 0 (sub1 open-windows))))))
 
 (define (pump-forever)
   (let loop ()
-    (define keep-going?
-      (call-with-semaphore pump-lock (lambda () (> open-windows 0))))
+    (define keep-going? (call-with-semaphore pump-lock (lambda () (> open-windows 0))))
     (when keep-going?
       (pump-once)
       ;; Mandatory scheduler yield: when a runloop source is always ready,
@@ -452,8 +447,7 @@
 
   ;; NSRect frame for the window (Cocoa centers it on screen). CGFloat fields
   ;; require inexact values — Racket FFI rejects exact integers for _double.
-  (define frame
-    (make-NSRect (make-NSPoint 0.0 0.0) (make-NSSize (* 1.0 width) (* 1.0 height))))
+  (define frame (make-NSRect (make-NSPoint 0.0 0.0) (make-NSSize (* 1.0 width) (* 1.0 height))))
   (define window
     (tell (tell NSWindow alloc)
           initWithContentRect:
@@ -474,12 +468,7 @@
   ;; WKWebView as the content view, tracking window resizes.
   (define config (tell (tell WKWebViewConfiguration alloc) init))
   (define webview
-    (tell (tell WKWebView alloc)
-          initWithFrame:
-          #:type _NSRect
-          frame
-          configuration:
-          config))
+    (tell (tell WKWebView alloc) initWithFrame: #:type _NSRect frame configuration: config))
   (tellv webview
          setAutoresizingMask:
          #:type _uint
@@ -487,8 +476,7 @@
   (tellv window setContentView: #:type _id webview)
   ;; #:devtools? makes WKWebView inspectable (macOS 13+); on older systems
   ;; web inspectors need a bundle-local override — ignored here.
-  (when (and devtools?
-             (tell webview respondsToSelector: #:type _SEL (selector setInspectable:)))
+  (when (and devtools? (tell webview respondsToSelector: #:type _SEL (selector setInspectable:)))
     (tellv webview setInspectable: #:type _bool #t))
 
   ;; Delegate forwards windowWillClose: to the on-close thunk and flags the
@@ -544,47 +532,43 @@
 
 (define (url wv)
   (define u (tell #:type _id (mac:webview-webview wv) URL))
-  (and (cast u _id _pointer)
-       (tell #:type _string (tell #:type _id u absoluteString) UTF8String)))
+  (and (cast u _id _pointer) (tell #:type _string (tell #:type _id u absoluteString) UTF8String)))
 
 ;; Captures the window to dest (default: a fresh temp .png) and returns the
 ;; path, or #f when the window is closed or not currently capturable (e.g. it
 ;; sits on a hidden Space). CGWindowListCreateImage is synchronous and needs
 ;; no runloop participation.
 (define (capture! wv [dest #f])
-  (and (not (unbox (mac:webview-closed?-box wv)))
-       CGWindowListCreateImage
-       (let ()
-         (define winnum (tell #:type _intptr (mac:webview-window wv) windowNumber))
-         (define img (CGWindowListCreateImage rect-null
-                                               kCGWindowListOptionIncludingWindow
-                                               (bitwise-and winnum #xFFFFFFFF)
-                                               0))
-         (and img
-              (let* ((pool (tell (tell NSAutoreleasePool alloc) init))
-                     (rep (tell (tell NSBitmapImageRep alloc)
-                                initWithCGImage:
-                                #:type _pointer
-                                img))
-                     (data (tell rep
-                                 representationUsingType:
-                                 #:type _int
-                                 NSPNGFileType
-                                 properties:
-                                 #:type _id
-                                 #f))
-                     (path (or dest (make-temporary-file "glaze-capture-~a.png")))
-                     (ok? (tell #:type _bool
-                                data
-                                writeToFile:
-                                (->nsstring (if (string? path) path (path->string path)))
-                                atomically:
-                                #:type _bool
-                                #t)))
-                (tellv pool drain)
-                (when CGImageRelease (CGImageRelease img))
-                (and ok? path))))))
-
+  (and
+   (not (unbox (mac:webview-closed?-box wv)))
+   CGWindowListCreateImage
+   (let ()
+     (define winnum (tell #:type _intptr (mac:webview-window wv) windowNumber))
+     (define img
+       (CGWindowListCreateImage rect-null
+                                kCGWindowListOptionIncludingWindow
+                                (bitwise-and winnum #xFFFFFFFF)
+                                0))
+     (and
+      img
+      (let* ([pool (tell (tell NSAutoreleasePool alloc) init)]
+             [rep (tell (tell NSBitmapImageRep alloc) initWithCGImage: #:type _pointer img)]
+             [data
+              (tell rep representationUsingType: #:type _int NSPNGFileType properties: #:type _id #f)]
+             [path (or dest (make-temporary-file "glaze-capture-~a.png"))]
+             [ok? (tell #:type _bool
+                        data
+                        writeToFile:
+                        (->nsstring (if (string? path)
+                                        path
+                                        (path->string path)))
+                        atomically:
+                        #:type _bool
+                        #t)])
+        (tellv pool drain)
+        (when CGImageRelease
+          (CGImageRelease img))
+        (and ok? path))))))
 
 ;; ---- window controls ----
 (define (set-title! wv t)

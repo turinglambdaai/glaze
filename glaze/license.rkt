@@ -72,13 +72,12 @@
   (define dir (make-temporary-file "glaze-sha-~a" 'directory))
   (define f (build-path dir "data.bin"))
   (call-with-output-file f (lambda (out) (write-bytes data out)) #:exists 'replace)
-  (begin0
-    (with-handlers ([exn:fail? (lambda (e) #f)])
-      (define out (open-output-string))
-      (openssl-exit-code #:stdout out "dgst" "-sha256" "-r" (path->string f))
-      ;; #px, not #rx: the {64} quantifier needs Perl-style syntax
-      (define m (regexp-match #px"^([0-9a-fA-F]{64})\\b" (get-output-string out)))
-      (and m (string-downcase (second m))))
+  (begin0 (with-handlers ([exn:fail? (lambda (e) #f)])
+            (define out (open-output-string))
+            (openssl-exit-code #:stdout out "dgst" "-sha256" "-r" (path->string f))
+            ;; #px, not #rx: the {64} quantifier needs Perl-style syntax
+            (define m (regexp-match #px"^([0-9a-fA-F]{64})\\b" (get-output-string out)))
+            (and m (string-downcase (second m))))
     (delete-directory/files dir)))
 
 ;; ---- machine identifier ----
@@ -101,26 +100,23 @@
          (define out (open-output-string))
          (parameterize ([current-output-port out])
            (system*/exit-code exe "-rd1" "-c" "IOPlatformExpertDevice"))
-         (define m (regexp-match #rx"\"IOPlatformUUID\"\\s*=\\s*\"([^\"]+)\""
-                                 (get-output-string out)))
+         (define m
+           (regexp-match #rx"\"IOPlatformUUID\"\\s*=\\s*\"([^\"]+)\"" (get-output-string out)))
          (and m (second m)))))
 
 (define (raw-windows-guid)
   (define exe (find-executable-path "reg.exe" #f))
-  (and exe
-       (with-handlers ([exn:fail? (lambda (e) #f)])
-         (define out (open-output-string))
-         (parameterize ([current-output-port out])
-           (system*/exit-code exe
-                              "query"
-                              "HKLM\\SOFTWARE\\Microsoft\\Cryptography"
-                              "/v" "MachineGuid"))
-         (define m (regexp-match #rx"REG_SZ\\s+(\\S+)" (get-output-string out)))
-         (and m (second m)))))
+  (and
+   exe
+   (with-handlers ([exn:fail? (lambda (e) #f)])
+     (define out (open-output-string))
+     (parameterize ([current-output-port out])
+       (system*/exit-code exe "query" "HKLM\\SOFTWARE\\Microsoft\\Cryptography" "/v" "MachineGuid"))
+     (define m (regexp-match #rx"REG_SZ\\s+(\\S+)" (get-output-string out)))
+     (and m (second m)))))
 
 (define (raw-linux-machine-id)
-  (or (and (file-exists? "/etc/machine-id")
-           (string-trim (file->string "/etc/machine-id")))
+  (or (and (file-exists? "/etc/machine-id") (string-trim (file->string "/etc/machine-id")))
       (and (file-exists? "/var/lib/dbus/machine-id")
            (string-trim (file->string "/var/lib/dbus/machine-id")))))
 
@@ -142,34 +138,28 @@
     [(hash? v)
      (string-append
       "{"
-      (string-join
-       (for/list ([k (in-list (sort (hash-keys v) string<? #:key symbol->string))])
-         (format "~a:~a"
-                 (json-string (symbol->string k))
-                 (json-fragment (hash-ref v k))))
-       ",")
+      (string-join (for/list ([k (in-list (sort (hash-keys v) string<? #:key symbol->string))])
+                     (format "~a:~a" (json-string (symbol->string k)) (json-fragment (hash-ref v k))))
+                   ",")
       "}")]
-    [(list? v)
-     (string-append "[" (string-join (map json-fragment v) ",") "]")]
+    [(list? v) (string-append "[" (string-join (map json-fragment v) ",") "]")]
     [(string? v) (json-string v)]
     [(real? v) (~a v)]
     [(boolean? v) (if v "true" "false")]
     [else (json-string (format "~a" v))]))
 
 (define (json-string s)
-  (string-append
-   "\""
-   (string-join
-    (for/list ([c (in-string s)])
-      (case c
-        [(#\") "\\\""]
-        [(#\\) "\\\\"]
-        [(#\newline) "\\n"]
-        [(#\return) "\\r"]
-        [(#\tab) "\\t"]
-        [else (string c)]))
-    "")
-   "\""))
+  (string-append "\""
+                 (string-join (for/list ([c (in-string s)])
+                                (case c
+                                  [(#\") "\\\""]
+                                  [(#\\) "\\\\"]
+                                  [(#\newline) "\\n"]
+                                  [(#\return) "\\r"]
+                                  [(#\tab) "\\t"]
+                                  [else (string c)]))
+                              "")
+                 "\""))
 
 ;; ---- RSA-SHA256 over payload bytes ----
 
@@ -179,16 +169,15 @@
   (define dir (make-temporary-file "glaze-license-~a" 'directory))
   (define payload-path (build-path dir "payload.bin"))
   (define sig-path (build-path dir "sig.bin"))
-  (call-with-output-file payload-path
-                         (lambda (out) (write-bytes payload out))
-                         #:exists 'replace)
-  (begin0
-    (let ([code (openssl-exit-code "dgst" "-sha256" "-sign"
-                                   (path->string (path->complete-path private-key-path))
-                                   "-out" (path->string sig-path)
-                                   (path->string payload-path))])
-      (and code (zero? code) (file-exists? sig-path)
-           (file->bytes sig-path)))
+  (call-with-output-file payload-path (lambda (out) (write-bytes payload out)) #:exists 'replace)
+  (begin0 (let ([code (openssl-exit-code "dgst"
+                                         "-sha256"
+                                         "-sign"
+                                         (path->string (path->complete-path private-key-path))
+                                         "-out"
+                                         (path->string sig-path)
+                                         (path->string payload-path))])
+            (and code (zero? code) (file-exists? sig-path) (file->bytes sig-path)))
     (delete-directory/files dir)))
 
 ;; Verify an RSA-SHA256 signature (base64 string) over `payload` with a PEM
@@ -197,23 +186,22 @@
   (define sig
     (with-handlers ([exn:fail? (lambda (e) #f)])
       (base64-decode (string->bytes/utf-8 signature-b64))))
-  (and sig
-       (let ([dir (make-temporary-file "glaze-license-~a" 'directory)])
-         (define payload-path (build-path dir "payload.bin"))
-         (define sig-path (build-path dir "sig.bin"))
-         (call-with-output-file payload-path
-                                (lambda (out) (write-bytes payload out))
-                                #:exists 'replace)
-         (call-with-output-file sig-path
-                                (lambda (out) (write-bytes sig out))
-                                #:exists 'replace)
-         (begin0
-           (let ([code (openssl-exit-code "dgst" "-sha256" "-verify"
-                                          (path->string (path->complete-path public-key-path))
-                                          "-signature" (path->string sig-path)
-                                          (path->string payload-path))])
-             (and code (zero? code)))
-           (delete-directory/files dir)))))
+  (and
+   sig
+   (let ([dir (make-temporary-file "glaze-license-~a" 'directory)])
+     (define payload-path (build-path dir "payload.bin"))
+     (define sig-path (build-path dir "sig.bin"))
+     (call-with-output-file payload-path (lambda (out) (write-bytes payload out)) #:exists 'replace)
+     (call-with-output-file sig-path (lambda (out) (write-bytes sig out)) #:exists 'replace)
+     (begin0 (let ([code (openssl-exit-code "dgst"
+                                            "-sha256"
+                                            "-verify"
+                                            (path->string (path->complete-path public-key-path))
+                                            "-signature"
+                                            (path->string sig-path)
+                                            (path->string payload-path))])
+               (and code (zero? code)))
+       (delete-directory/files dir)))))
 
 ;; ---- issuing ----
 
@@ -232,20 +220,22 @@
                        #:machine-id [machine #f]
                        #:out [out "app.license"])
   (define claims
-    (make-hasheq
-     (append (list (cons 'product product)
-                   (cons 'subject subject))
-             (if expiry (list (cons 'expiry expiry)) '())
-             (if machine (list (cons 'machine-id machine)) '()))))
+    (make-hasheq (append (list (cons 'product product) (cons 'subject subject))
+                         (if expiry
+                             (list (cons 'expiry expiry))
+                             '())
+                         (if machine
+                             (list (cons 'machine-id machine))
+                             '()))))
   (define sig (sign-payload (canonical-json claims) private-key))
   (unless sig
     (error 'issue-license "signing failed (openssl missing or key unreadable)"))
-  (hash-set! claims 'signature
-             (string-trim (bytes->string/utf-8 (base64-encode sig #""))))
-  (define out-path (if (path? out) out (string->path out)))
-  (call-with-output-file out-path
-                         (lambda (o) (write-json claims o))
-                         #:exists 'replace)
+  (hash-set! claims 'signature (string-trim (bytes->string/utf-8 (base64-encode sig #""))))
+  (define out-path
+    (if (path? out)
+        out
+        (string->path out)))
+  (call-with-output-file out-path (lambda (o) (write-json claims o)) #:exists 'replace)
   out-path)
 
 ;; ---- validation ----
@@ -264,7 +254,8 @@
                           #:product product
                           #:machine-id [machine (machine-id)])
   (let/ec return
-    (define (fail reason) (return (hasheq 'valid #f 'reason reason)))
+    (define (fail reason)
+      (return (hasheq 'valid #f 'reason reason)))
     (unless (file-exists? license-file)
       (fail "missing-file"))
     (unless (openssl-path)
@@ -293,35 +284,37 @@
     (define bound (hash-ref claims 'machine-id #f))
     (when (and bound (not (equal? bound machine)))
       (fail "machine"))
-    (hasheq 'valid #t
-            'subject (hash-ref claims 'subject #f)
-            'expiry (or expiry #f)
-            'machine-id (or bound #f))))
+    (hasheq 'valid
+            #t
+            'subject
+            (hash-ref claims 'subject #f)
+            'expiry
+            (or expiry #f)
+            'machine-id
+            (or bound #f))))
 
 ;; Boolean convenience wrapper.
-(define (license-valid? license-file #:public-key public-key
+(define (license-valid? license-file
+                        #:public-key public-key
                         #:product product
                         #:machine-id [machine (machine-id)])
-  (hash-ref (validate-license license-file
-                              #:public-key public-key
-                              #:product product
-                              #:machine-id machine)
-            'valid))
+  (hash-ref
+   (validate-license license-file #:public-key public-key #:product product #:machine-id machine)
+   'valid))
 
 ;; Days until an "YYYY-MM-DD" expiry (expiry day inclusive); negative when
 ;; already past. Raises on a malformed date.
 (define (days-until-expiry expiry)
   ;; #px, not #rx: {n} quantifiers need Perl-style syntax
   (define m (regexp-match #px"^([0-9]{4})-([0-9]{2})-([0-9]{2})$" expiry))
-  (unless m (error 'days-until-expiry "malformed expiry date: ~a" expiry))
+  (unless m
+    (error 'days-until-expiry "malformed expiry date: ~a" expiry))
   (define y (string->number (second m)))
   (define mo (string->number (third m)))
   (define d (string->number (fourth m)))
   (define today (current-date))
   (define secs-exp (find-seconds 0 0 0 d mo y #f))
-  (define secs-now (find-seconds 0 0 0
-                                 (date-day today) (date-month today)
-                                 (date-year today) #f))
+  (define secs-now (find-seconds 0 0 0 (date-day today) (date-month today) (date-year today) #f))
   (inexact->exact (floor (/ (- secs-exp secs-now) 60 60 24))))
 
 ;; True when the YYYY-MM-DD date is strictly before today.

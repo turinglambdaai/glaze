@@ -31,8 +31,7 @@
   (unless backend-procs
     (set! backend-procs (make-hash))
     (define mod (backend-module-path))
-    (for ([name (in-list '(supported? clipboard-set! clipboard-get notify!
-                                      open-path reveal-path))])
+    (for ([name (in-list '(supported? clipboard-set! clipboard-get notify! open-path reveal-path))])
       (hash-set! backend-procs name (dynamic-require mod name))))
   backend-procs)
 
@@ -69,12 +68,16 @@
 ;; launcher subprocess succeeded.
 (define (open-path p)
   (with-handlers ([exn:fail? (lambda (e) #f)])
-    ((ref 'open-path) (if (path? p) (path->string p) p))))
+    ((ref 'open-path) (if (path? p)
+                          (path->string p)
+                          p))))
 
 ;; Reveal a file in Finder / Explorer / the file manager (selecting it).
 (define (reveal-path p)
   (with-handlers ([exn:fail? (lambda (e) #f)])
-    ((ref 'reveal-path) (if (path? p) (path->string p) p))))
+    ((ref 'reveal-path) (if (path? p)
+                            (path->string p)
+                            p))))
 
 ;; ---- single instance ----
 

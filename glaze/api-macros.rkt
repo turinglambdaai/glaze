@@ -41,15 +41,12 @@
   (cond
     [(eq? v glaze-absent)
      (if required?
-         (raise (exn:fail:glaze:bad-param
-                 (format "~a: missing" name)
-                 (current-continuation-marks)))
+         (raise (exn:fail:glaze:bad-param (format "~a: missing" name) (current-continuation-marks)))
          default)]
     [(pred v) v]
     [else
-     (raise (exn:fail:glaze:bad-param
-             (format "~a: invalid value ~v" name v)
-             (current-continuation-marks)))]))
+     (raise (exn:fail:glaze:bad-param (format "~a: invalid value ~v" name v)
+                                      (current-continuation-marks)))]))
 
 (begin-for-syntax
   ;; id | [id pred] | [id pred default] -> (list id-stx pred-stx default-stx required?-stx)
@@ -83,19 +80,18 @@
            (if idx
                #`(list-ref captured-path-args #,idx)
                #`(check-param (quote #,i)
-                              (lambda ()
-                                (hash-ref req-body (quote #,i) glaze-absent))
+                              (lambda () (hash-ref req-body (quote #,i) glaze-absent))
                               #,pred
                               #,default
                               #,req?))))
        (with-syntax ([(proc-arg ...) ids]
                      [(arg-e ...) arg-exprs])
-         (cons
-          #`(define (proc proc-arg ...) body ...)
-          #`(method path
-                    (lambda (req . captured-path-args)
-                      (define req-body (request-json-body req))
-                      (proc arg-e ...)))))])))
+         (cons #`(define (proc proc-arg ...)
+                   body ...)
+               #`(method path
+                         (lambda (req . captured-path-args)
+                           (define req-body (request-json-body req))
+                           (proc arg-e ...)))))])))
 
 (define-syntax (define-api-routes stx)
   (syntax-parse stx

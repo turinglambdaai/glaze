@@ -31,9 +31,13 @@
 ;; "" means the platform default search (dlopen soname lookup); the rest are
 ;; the common multiarch/lib64 locations probed literally when that fails.
 (define ffi-search-dirs
-  '("" "/lib/x86_64-linux-gnu/" "/usr/lib/x86_64-linux-gnu/"
-    "/lib/aarch64-linux-gnu/" "/usr/lib/aarch64-linux-gnu/"
-    "/usr/lib64/" "/usr/lib/" "/lib/"))
+  '("" "/lib/x86_64-linux-gnu/"
+       "/usr/lib/x86_64-linux-gnu/"
+       "/lib/aarch64-linux-gnu/"
+       "/usr/lib/aarch64-linux-gnu/"
+       "/usr/lib64/"
+       "/usr/lib/"
+       "/lib/"))
 
 (define last-reason-box (box #f))
 
@@ -58,13 +62,22 @@
 (define (ffi-lib* name versions)
   (set-box! last-reason-box #f)
   (define version-candidates
-    (if (string? versions) (list versions) versions))
+    (if (string? versions)
+        (list versions)
+        versions))
   (for/or ([dir (in-list ffi-search-dirs)])
     (for/or ([v (in-list version-candidates)])
-      (with-handlers ([exn:fail? (λ (e) (record-reason! e) #f)])
+      (with-handlers ([exn:fail? (λ (e)
+                                   (record-reason! e)
+                                   #f)])
         (if (string=? dir "")
             (ffi-lib name (list v #f))
-            (ffi-lib (format "~alib~a.so~a" dir name (if v (format ".~a" v) ""))))))))
+            (ffi-lib (format "~alib~a.so~a"
+                             dir
+                             name
+                             (if v
+                                 (format ".~a" v)
+                                 ""))))))))
 
 ;; ffi-lib failure messages are multi-line ("could not load...\n path:...\n
 ;; system error:...\n context..."); the header lines carry the actionable
@@ -73,8 +86,7 @@
   (set-box! last-reason-box (one-line (exn-message e))))
 
 (define (one-line s)
-  (string-join
-   (for/list ([line (in-list (string-split s "\n"))]
-              #:unless (string=? (string-trim line) ""))
-     (string-trim line))
-   "; "))
+  (string-join (for/list ([line (in-list (string-split s "\n"))]
+                          #:unless (string=? (string-trim line) ""))
+                 (string-trim line))
+               "; "))

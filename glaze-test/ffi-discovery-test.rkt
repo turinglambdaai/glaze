@@ -27,8 +27,7 @@
   (check-false (string-contains? (ffi-lib-reason) "\n") "reason is single-line")
 
   ;; #f inside versions also tries the unversioned name (-dev installs).
-  (check-false (ffi-lib* "glaze-no-such-library-xyz" '(#f))
-               "unversioned candidate -> #f, no raise"))
+  (check-false (ffi-lib* "glaze-no-such-library-xyz" '(#f)) "unversioned candidate -> #f, no raise"))
 
 ;; The schedulers pick these at runtime; packaging embeds exactly this list
 ;; (see glaze/build). Guard the contract so a renamed backend module breaks
@@ -40,21 +39,30 @@
 (for ([mod (in-list backends)])
   (check-true (string-prefix? (symbol->string mod) "glaze/")
               (format "~a lives in the glaze collection" mod)))
-(check-true
- (case (system-type 'os)
-   [(unix) (and (memq 'glaze/webview/webview-linux backends) #t)]
-   [(windows) (and (memq 'glaze/webview/webview-windows backends) #t)]
-   [(macosx) (and (memq 'glaze/webview/webview-macos backends) #t)]
-   [else (and (memq 'glaze/webview/webview-stub backends) #t)])
- "current platform's webview backend is in the embed list")
+(check-true (case (system-type 'os)
+              [(unix) (and (memq 'glaze/webview/webview-linux backends) #t)]
+              [(windows) (and (memq 'glaze/webview/webview-windows backends) #t)]
+              [(macosx) (and (memq 'glaze/webview/webview-macos backends) #t)]
+              [else (and (memq 'glaze/webview/webview-stub backends) #t)])
+            "current platform's webview backend is in the embed list")
 
 ;; Backend contract: the dispatcher dynamic-requires all 13 names from the
 ;; current platform's backend, so a missing export breaks the packaged app
 ;; at the first open-window (webview-linux shipped without focus!/set-menu!
 ;; exports despite implementing them — caught by exactly this gap).
 (define webview-dispatch-names
-  '(open-webview supported? close navigate title url capture!
-    set-title! set-size! set-fullscreen! focus! set-menu! closed?))
+  '(open-webview supported?
+                 close
+                 navigate
+                 title
+                 url
+                 capture!
+                 set-title!
+                 set-size!
+                 set-fullscreen!
+                 focus!
+                 set-menu!
+                 closed?))
 (when (eq? (system-type 'os) 'unix)
   (for ([name (in-list webview-dispatch-names)])
     (check-not-false (dynamic-require 'glaze/webview/webview-linux name (λ () #f))

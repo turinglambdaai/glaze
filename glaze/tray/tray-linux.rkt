@@ -31,7 +31,6 @@
          supported?
          lin:tray?)
 
-
 ;; Racket's ffi-lib misses Debian/Ubuntu multiarch dirs on some hosts;
 ;; try the bare soname first, then common absolute locations — shared with
 ;; the other backends via ../ffi-discovery.rkt.

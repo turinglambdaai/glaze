@@ -74,12 +74,10 @@
       "  Arch:          sudo pacman -S gtk3 webkit2gtk-4.1\n"
       "Glaze must also run inside a graphical desktop session (or Xvfb in CI).")]
     [(macosx)
-     (string-append
-      "WKWebView is built into macOS and normally requires no separate download.\n"
-      "Run Glaze from a logged-in graphical session. If startup still fails, "
-      "report the backend error above together with your macOS and Racket versions.")]
-    [else
-     "This operating system has no native WebView backend in Glaze."]))
+     (string-append "WKWebView is built into macOS and normally requires no separate download.\n"
+                    "Run Glaze from a logged-in graphical session. If startup still fails, "
+                    "report the backend error above together with your macOS and Racket versions.")]
+    [else "This operating system has no native WebView backend in Glaze."]))
 
 (define (webview-error->message e)
   (cond
@@ -89,9 +87,10 @@
     [else "the native backend reported that it is unavailable"]))
 
 (define (webview-diagnostic [e (webview-last-error)])
-  (string-append
-   "Native WebView could not start: " (webview-error->message e) "\n\n"
-   (webview-install-guidance)))
+  (string-append "Native WebView could not start: "
+                 (webview-error->message e)
+                 "\n\n"
+                 (webview-install-guidance)))
 
 ;; Every successfully opened window, weakly held: closed + collected windows
 ;; disappear from all-webviews on their own.
@@ -111,9 +110,18 @@
   (unless backend-procs
     (set! backend-procs (make-hash))
     (define mod (backend-module-path))
-    (for ([name (in-list '(open-webview supported? close navigate title url capture!
-                             set-title! set-size! set-fullscreen! focus!
-                             set-menu! closed?))])
+    (for ([name (in-list '(open-webview supported?
+                                        close
+                                        navigate
+                                        title
+                                        url
+                                        capture!
+                                        set-title!
+                                        set-size!
+                                        set-fullscreen!
+                                        focus!
+                                        set-menu!
+                                        closed?))])
       (hash-set! backend-procs name (dynamic-require mod name))))
   backend-procs)
 
@@ -160,11 +168,11 @@
                                  (remember-webview-error! e)
                                  #f)])
       ((ref 'open-webview) url
-        #:title title
-        #:width width
-        #:height height
-        #:devtools? devtools?
-        #:on-close on-close)))
+                           #:title title
+                           #:width width
+                           #:height height
+                           #:devtools? devtools?
+                           #:on-close on-close)))
   (cond
     [h
      (define wv (webview (detected-backend) h))
@@ -212,13 +220,15 @@
   ((ref 'capture!) (webview-handle wv) dest))
 
 ;; ---- window controls ----
-(define (webview-set-title! wv t) ((ref 'set-title!) (webview-handle wv) t))
+(define (webview-set-title! wv t)
+  ((ref 'set-title!) (webview-handle wv) t))
 (define (webview-set-size! wv width height)
   ((ref 'set-size!) (webview-handle wv) width height))
 (define (webview-set-fullscreen! wv on?)
   ((ref 'set-fullscreen!) (webview-handle wv) on?))
 
-(define (webview-focus! wv) ((ref 'focus!) (webview-handle wv)))
+(define (webview-focus! wv)
+  ((ref 'focus!) (webview-handle wv)))
 
 ;; ---- menu bar ----
 ;; Replace the app's custom menus with `menus` — a list of menu? values
@@ -237,23 +247,27 @@
 ;; All windows this process opened that have not been garbage collected.
 ;; Closed-but-uncollected handles report webview-closed? = #t.
 (define (all-webviews)
-  (for/list ([(wv _) (in-hash open-registry)]) wv))
+  (for/list ([(wv _) (in-hash open-registry)])
+    wv))
 
 ;; Close every open window (delivers #:on-close for each).
 (define (close-all-webviews!)
-  (for ([wv (in-list (all-webviews))] #:unless (webview-closed? wv))
+  (for ([wv (in-list (all-webviews))]
+        #:unless (webview-closed? wv))
     (webview-close wv)))
 
 ;; Block until every open window is closed (OS chrome closes included), or
 ;; until timeout-secs elapse. Returns #t when all closed, #f on timeout.
 (define (wait-for-webviews [timeout-secs #f])
-  (define deadline
-    (and timeout-secs (+ (current-inexact-milliseconds) (* timeout-secs 1000))))
+  (define deadline (and timeout-secs (+ (current-inexact-milliseconds) (* timeout-secs 1000))))
   (let loop ()
-    (define open (for/list ([wv (in-list (all-webviews))]
-                            #:unless (webview-closed? wv))
-                   wv))
+    (define open
+      (for/list ([wv (in-list (all-webviews))]
+                 #:unless (webview-closed? wv))
+        wv))
     (cond
       [(null? open) #t]
       [(and deadline (>= (current-inexact-milliseconds) deadline)) #f]
-      [else (sleep 0.05) (loop)])))
+      [else
+       (sleep 0.05)
+       (loop)])))

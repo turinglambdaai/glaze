@@ -34,7 +34,8 @@
 (define (fetch-manifest url)
   (with-handlers ([exn:fail? (lambda (e) #f)])
     (define m (regexp-match #rx"^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/]+)(/.*)?$" url))
-    (unless m (error 'check-update "bad manifest url"))
+    (unless m
+      (error 'check-update "bad manifest url"))
     (define scheme (list-ref m 1))
     (define authority (list-ref m 2))
     (define path (or (list-ref m 3) "/"))
@@ -42,15 +43,12 @@
     (define hostport (string-split authority ":"))
     (define host (first hostport))
     (define port
-      (or (and (= (length hostport) 2) (string->number (second hostport)))
-          (if ssl? 443 80)))
+      (or (and (= (length hostport) 2) (string->number (second hostport))) (if ssl? 443 80)))
     (when ssl?
       ;; force the openssl module to load so http-sendrecv can use it
       (dynamic-require 'openssl 'ssl-connect #f))
-    (define-values (_st _headers in)
-      (http-sendrecv host path #:port port #:ssl? (if ssl? 'auto #f)))
-    (begin0
-      (port->bytes in)
+    (define-values (_st _headers in) (http-sendrecv host path #:port port #:ssl? (if ssl? 'auto #f)))
+    (begin0 (port->bytes in)
       (close-input-port in))))
 
 (define (check-update manifest-url #:current-version [current "0.0.0"])
@@ -64,10 +62,14 @@
               (let ([v (hash-ref data 'version #f)])
                 (and (string? v)
                      (newer-version? v current)
-                     (hasheq 'version v
-                             'url (hash-ref data 'url #f)
-                             'notes (hash-ref data 'notes #f)
-                             'sha256 (hash-ref data 'sha256 #f))))))))
+                     (hasheq 'version
+                             v
+                             'url
+                             (hash-ref data 'url #f)
+                             'notes
+                             (hash-ref data 'notes #f)
+                             'sha256
+                             (hash-ref data 'sha256 #f))))))))
 
 ;; True when the file at `path` has the given SHA-256 hex digest
 ;; (case-insensitive). #f when openssl is missing or the file is unreadable
@@ -82,8 +84,7 @@
          (parameterize ([current-output-port out])
            (system*/exit-code exe "dgst" "-sha256" "-r" (path->string path)))
          (define m (regexp-match #px"^([0-9a-fA-F]{64})\\b" (get-output-string out)))
-         (and m
-              (string-ci=? (second m) (string-trim expected-hex))))))
+         (and m (string-ci=? (second m) (string-trim expected-hex))))))
 
 ;; Numeric dotted comparison: "1.10.0" > "1.9.2"; missing segments count 0.
 (define (newer-version? candidate current)

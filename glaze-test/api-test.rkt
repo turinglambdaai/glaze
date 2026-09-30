@@ -16,39 +16,40 @@
 
 (define dir (make-temporary-file "glaze-api-~a" 'directory))
 (call-with-output-file (build-path dir "index.html")
-  (lambda (o) (display #"<html>idx</html>" o))
-  #:exists 'replace)
+                       (lambda (o) (display #"<html>idx</html>" o))
+                       #:exists 'replace)
 
 (define count (box 0))
 (define reported-api-error (box #f))
-(current-glaze-error-reporter
- (lambda (exn uri) (set-box! reported-api-error (cons exn uri))))
+(current-glaze-error-reporter (lambda (exn uri) (set-box! reported-api-error (cons exn uri))))
 
 (define-values (port shutdown)
-  (start-server
-   #:port 18960
-   #:public-dir dir
-   #:api (list
-          (GET "api/ping" (lambda (req) (hasheq 'pong #t)))
-          (POST "api/bump/:delta"
-                (lambda (req delta)
-                  (set-box! count (+ (unbox count) (string->number delta)))
-                  (hasheq 'count (unbox count))))
-          (POST "api/echo"
-                (lambda (req)
-                  (define body (request-json-body req))
-                  (hasheq 'echo (and (hash? body) (hash-ref body 'x 'miss)))))
-          (GET "api/boom" (lambda (req) (raise-user-error 'boom "handler exploded")))
-          (GET "api/raw" (lambda (req) (json-response (hasheq 'raw #t)))))))
+  (start-server #:port 18960
+                #:public-dir dir
+                #:api
+                (list (GET "api/ping" (lambda (req) (hasheq 'pong #t)))
+                      (POST "api/bump/:delta"
+                            (lambda (req delta)
+                              (set-box! count (+ (unbox count) (string->number delta)))
+                              (hasheq 'count (unbox count))))
+                      (POST "api/echo"
+                            (lambda (req)
+                              (define body (request-json-body req))
+                              (hasheq 'echo (and (hash? body) (hash-ref body 'x 'miss)))))
+                      (GET "api/boom" (lambda (req) (raise-user-error 'boom "handler exploded")))
+                      (GET "api/raw" (lambda (req) (json-response (hasheq 'raw #t)))))))
 
 (define (call method path [data #f])
   (define-values (status headers in)
-    (http-sendrecv "127.0.0.1" path
+    (http-sendrecv "127.0.0.1"
+                   path
                    #:port 18960
                    #:ssl? #f
                    #:method method
                    #:data data
-                   #:headers (if data '("Content-Type: application/json") '())))
+                   #:headers (if data
+                                 '("Content-Type: application/json")
+                                 '())))
   (define body (port->bytes in))
   (close-input-port in)
   (values (bytes->string/utf-8 status) body))

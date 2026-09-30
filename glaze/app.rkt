@@ -28,7 +28,9 @@
   (apply string-append
          (for/list ([b (in-list (bytes->list (crypto-random-bytes 16)))])
            (define s (number->string b 16))
-           (if (= (string-length s) 1) (string-append "0" s) s))))
+           (if (= (string-length s) 1)
+               (string-append "0" s)
+               s))))
 
 ;; Bound by run-app so callbacks can read the active token (empty when the
 ;; API is open).
@@ -37,9 +39,9 @@
 (define max-port-attempts 50)
 
 (define (start-server-on-free-port #:public-dir public-dir
-                                    #:api api-routes
-                                    #:events [event-bus #f]
-                                    #:api-token [api-token #f])
+                                   #:api api-routes
+                                   #:events [event-bus #f]
+                                   #:api-token [api-token #f])
   (let loop ([attempts 0])
     (define candidate (+ 20000 (random 45000)))
     (with-handlers ([exn:fail:network? (lambda (e)
@@ -87,7 +89,9 @@
   ;; page would have no way to receive the token (api.js deliberately no
   ;; longer hands it out); programmatic clients use the X-Glaze-Token header.
   (define open-url
-    (if token (format "~a?glaze-token=~a" url token) url))
+    (if token
+        (format "~a?glaze-token=~a" url token)
+        url))
   ;; Once-guard so callers may always call shutdown, even after run-app
   ;; already stopped the server on window close.
   (define once (make-semaphore 1))
@@ -95,24 +99,21 @@
     (call-with-semaphore once (lambda () (raw-shutdown))))
   (define closed (make-semaphore 0))
   (parameterize ([current-api-token (or token "")]
-                 [current-glaze-error-reporter
-                  (or on-error (current-glaze-error-reporter))])
+                 [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))])
     ;; Update check runs in the background: the fetch has a multi-second
     ;; network timeout and a GUI app must not stall first paint on it. The
     ;; 'update-available broadcast keeps its original contract (same event,
     ;; same payload) — consumers cannot tell it arrived asynchronously.
     (when check-update
-      (thread
-       (lambda ()
-         (define info (do-check-update check-update
-                                       #:current-version current-version))
-         (when info
-           (printf "[glaze] update available: ~a (current ~a) — ~a~n"
-                   (hash-ref info 'version #f)
-                   current-version
-                   (hash-ref info 'url #f))
-           (when event-bus
-             (bus-broadcast! event-bus 'update-available info))))))
+      (thread (lambda ()
+                (define info (do-check-update check-update #:current-version current-version))
+                (when info
+                  (printf "[glaze] update available: ~a (current ~a) — ~a~n"
+                          (hash-ref info 'version #f)
+                          current-version
+                          (hash-ref info 'url #f))
+                  (when event-bus
+                    (bus-broadcast! event-bus 'update-available info))))))
     ;; If native GUI startup fails, never leave the local HTTP server behind.
     ;; open-window's exception contains the platform-specific install/repair
     ;; instructions; preserve it unchanged for the caller/user.
