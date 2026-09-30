@@ -2,6 +2,8 @@
 
 Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web frontend. A [Tauri](https://tauri.app/)-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.
 
+**Human-first. Agent-native. Local by design.**
+
 [![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.7.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
@@ -99,7 +101,10 @@ A native desktop window opens and hosts the frontend served by the local Racket 
 
 ```bash
 raco glaze init <name>       # Create a native Glaze desktop project
+raco glaze inspect --json    # Read the project/edit/verification contract
+raco glaze doctor --json     # Diagnose package and native WebView readiness
 raco glaze dev               # Run this project's native desktop app
+raco glaze verify            # Assert title/URL and capture the native window
 raco glaze build             # Build a distributable (exe + bundled assets)
 raco glaze keygen            # Create an RSA keypair for license signing
 raco glaze updater-keygen    # Create an Ed25519 update-signing keypair
@@ -110,6 +115,11 @@ raco glaze help              # Show help
 ```
 
 There is intentionally no browser-mode `dev`/`serve` command. Development and production use the same native WebView path so missing dependencies and native-backend failures cannot be hidden by a browser fallback.
+
+`init` also creates `AGENTS.md` and a runnable `verify.rkt`. This gives coding
+agents explicit edit boundaries, machine-readable inspection/diagnostics, and
+native-window evidence with meaningful exit codes. See the
+[agent-native workflow](docs/agent-native.md).
 
 ### `build`
 

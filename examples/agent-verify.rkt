@@ -5,8 +5,9 @@
 ;; pixels via webview-capture! — with no human at the screen. This is the
 ;; loop agents use to develop Glaze apps autonomously.
 ;;
-;; macOS: full flow (title/url/capture). Other platforms degrade to #f and
-;; the run is still a valid smoke test.
+;; Supported desktop platforms run the full title/URL/capture flow. A missing
+;; native backend is an actionable failure, never a successful browser-mode
+;; fallback.
 ;;
 ;; Run: racket examples/agent-verify.rkt
 
@@ -63,8 +64,12 @@ align-items:center;justify-content:center;height:100vh;margin:0\">\
 (delete-directory/files dir)
 (for ([v (in-list (reverse verdicts))])
   (printf "[verify] ~a = ~a\n" (car v) (cdr v)))
-(printf "[verify] ~a\n"
-        (cond
-          [skipped? "SKIPPED (no webview backend on this platform)"]
-          [(andmap identity (map cdr verdicts)) "ALL PASS"]
-          [else "CHECK FAILURES"]))
+(cond
+  [skipped?
+   (eprintf "[verify] FAILED (no native WebView backend on this platform)\n")
+   (exit 2)]
+  [(and (pair? verdicts) (andmap cdr verdicts))
+   (displayln "[verify] ALL PASS")]
+  [else
+   (eprintf "[verify] CHECK FAILURES\n")
+   (exit 1)])

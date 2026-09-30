@@ -5,6 +5,18 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Make new projects agent-native with a generated `AGENTS.md`, a native UI
+  `verify.rkt`, `raco glaze inspect --json`, and `raco glaze verify`.
+- Extend `raco glaze doctor` with machine-readable JSON and native WebView
+  readiness diagnostics while retaining its human-readable package repair flow.
+
+### Fixed
+- Make `examples/agent-verify.rkt` return nonzero when native verification is
+  unavailable or any assertion fails, so automation cannot report a false pass.
+
 ## [0.7.0] - 2026-09-29
 
 ### Added

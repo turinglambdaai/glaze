@@ -8,7 +8,66 @@
          glaze/build
          glaze/license
          glaze/signing
-         glaze-cli/pkg)
+         glaze-cli/pkg
+         glaze-cli/inspect)
+
+(define agent-instructions
+  #<<AGENTS
+# Glaze agent contract
+
+Human-first. Agent-native. Local by design.
+
+Start with `raco glaze inspect --json` and `raco glaze doctor --json`.
+
+- `main.rkt` owns Racket routes, events, and native-window behavior.
+- `public/` owns the HTML/CSS/JavaScript interface.
+- `verify.rkt` is the non-interactive native UI acceptance check.
+- `dist/` is generated output; rebuild it instead of hand-editing it.
+- Glaze is GUI-first. Never replace a failed WebView with a browser fallback.
+- Preserve loopback-only serving, Host validation, and token protection.
+
+Use `raco glaze dev` for the real application path, `raco glaze verify` for
+title/URL/PNG evidence, and `raco glaze build` for distributable output.
+AGENTS
+  )
+
+(define verification-template
+  #<<VERIFY
+#lang racket/base
+
+(require racket/file
+         glaze)
+
+(define public (build-path (current-directory) "public"))
+(define verdicts '())
+(define-values (_kind stop)
+  (run-app
+   #:public-dir public
+   #:title "Glaze Verification"
+   #:on-ready
+   (lambda (wv url)
+     (define deadline (+ (current-inexact-milliseconds) 15000))
+     (define loaded?
+       (let loop ()
+         (cond
+           [(equal? (webview-title wv) "Glaze App") #t]
+           [(>= (current-inexact-milliseconds) deadline) #f]
+           [else (sleep 0.1) (loop)])))
+     (define shot (and loaded? (webview-capture! wv)))
+     (set! verdicts
+           (list (cons 'page-loaded loaded?)
+                 (cons 'url (equal? (webview-url wv) url))
+                 (cons 'capture (and shot (file-exists? shot) (> (file-size shot) 0)))))
+     (webview-close wv))))
+(stop)
+(for ([verdict (in-list verdicts)])
+  (printf "[verify] ~a = ~a\n" (car verdict) (cdr verdict)))
+(unless (and (pair? verdicts) (andmap cdr verdicts))
+  (eprintf "[verify] native UI verification failed\n")
+  (exit 1))
+(displayln "[verify] ALL PASS")
+VERIFY
+  )
 
 (define (init-project name)
   (printf "Creating Glaze project: ~a\n" name)
@@ -51,6 +110,8 @@
 </body>
 </html>
 ")
+  (write-file (build-path name "AGENTS.md") agent-instructions)
+  (write-file (build-path name "verify.rkt") verification-template)
   (printf "Done! Run:\n  cd ~a\n  racket main.rkt\n\nOr use:\n  cd ~a\n  raco glaze dev\n"
           name name))
 
@@ -184,7 +245,9 @@
   (displayln "  update-verify Verify an update artifact signature")
   (displayln "  license       Sign or verify offline license files")
   (displayln "  install       Pin the glaze package to a revision and link it")
-  (displayln "  doctor        Diagnose glaze package links (--fix removes broken ones)")
+  (displayln "  doctor        Diagnose package/WebView readiness (--json for agents)")
+  (displayln "  inspect       Show project edit/verification map (--json for agents)")
+  (displayln "  verify        Run the project native UI verification script")
   (displayln "  help          Show this help")
   (displayln "")
   (displayln "Glaze requires a working native WebView. If it is missing or broken, startup")
@@ -427,6 +490,14 @@
                         "myapp"
                         (car rest)))]
      ["dev" (dev-app)]
+     ["inspect" (exit (run-inspect #:json? (member "--json" rest)))]
+     ["verify"
+      (define verifier (build-path (current-directory) "verify.rkt"))
+      (unless (file-exists? verifier)
+        (error 'verify "verify.rkt not found; add a native UI acceptance script or rerun `raco glaze init`"))
+      (define racket-exe (or (find-executable-path "racket" #f)
+                             (error 'verify "racket executable not found on PATH")))
+      (exit (system*/exit-code racket-exe (path->string verifier)))]
      ["build" (build-command rest)]
      ["keygen" (keygen-command rest)]
      ["license" (license-command rest)]
