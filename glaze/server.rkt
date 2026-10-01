@@ -26,6 +26,7 @@
          racket/string
          racket/tcp
          "api.rkt"
+         "capability.rkt"
          "events.rkt")
 
 (provide start-dev-server
@@ -58,12 +59,22 @@
                       #:api [api-routes '()]
                       #:events [event-bus #f]
                       #:api-token [api-token #f]
+                      #:capability [authority #f]
                       #:serve-api-client? [serve-client? #t])
   (when (and event-bus (not (event-bus? event-bus)))
     (raise-argument-error 'start-server "event-bus?" event-bus))
   (when (and api-token (not (string? api-token)))
     (raise-argument-error 'start-server "(or/c #f string?)" api-token))
-  (define dispatcher (make-dispatcher public-dir api-routes port event-bus serve-client? api-token))
+  (when (and authority (not (capability? authority)))
+    (raise-argument-error 'start-server "(or/c #f capability?)" authority))
+  (when (and authority (not (and (string? api-token) (not (string=? api-token "")))))
+    (raise-arguments-error
+     'start-server
+     "a capability requires a non-empty #:api-token so authority stays bound to the WebView"
+     "capability"
+     (capability-id authority)))
+  (define dispatcher
+    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token authority))
   (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
@@ -127,8 +138,10 @@
 
 ;; ---- dispatcher ----
 
-(define (make-dispatcher public-dir api-routes port event-bus serve-client? api-token)
+(define (make-dispatcher public-dir api-routes port event-bus serve-client? api-token authority)
   (lambda (conn req)
+    (define matched-api (find-api-match api-routes req))
+    (define events-request? (and event-bus (sse-request? req)))
     (define resp
       (cond
         [(not (host-allowed? req port)) (error-response 403 "host not allowed")]
@@ -141,25 +154,19 @@
         ;; The token guards capabilities (API routes + the event stream),
         ;; not resources: static files and the api.js bootstrap stay open —
         ;; the page received its cookie via the bootstrap redirect above.
-        [(and api-token
-              (pair? api-routes)
-              (not (token-ok? req api-token))
-              (or (api-matches? api-routes req) (and event-bus (sse-request? req))))
+        [(and api-token (not (token-ok? req api-token)) (or matched-api events-request?))
          (error-response 401 "missing or invalid glaze token")]
-        [(find-api-response api-routes req)]
-        [(and event-bus (sse-request? req)) (sse-response event-bus)]
-        [(and serve-client? (api-client-request? req)) (api-client-response api-routes api-token)]
+        [(and matched-api authority (not (api-match-authorized? authority matched-api req)))
+         (error-response 403 "capability denied API route")]
+        [matched-api (api-match-response matched-api req authority)]
+        [(and events-request? authority (not (capability-authorized? authority 'glaze:events)))
+         (error-response 403 "capability denied event stream")]
+        [events-request? (sse-response event-bus)]
+        [(and serve-client? (api-client-request? req))
+         (api-client-response api-routes api-token authority)]
         [(directory-exists? public-dir) (serve-static-file public-dir req)]
         [else (make-404-response)]))
     (output-response conn resp)))
-
-;; Does any route match this request (method + path shape)?
-(define (api-matches? api-routes req)
-  (define method (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
-  (define segments
-    (filter (lambda (s) (not (equal? s ""))) (map path/param-path (url-path (request-uri req)))))
-  (for/or ([r (in-list api-routes)])
-    (and (route-match r method segments) #t)))
 
 ;; Token arrives as the X-Glaze-Token header (curl / programmatic clients)
 ;; or the glaze_token cookie (browsers — EventSource cannot set headers, but
@@ -250,13 +257,20 @@
 ;;                                                path params become arguments
 ;;   glaze.on('counter-changed', fn)            — EventSource subscription
 ;;                                                (only when #:events is live)
-(define (api-client-response api-routes [api-token #f])
+(define (api-client-response api-routes [api-token #f] [authority #f])
   ;; api-token is accepted for signature compatibility but deliberately NOT
   ;; served here: this endpoint is openly readable, and embedding the token
   ;; (or setting the cookie) in the response would let any local prober
   ;; mint credentials. The page gets its cookie via the ?glaze-token=
   ;; bootstrap redirect instead (run-app opens that URL automatically).
-  (define js (generate-api-client api-routes))
+  (define visible-routes
+    (if authority
+        (filter (lambda (route)
+                  (and (route-permission route)
+                       (capability-has-permission? authority (route-permission route))))
+                api-routes)
+        api-routes))
+  (define js (generate-api-client visible-routes))
   (response/full 200
                  #"OK"
                  (current-seconds)
@@ -336,26 +350,43 @@
              [(zero? i) (js-camel seg #t)]
              [else (js-camel seg #f)]))))
 
-;; Try each route against the request; on a match apply the handler and
-;; normalize its result (jsexpr -> 200 JSON; response -> itself, e.g. the
-;; streaming-response / event-stream-response values from glaze/api;
-;; exception -> 500 JSON). No match -> #f (fall through to static).
-(define (find-api-response api-routes req)
+;; Match once so token and capability checks apply to exactly the route whose
+;; handler will run.
+(define (find-api-match api-routes req)
   (define method (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
   (define segments
     (filter (lambda (s) (not (equal? s ""))) (map path/param-path (url-path (request-uri req)))))
   (for/or ([r (in-list api-routes)])
     (define captured (route-match r method segments))
-    (and captured
-         (with-handlers ([exn:fail:glaze:bad-param? (lambda (e) (error-response 400 (exn-message e)))]
-                         [exn:fail?
-                          (lambda (e)
-                            ((current-glaze-error-reporter) e (url-path-string (request-uri req)))
-                            (error-response 500 (exn-message e)))])
-           (define result (apply (route-handler r) req captured))
-           (cond
-             [(response? result) result]
-             [else (api-response result)])))))
+    (and captured (list r captured))))
+
+(define (api-match-authorized? authority matched req)
+  (define route (first matched))
+  (define captured (second matched))
+  (define permission (route-permission route))
+  (and permission
+       (capability-has-permission? authority permission)
+       (with-handlers ([exn:fail? (lambda (e) #f)])
+         (define resource-proc (route-resource route))
+         (define resource
+           (and resource-proc
+                (parameterize ([current-capability-id (capability-id authority)])
+                  (apply resource-proc req captured))))
+         (capability-authorized? authority permission resource))))
+
+(define (api-match-response matched req [authority #f])
+  (define route (first matched))
+  (define captured (second matched))
+  (with-handlers ([exn:fail:glaze:bad-param? (lambda (e) (error-response 400 (exn-message e)))]
+                  [exn:fail? (lambda (e)
+                               ((current-glaze-error-reporter) e (url-path-string (request-uri req)))
+                               (error-response 500 (exn-message e)))])
+    (define result
+      (parameterize ([current-capability-id (and authority (capability-id authority))])
+        (apply (route-handler route) req captured)))
+    (cond
+      [(response? result) result]
+      [else (api-response result)])))
 
 (define (serve-static-file dir req)
   (define uri-path (url-path (request-uri req)))

@@ -15,6 +15,7 @@
 
 (require racket/random
          "server.rkt"
+         "capability.rkt"
          "events.rkt"
          (rename-in "update.rkt" [check-update do-check-update])
          "webview/main.rkt")
@@ -41,7 +42,8 @@
 (define (start-server-on-free-port #:public-dir public-dir
                                    #:api api-routes
                                    #:events [event-bus #f]
-                                   #:api-token [api-token #f])
+                                   #:api-token [api-token #f]
+                                   #:capability [authority #f])
   (let loop ([attempts 0])
     (define candidate (+ 20000 (random 45000)))
     (with-handlers ([exn:fail:network? (lambda (e)
@@ -52,7 +54,8 @@
                     #:public-dir public-dir
                     #:api api-routes
                     #:events event-bus
-                    #:api-token api-token))))
+                    #:api-token api-token
+                    #:capability authority))))
 
 (define (run-app #:public-dir [public-dir "public"]
                  #:api [api-routes '()]
@@ -62,6 +65,7 @@
                  #:height [height 768]
                  #:events [event-bus #f]
                  #:api-token [api-token #f]
+                 #:capability [authority #f]
                  #:on-close [user-on-close (lambda () (void))]
                  #:on-error [on-error #f]
                  #:check-update [check-update #f]
@@ -69,6 +73,8 @@
                  #:app-id [app-id #f]
                  #:window-state [window-state-option #f]
                  #:on-ready [on-ready (lambda (wv url) (void))])
+  (when (and authority (not (capability? authority)))
+    (raise-argument-error 'run-app "(or/c #f capability?)" authority))
   (define state-path
     (cond
       [(not window-state-option) #f]
@@ -85,6 +91,7 @@
     (cond
       [(eq? api-token #t) (make-api-token)]
       [(string? api-token) api-token]
+      [authority (make-api-token)]
       [else #f]))
   (define-values (actual-port raw-shutdown)
     (if port
@@ -92,11 +99,13 @@
                       #:public-dir public-dir
                       #:api api-routes
                       #:events event-bus
-                      #:api-token token)
+                      #:api-token token
+                      #:capability authority)
         (start-server-on-free-port #:public-dir public-dir
                                    #:api api-routes
                                    #:events event-bus
-                                   #:api-token token)))
+                                   #:api-token token
+                                   #:capability authority)))
   (define url (format "http://127.0.0.1:~a/" actual-port))
   ;; Capability URL: the one-time ?glaze-token= bootstrap exchanges the token
   ;; for an HttpOnly cookie and redirects to the clean URL. Without it the

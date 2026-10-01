@@ -20,6 +20,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **Web 写界面** —— Tailwind、Svelte、React 或任何 Web 框架
 - **真正的桌面外壳** —— 系统原生窗口 + 嵌入式 WebView
 - **JSON API 桥接** —— 页面用普通 `fetch("/api/...")` 调用 Racket
+- **运行时权限能力** —— API 路由默认拒绝，并支持文件路径与命令参数范围
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -31,6 +32,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 原生工具链 | **无需**（纯 FFI） | Rust + cargo | 无 | Go + WebView2 依赖 |
 | 二进制体积 | 极小 | 小 | 100 MB+ | 小 |
 | 前后端桥接 | HTTP JSON 路由（`fetch`） | `invoke()` IPC | Node API | 绑定层 |
+| 运行时权限 | 路由权限 + 资源范围 | Capabilities + permissions | 应用自行实现 | 应用自行实现 |
 | WebView 后端 | WebView2 / WKWebView / WebKitGTK | 系统 WebView | 自带 Chromium | WebView2/WKWebView |
 | WebView 缺失时 | **明确失败 + 安装指引** | 前置依赖错误 | 不适用（自带） | 前置依赖错误 |
 | Agent 友好的 UI 验证（title/url/截图） | **内置** | 需 WebDriver | 需 CDP | 有限 |
@@ -44,6 +46,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 本地应用 HTTP 服务 | ✅ | ✅ | ✅ |
 | 系统托盘 | ✅ | ✅ | ✅（CI 验证） |
 | JSON API 桥接 | ✅ | ✅ | ✅ |
+| Capability 限制 API 路由 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -211,7 +214,8 @@ myapp/
 
 ```racket
 (run-app #:public-dir "public"
-         #:api (list (GET "api/ping" ...)))
+         #:api (list (GET "api/ping" ...))
+         #:capability main-capability)
 ;; 窗口关闭 -> server 停止 -> (values 'webview shutdown)
 ```
 
@@ -242,6 +246,40 @@ myapp/
 
 `define-api-routes` 一处声明同时产生 Racket procedure、validated route 和 `/glaze/api.js` 中的 JS client entry。
 
+### 运行时 capability 与资源范围
+
+Capability 是显式启用、默认拒绝的安全边界。一旦向 `run-app` 传入
+`#:capability`，每条 API 路由都必须声明 `#:permission`；未声明或未授权的
+路由直接返回 403，handler 不会执行。`run-app` 会自动生成 API token 并通过
+一次性 bootstrap URL 绑定到 WebView。
+
+```racket
+(define main-capability
+  (make-capability
+   "main"
+   (list 'settings:read
+         (path-permission 'files:read
+                          #:allow (list app-data-dir)
+                          #:deny (list secrets-dir))
+         (command-permission 'tools:run
+                             #:allow '("git")
+                             #:arguments (lambda (args)
+                                           (equal? args '("--version")))))))
+
+(define routes
+  (list (GET "api/settings" settings-handler
+             #:permission 'settings:read)
+        (POST "api/files/read" read-handler
+              #:permission 'files:read
+              #:resource (lambda (req)
+                           (hash-ref (request-json-body req) 'path)))))
+
+(run-app #:public-dir "public" #:api routes #:capability main-capability)
+```
+
+命令范围由路由的 `#:resource` 返回 `command-resource`；deny 路径或命令优先于
+allow。应用需要 SSE 时，在 capability 中授予 `'glaze:events`。
+
 ### 后端 → 前端推送（SSE）
 
 ```racket
@@ -257,6 +295,7 @@ SSE 与嵌入式 WebView 前端共享同一个本地 origin。
 - 仅服务 Host 为 `127.0.0.1` / `localhost` / `[::1]` 的请求；
 - 参数问题返回 400 JSON，handler 异常返回 500 JSON；
 - 可选 `#:api-token` 保护 API 路由与 SSE；
+- 可选 `#:capability` 启用默认拒绝的路由权限，并可限制文件根目录、命令与参数；
 - 应用窗口通过一次性的 token bootstrap URL 获取 HttpOnly cookie。
 
 ## 系统集成

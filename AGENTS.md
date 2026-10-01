@@ -255,6 +255,8 @@ SSE 事件流使用同一个 origin；这套 HTTP 机制服务的是**嵌入式 
 - `#:api-token` 保护 API + SSE；静态资源与 bootstrap 不直接泄露 token；
 - `run-app` 的一次性 `?glaze-token=` URL 换 HttpOnly cookie；
 - 程序化客户端用 `X-Glaze-Token`；
+- `#:capability` 启用后，路由必须显式声明 `#:permission`，未授权 handler 不得执行；
+- path/command scope 必须 deny 优先，路径比较需抵抗 `..` 与已有 symlink 越界；
 - 同用户本地进程仍可能读进程内存，因此这不是强隔离边界。
 
 ## 系统托盘

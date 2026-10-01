@@ -38,6 +38,8 @@
          route-handler
          route-method
          route-segments
+         route-permission
+         route-resource
          param?
          param-id
          (struct-out exn:fail:glaze:bad-param)
@@ -50,7 +52,7 @@
          route-match
          path->segments)
 
-(struct route (method segments handler) #:transparent)
+(struct route (method segments handler permission resource) #:transparent)
 (struct param (id) #:transparent)
 
 ;; Raised by define-api-routes argument checking; the server maps it to a
@@ -66,10 +68,17 @@
         (param (substring seg 1))
         seg)))
 
-(define ((make-route-method method) path handler)
+(define ((make-route-method method) path
+                                    handler
+                                    #:permission [permission #f]
+                                    #:resource [resource #f])
   (unless (procedure? handler)
     (raise-argument-error 'api-route "procedure?" handler))
-  (route method (parse-path path) handler))
+  (when (and permission (not (or (symbol? permission) (string? permission))))
+    (raise-argument-error 'api-route "(or/c #f symbol? string?)" permission))
+  (when (and resource (not (procedure? resource)))
+    (raise-argument-error 'api-route "(or/c #f procedure?)" resource))
+  (route method (parse-path path) handler permission resource))
 
 (define GET (make-route-method 'GET))
 (define POST (make-route-method 'POST))

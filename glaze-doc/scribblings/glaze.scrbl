@@ -42,6 +42,7 @@ guidance. Glaze never substitutes a system-browser tab for the desktop window.
           [#:height height exact-positive-integer? 768]
           [#:events events (or/c #f event-bus?) #f]
           [#:api-token api-token (or/c #f string? #t) #f]
+          [#:capability capability (or/c #f capability?) #f]
           [#:on-close on-close (-> any) (lambda () (void))]
           [#:on-error on-error (or/c #f procedure?) #f]
           [#:check-update check-update (or/c #f string?) #f]
@@ -65,6 +66,10 @@ generates a random capability token and uses a one-time bootstrap URL to set an
 HttpOnly cookie for the embedded frontend. @racket[#:on-error] receives API
 handler failures. @racket[#:check-update] wires an update manifest into the
 application lifecycle.
+
+When @racket[#:capability] is supplied, @racket[run-app] automatically creates
+an API token if necessary. Every API route then requires a declared and granted
+permission; this mode is default-deny.
 
 With @racket[#:window-state #t], @racket[#:app-id] selects a platform config
 path where Glaze saves outer position, size, and maximized state at close and
@@ -92,6 +97,7 @@ is the empty string when API-token protection is disabled.
           [#:api api (listof route?) '()]
           [#:events events (or/c #f event-bus?) #f]
           [#:api-token api-token (or/c #f string?) #f]
+          [#:capability capability (or/c #f capability?) #f]
           [#:serve-api-client? serve-api-client? boolean? #t])
          (values exact-nonnegative-integer? procedure?)]{
 Starts the loopback HTTP server that powers the embedded frontend. Static
@@ -100,6 +106,10 @@ SSE event stream share the same origin. The return values are the actual port
 and a shutdown procedure. @racket[start-dev-server] remains a compatibility
 alias for this low-level server primitive; it does not define a browser-based
 application mode.
+
+The low-level server requires an explicit, non-empty @racket[#:api-token] whenever
+@racket[#:capability] is supplied, keeping runtime authority bound to the
+embedded WebView rather than an unauthenticated loopback caller.
 }
 
 @defproc[(stop-server [shutdown-proc procedure?]) void?]{Stops the server.}
@@ -118,10 +128,72 @@ do not use it as a fallback.
 The embedded frontend calls Racket through ordinary same-origin HTTP requests.
 This keeps the bridge easy to inspect and test with normal developer tools.
 
-@defproc[(GET [path string?] [handler procedure?]) route?]{}
-@defproc[(POST [path string?] [handler procedure?]) route?]{}
-@defproc[(PUT [path string?] [handler procedure?]) route?]{}
-@defproc[(DELETE [path string?] [handler procedure?]) route?]{}
+@defproc[(GET [path string?]
+              [handler procedure?]
+              [#:permission permission (or/c #f symbol? string?) #f]
+              [#:resource resource (or/c #f procedure?) #f]) route?]{}
+@defproc[(POST [path string?]
+               [handler procedure?]
+               [#:permission permission (or/c #f symbol? string?) #f]
+               [#:resource resource (or/c #f procedure?) #f]) route?]{}
+@defproc[(PUT [path string?]
+              [handler procedure?]
+              [#:permission permission (or/c #f symbol? string?) #f]
+              [#:resource resource (or/c #f procedure?) #f]) route?]{}
+@defproc[(DELETE [path string?]
+                 [handler procedure?]
+                 [#:permission permission (or/c #f symbol? string?) #f]
+                 [#:resource resource (or/c #f procedure?) #f]) route?]{}
+
+The resource procedure receives the same request and captured path parameters
+as the route handler. Its result is checked against the active scoped
+permission before the handler can run. @racket[define-api-routes] accepts the
+same @racket[#:permission] and @racket[#:resource] options after its route path.
+
+@section[#:tag "capabilities"]{Runtime Capabilities}
+
+@defmodule[glaze/capability]
+
+@defproc[(make-capability [id string?] [permissions list?]) capability?]{
+Creates a named authority from permission identifiers and scoped permissions.
+}
+
+@defproc[(allow-permission [id (or/c symbol? string?)]) any/c]{Creates an
+unscoped permission grant. A bare symbol or string in
+@racket[make-capability] has the same meaning.}
+
+@defproc[(scoped-permission [id (or/c symbol? string?)]
+                            [authorize procedure?]) any/c]{Creates a generic
+resource permission. @racket[authorize] receives the route resource and must
+return a true value to authorize the request.}
+
+@defproc[(path-permission [id (or/c symbol? string?)]
+                          [#:allow allow-roots list?]
+                          [#:deny deny-roots list? '()]) any/c]{
+Allows resources inside the listed roots except those inside a denied root.
+Paths are simplified through existing symlinks; deny entries take precedence.
+}
+
+@defproc[(command-permission [id (or/c symbol? string?)]
+                             [#:allow allow-programs list?]
+                             [#:deny deny-programs list? '()]
+                             [#:arguments arguments-ok? procedure?
+                              (lambda (arguments) #t)]) any/c]{
+Allows exact executable names or paths and optionally validates their argument
+list. Deny entries take precedence.
+}
+
+@defproc[(command-resource [program path-string?]
+                           [arguments list?]) command-resource?]{Constructs the
+resource returned by a command route's @racket[#:resource] procedure.}
+
+@defproc[(capability-authorized? [capability capability?]
+                                 [permission (or/c symbol? string?)]
+                                 [resource any/c #f]) boolean?]{Checks runtime
+authority without invoking a route.}
+
+@defparam[current-capability-id id (or/c #f string?)]{Bound to the active
+capability ID while a protected route handler or resource extractor runs.}
 
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;
@@ -376,6 +448,11 @@ With @racket[#:api-token], API routes and the SSE stream require a capability.
 @racket[run-app] opens the native WebView at a one-time bootstrap URL; the
 server exchanges the token for an HttpOnly cookie and redirects to the clean
 path. Programmatic clients may use the @litchar{X-Glaze-Token} header.
+
+With @racket[#:capability], the server additionally enforces named permissions
+and resource scopes. Routes without @racket[#:permission], routes whose
+permission is absent, and resources outside a granted scope return 403 before
+the handler runs. Grant @racket['glaze:events] to authorize the SSE endpoint.
 
 This is defense in depth against casual local callers, not isolation from
 other processes running as the same OS user.
