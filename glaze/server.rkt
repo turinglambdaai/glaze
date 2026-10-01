@@ -337,8 +337,9 @@
              [else (js-camel seg #f)]))))
 
 ;; Try each route against the request; on a match apply the handler and
-;; normalize its result (jsexpr -> 200 JSON; response -> itself; exception ->
-;; 500 JSON). No match -> #f (fall through to static).
+;; normalize its result (jsexpr -> 200 JSON; response -> itself, e.g. the
+;; streaming-response / event-stream-response values from glaze/api;
+;; exception -> 500 JSON). No match -> #f (fall through to static).
 (define (find-api-response api-routes req)
   (define method (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
   (define segments

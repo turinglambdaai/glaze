@@ -117,7 +117,8 @@ This keeps the bridge easy to inspect and test with normal developer tools.
 
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;
-a full response value may also be returned.
+a full response value may also be returned, including a streaming response
+(@racket[streaming-response] / @racket[event-stream-response] below).
 
 @defproc[(request-json-body [req request?]) jsexpr?]{
 Parses a JSON request body. Missing, empty, or malformed input yields an empty
@@ -129,6 +130,55 @@ Racket jsexprs are symbols, for example @racket[(hash-ref body 'delta)].
 @defproc[(api-response [data jsexpr?]) response?]{}
 @defproc[(error-response [status exact-nonnegative-integer?]
                          [message string?]) response?]{}
+
+@defproc[(streaming-response [writer (-> output-port? any)]
+                             [#:mime mime bytes? #"application/octet-stream"]
+                             [#:headers headers (listof header?) '()])
+         response?]{
+A chunked 200 response. @racket[writer] runs on the connection thread after
+the status line and headers go out — the same mechanism as the built-in
+@litchar{/glaze/events} SSE endpoint. Write to the port and call
+@racket[(flush-output out)] after each chunk that should be delivered
+immediately; returning from the writer ends the response.
+
+A handler that raises before returning still maps to a 500 JSON (nothing is
+on the wire yet); an exception @emph{inside} the writer closes the
+connection mid-stream, so wrap your own errors there if truncation is
+unacceptable. The typical use is proxying a streaming LLM endpoint — tokens
+reach the page as they arrive, API keys stay in Racket, and the page never
+makes a cross-origin call:
+
+@codeblock|{
+(GET "api/llm/chat"
+ (lambda (req)
+   (streaming-response
+    #:mime #"application/x-ndjson"
+    (lambda (out)
+      (for ([delta (in-llm-deltas (request-json-body req))])
+        (displayln (jsexpr->string (hasheq 'delta delta)) out)
+        (flush-output out))))))
+}|
+}
+
+@defproc[(event-stream-response [sender procedure?]
+                                [#:headers headers (listof header?) '()])
+         response?]{
+The SSE flavor of @racket[streaming-response]: @racket[sender] receives a
+@racket[send] callback, and each @racket[(send name data)] emits one
+@verbatim|{event: name\ndata: <json>}| frame and flushes. Consuming with
+@racket[EventSource] in the page works out of the box;
+@racket[Cache-Control: no-cache] is added automatically.
+
+@codeblock|{
+(GET "api/sse/demo"
+ (lambda (req)
+   (event-stream-response
+    (lambda (send)
+      (send 'delta (hasheq 'text "Hel"))
+      (send 'delta (hasheq 'text "lo"))
+      (send 'done (hasheq 'ok #t))))))
+}|
+}
 
 @defform[(define-api-routes id clause ...)]{
 Declares a callable Racket procedure, a validated HTTP route, and a generated
