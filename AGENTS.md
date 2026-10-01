@@ -257,6 +257,7 @@ SSE 事件流使用同一个 origin；这套 HTTP 机制服务的是**嵌入式 
 - 程序化客户端用 `X-Glaze-Token`；
 - `#:capability` 启用后，路由必须显式声明 `#:permission`，未授权 handler 不得执行；
 - path/command scope 必须 deny 优先，路径比较需抵抗 `..` 与已有 symlink 越界；
+- 内置 filesystem routes 必须在 handler 前检查 `fs:read` / `fs:write`；复制和移动同时检查源与目标；
 - 同用户本地进程仍可能读进程内存，因此这不是强隔离边界。
 
 ## 系统托盘

@@ -21,6 +21,7 @@ You get:
 - **Native desktop shell** — a real OS window with an embedded system WebView
 - **JSON API bridge** — the page calls Racket with plain `fetch("/api/...")`
 - **Runtime capabilities** — default-deny route permissions with path and command scopes
+- **Scoped filesystem plugin** — text/binary I/O, directories, metadata, copy/move/remove
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -47,6 +48,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | System tray | ✅ | ✅ | ✅ (CI-verified) |
 | JSON API bridge | ✅ | ✅ | ✅ |
 | Capability-gated API routes | ✅ | ✅ | ✅ |
+| Scoped filesystem plugin | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -342,6 +344,30 @@ API token when a capability is active.
 Use `command-resource` from a route's `#:resource` procedure when enforcing a
 `command-permission`. Deny paths/programs take precedence over allow entries.
 Grant `'glaze:events` when an application capability should access SSE.
+
+### Scoped filesystem plugin
+
+`make-filesystem-routes` supplies capability-gated frontend APIs for UTF-8 text,
+base64 binary files, directory listing/creation, metadata, existence checks,
+file copy, move, and removal. Add its routes to the app and grant only the roots
+the window needs:
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (path-permission 'fs:read #:allow (list documents-dir))
+         (path-permission 'fs:write #:allow (list cache-dir)))))
+
+(run-app #:public-dir "public"
+         #:api (make-filesystem-routes)
+         #:capability authority)
+```
+
+The generated client exposes functions such as `glaze.api.fsReadText(body)`,
+`fsWriteFile(body)`, `fsReadDir(body)`, and `fsMove(body)`. Copy and move scope
+checks cover both source and destination. Writes use same-directory temporary
+files followed by atomic replacement.
 
 ### Typed routes, one declaration — `define-api-routes`
 

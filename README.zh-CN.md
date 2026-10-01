@@ -21,6 +21,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **真正的桌面外壳** —— 系统原生窗口 + 嵌入式 WebView
 - **JSON API 桥接** —— 页面用普通 `fetch("/api/...")` 调用 Racket
 - **运行时权限能力** —— API 路由默认拒绝，并支持文件路径与命令参数范围
+- **受限文件系统插件** —— 文本/二进制、目录、元数据、复制/移动/删除
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -47,6 +48,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 系统托盘 | ✅ | ✅ | ✅（CI 验证） |
 | JSON API 桥接 | ✅ | ✅ | ✅ |
 | Capability 限制 API 路由 | ✅ | ✅ | ✅ |
+| 路径 scope 文件系统插件 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -279,6 +281,28 @@ Capability 是显式启用、默认拒绝的安全边界。一旦向 `run-app` �
 
 命令范围由路由的 `#:resource` 返回 `command-resource`；deny 路径或命令优先于
 allow。应用需要 SSE 时，在 capability 中授予 `'glaze:events`。
+
+### 受路径 scope 约束的文件系统插件
+
+`make-filesystem-routes` 提供可直接从前端调用的 UTF-8 文本、base64 二进制、
+目录读取/创建、元数据、存在性、文件复制、移动和删除 API。应用只需组合路由并
+授予窗口确实需要的目录：
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (path-permission 'fs:read #:allow (list documents-dir))
+         (path-permission 'fs:write #:allow (list cache-dir)))))
+
+(run-app #:public-dir "public"
+         #:api (make-filesystem-routes)
+         #:capability authority)
+```
+
+生成的客户端包含 `glaze.api.fsReadText(body)`、`fsWriteFile(body)`、
+`fsReadDir(body)`、`fsMove(body)` 等函数。复制/移动会同时检查源和目标；写入
+使用同目录临时文件后原子替换。
 
 ### 后端 → 前端推送（SSE）
 

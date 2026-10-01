@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   routes default-deny, bind authority to the WebView token, omit ungranted
   routes from the generated client, and support deny-first path and
   command/argument scopes.
+- Add a capability-gated filesystem plugin with direct Racket procedures and
+  generated frontend routes for text/base64 I/O, directories, metadata,
+  existence checks, copy, move, and removal. Multi-path operations authorize
+  both source and destination; writes use atomic same-directory replacement.
 
 ## [0.8.0] - 2026-09-30
 
