@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   generated frontend routes for text/base64 I/O, directories, metadata,
   existence checks, copy, move, and removal. Multi-path operations authorize
   both source and destination; writes use atomic same-directory replacement.
+- Add a capability-gated shell/process plugin with direct execution, bounded
+  stdout/stderr capture, environment and working-directory options, timeouts,
+  and capability-owned background handles for stdin, status, and termination.
+  Frontend environment names and working-directory roots are opt-in, and the
+  retained process registry is bounded.
 
 ## [0.8.0] - 2026-09-30
 
