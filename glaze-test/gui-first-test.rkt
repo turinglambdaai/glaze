@@ -21,6 +21,10 @@
 (check-false (member '#:fallback-browser? open-allowed))
 (check-false (member '#:fallback-browser? wv-allowed))
 (check-false (member '#:fallback-browser? app-allowed))
+(check-not-false (member '#:window-state open-allowed))
+(check-not-false (member '#:window-state wv-allowed))
+(check-not-false (member '#:window-state app-allowed))
+(check-not-false (member '#:app-id app-allowed))
 
 ;; A missing backend must produce useful remediation text instead of sending
 ;; the user to a browser. The exact package differs by platform.

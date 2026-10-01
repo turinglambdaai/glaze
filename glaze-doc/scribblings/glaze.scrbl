@@ -46,6 +46,8 @@ guidance. Glaze never substitutes a system-browser tab for the desktop window.
           [#:on-error on-error (or/c #f procedure?) #f]
           [#:check-update check-update (or/c #f string?) #f]
           [#:current-version current-version string? "0.0.0"]
+          [#:app-id app-id (or/c #f string?) #f]
+          [#:window-state window-state (or/c #f #t path-string?) #f]
           [#:on-ready on-ready procedure? (lambda (wv url) (void))])
          (values 'webview procedure?)]{
 The one-call application entry point. It selects a free loopback port unless
@@ -63,6 +65,12 @@ generates a random capability token and uses a one-time bootstrap URL to set an
 HttpOnly cookie for the embedded frontend. @racket[#:on-error] receives API
 handler failures. @racket[#:check-update] wires an update manifest into the
 application lifecycle.
+
+With @racket[#:window-state #t], @racket[#:app-id] selects a platform config
+path where Glaze saves outer position, size, and maximized state at close and
+restores them on the next launch. An explicit path may be supplied instead.
+Stale geometry is clamped to the current virtual desktop so a disconnected
+monitor cannot strand the window.
 }
 
 @defproc[(make-api-token) string?]{
@@ -225,6 +233,7 @@ on Linux.
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
           [#:devtools? devtools? boolean? #f]
+          [#:window-state window-state (or/c #f path-string?) #f]
           [#:on-close on-close (-> any) (lambda () (void))])
          webview?]{
 Opens a native desktop window and loads @racket[url]. If the backend or its
@@ -243,9 +252,30 @@ There is no @racket[#:fallback-browser?] keyword.
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
           [#:devtools? devtools? boolean? #f]
+          [#:window-state window-state (or/c #f path-string?) #f]
           [#:on-close on-close (-> any) (lambda () (void))])
          webview?]{
 Lower-level synonym of @racket[open-window] with the same fail-fast contract.
+}
+
+@defproc[(webview-window-state [webview webview?])
+         (or/c #f window-state?)]{
+Returns the native window's outer position, size, and maximized state.
+}
+
+@defproc[(webview-set-window-state! [webview webview?]
+                                    [state window-state?])
+         any]{
+Moves/resizes the native window and restores its maximized state.
+}
+
+@defproc[(webview-save-state! [webview webview?] [path path-string?])
+         (or/c #f path?)]{}
+
+@defproc[(webview-restore-state! [webview webview?] [path path-string?])
+         any]{
+Reads a saved state, clamps it to @racket[webview-screen-area], and applies it.
+Malformed or missing state files are ignored.
 }
 
 @defproc[(webview-supported?) boolean?]{

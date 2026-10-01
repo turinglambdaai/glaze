@@ -66,7 +66,21 @@
                  #:on-error [on-error #f]
                  #:check-update [check-update #f]
                  #:current-version [current-version "0.0.0"]
+                 #:app-id [app-id #f]
+                 #:window-state [window-state-option #f]
                  #:on-ready [on-ready (lambda (wv url) (void))])
+  (define state-path
+    (cond
+      [(not window-state-option) #f]
+      [(eq? window-state-option #t)
+       (unless (and (string? app-id) (not (string=? app-id "")))
+         (raise-arguments-error 'run-app
+                                "#:app-id is required when #:window-state is #t"
+                                "app-id"
+                                app-id))
+       (default-window-state-path app-id)]
+      [(path-string? window-state-option) window-state-option]
+      [else (raise-argument-error 'run-app "(or/c #f #t path-string?)" window-state-option)]))
   (define token
     (cond
       [(eq? api-token #t) (make-api-token)]
@@ -125,6 +139,7 @@
                      #:title title
                      #:width width
                      #:height height
+                     #:window-state state-path
                      #:on-close (lambda ()
                                   (user-on-close)
                                   (semaphore-post closed)))))

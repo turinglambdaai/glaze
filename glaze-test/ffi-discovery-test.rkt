@@ -46,7 +46,7 @@
               [else (and (memq 'glaze/webview/webview-stub backends) #t)])
             "current platform's webview backend is in the embed list")
 
-;; Backend contract: the dispatcher dynamic-requires all 13 names from the
+;; Backend contract: the dispatcher dynamic-requires every name from the
 ;; current platform's backend, so a missing export breaks the packaged app
 ;; at the first open-window (webview-linux shipped without focus!/set-menu!
 ;; exports despite implementing them — caught by exactly this gap).
@@ -60,6 +60,9 @@
                  set-title!
                  set-size!
                  set-fullscreen!
+                 geometry
+                 set-geometry!
+                 screen-area
                  focus!
                  set-menu!
                  closed?))

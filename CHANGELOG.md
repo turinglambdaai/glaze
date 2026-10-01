@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   failure rollback.
 - Add `raco glaze manifest-sign` and `manifest-verify` so release automation
   can validate, sign, and verify the exact manifest consumed by applications.
+- Add cross-platform window geometry and Tauri-style opt-in window-state
+  persistence. Windows, macOS, and Linux now expose outer position, size, and
+  maximized state; `run-app #:app-id ... #:window-state #t` restores it and
+  clamps stale coordinates to the current virtual desktop.
 
 ## [0.8.0] - 2026-09-30
 
