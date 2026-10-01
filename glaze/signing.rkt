@@ -14,6 +14,8 @@
 
 (provide signing-keygen
          signing-key-password-encrypted?
+         sign-bytes
+         verify-bytes
          sign-file
          verify-signature
          sha256-file
@@ -135,6 +137,17 @@
 
 (define (sign-file path-value #:private-key private-key-value #:password [password #f])
   (define path (->path path-value))
+  (sign-bytes (string->bytes/utf-8 (string-append "sha256:" (sha256-file path)))
+              #:private-key private-key-value
+              #:password password))
+
+;; Sign arbitrary bytes with Ed25519 and return a base64 signature. This is
+;; intentionally lower-level than sign-file: update manifests sign the exact
+;; embedded payload bytes, while artifacts continue to sign their SHA-256
+;; digest so large files are never loaded into memory.
+(define (sign-bytes content #:private-key private-key-value #:password [password #f])
+  (unless (bytes? content)
+    (raise-argument-error 'sign-bytes "bytes?" content))
   (define private-key (->path private-key-value))
   (define payload-file (make-temporary-file "glaze-sig-in~a"))
   (define signature-file (make-temporary-file "glaze-sig-out~a"))
@@ -142,11 +155,11 @@
   (dynamic-wind
    void
    (lambda ()
-     (write-content-file payload-file (string-append "sha256:" (sha256-file path)))
+     (write-content-file payload-file content)
      (when password-file
        (write-content-file password-file password))
      (openssl-run
-      "artifact signing"
+      "Ed25519 signing"
       (append (list "pkeyutl" "-sign" "-rawin" "-inkey" (path->string private-key))
               (if password-file
                   (list "-passin" (string-append "file:" (path->string password-file)))
@@ -163,18 +176,28 @@
                           #:signature signature-base64
                           #:expected-sha256 [expected-sha256 #f])
   (define path (->path path-value))
-  (define public-key (->path public-key-value))
   (define digest (sha256-file path))
   (when (and expected-sha256 (not (string=? digest (string-downcase (string-trim expected-sha256)))))
     (error 'signing "artifact sha256 mismatch: expected ~a, artifact is ~a" expected-sha256 digest))
+  (verify-bytes (string->bytes/utf-8 (string-append "sha256:" digest))
+                #:public-key public-key-value
+                #:signature signature-base64))
+
+(define (verify-bytes content #:public-key public-key-value #:signature signature-base64)
+  (unless (bytes? content)
+    (raise-argument-error 'verify-bytes "bytes?" content))
+  (unless (string? signature-base64)
+    (raise-argument-error 'verify-bytes "string?" signature-base64))
+  (define public-key (->path public-key-value))
   (define payload-file (make-temporary-file "glaze-ver-in~a"))
   (define signature-file (make-temporary-file "glaze-ver-sig~a"))
   (dynamic-wind
    void
    (lambda ()
-     (write-content-file payload-file (string-append "sha256:" digest))
+     (write-content-file payload-file content)
      (write-content-file signature-file
-                         (base64-decode (string->bytes/utf-8 (string-trim signature-base64))))
+                         (with-handlers ([exn:fail? (lambda (_) #"")])
+                           (base64-decode (string->bytes/utf-8 (string-trim signature-base64)))))
      (zero? (system*/exit-code (find-openssl)
                                "pkeyutl"
                                "-verify"

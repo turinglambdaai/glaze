@@ -4,7 +4,7 @@ Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web f
 
 **Human-first. Agent-native. Local by design.**
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.7.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.8.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -55,7 +55,7 @@ Native WebView support is mandatory for application startup. `run-app` and `open
 
 | Platform | Runtime requirement |
 |---|---|
-| All | [Racket](https://racket-lang.org/) 7.0 or later (includes `raco`) |
+| All | [Racket](https://racket-lang.org/) 9.0 or later, CS runtime (includes `raco`) |
 | Windows | Microsoft Edge WebView2 Runtime (Evergreen). Glaze ships `WebView2Loader.dll`; install/repair the Runtime if startup says it is unavailable. |
 | macOS | WKWebView is built into macOS; run inside a logged-in graphical session. |
 | Linux | GTK 3 + WebKitGTK (`libwebkit2gtk-4.1-0` on current Debian/Ubuntu; distro equivalent elsewhere) and a graphical desktop session/Xvfb. |
@@ -110,6 +110,8 @@ raco glaze keygen            # Create an RSA keypair for license signing
 raco glaze updater-keygen    # Create an Ed25519 update-signing keypair
 raco glaze update-sign       # Sign an update artifact
 raco glaze update-verify     # Verify an artifact and pinned-key signature
+raco glaze manifest-sign     # Validate and sign a complete update manifest
+raco glaze manifest-verify   # Verify a manifest signature and pinned key id
 raco glaze license           # Sign or verify offline license files
 raco glaze help              # Show help
 ```
@@ -178,22 +180,33 @@ Failure reasons are stable tags (`missing-file`, `malformed`, `signature`, `prod
 
 ### Update integrity
 
-`check-update` passes through an optional `"sha256"` manifest field; verify a downloaded artifact before swapping it in:
+`check-update` remains the small, backward-compatible notification helper. For installed applications, the full updater validates a signed manifest, selects the platform/architecture and release channel, enforces staged-rollout and download-size limits, verifies SHA-256 plus an optional artifact signature, and executes an install plan with rollback:
 
 ```racket
-(define info (check-update manifest-url #:current-version "1.0.0"))
-(verify-file-sha256 artifact (hash-ref info 'sha256))
+(define manifest
+  (fetch-update-manifest manifest-url pinned-public-key
+                         #:key-id "release-2026"))
+(define candidate (select-update config manifest))
+(when candidate
+  (define artifact (download-update config candidate download-path))
+  (execute-install-plan!
+   (make-replace-install-plan candidate artifact installed-path
+                              #:restart restart-app)))
 ```
 
-For publisher authenticity as well as download integrity, pin an Ed25519
-public key inside the application and verify the release signature before
-installing it:
+Portable artifacts (including AppImage-style deployments) can use the atomic replacement adapter above. MSI/EXE/PKG/DMG installers use `make-install-plan` with a platform adapter that owns elevation and process handoff; Glaze still controls the verified input and invokes rollback when installation fails.
+
+Release automation can sign both artifacts and the validated manifest with the same pinned Ed25519 key:
 
 ```bash
 raco glaze updater-keygen --out updater-keys
-raco glaze update-sign app.zip --key updater-keys/private.pem --out app.zip.sig
-raco glaze update-verify app.zip --pub updater-keys/public.pem \
+raco glaze update-sign --artifact app.zip --key updater-keys/private.pem --out app.zip.sig
+raco glaze update-verify --artifact app.zip --pub updater-keys/public.pem \
   --signature app.zip.sig --sha256 <manifest-sha256>
+raco glaze manifest-sign --manifest manifest.json --key updater-keys/private.pem \
+  --key-id release-2026 --out manifest.signed.json
+raco glaze manifest-verify --manifest manifest.signed.json \
+  --pub updater-keys/public.pem --key-id release-2026
 ```
 
 ## Project Structure
