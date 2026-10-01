@@ -87,13 +87,27 @@
 (define (canonical-path p)
   (unless (path-string? p)
     (raise-argument-error 'path-permission "path-string? resource" p))
-  (define lexical (simplify-path (path->complete-path p) #f))
-  (define parts (explode-path lexical))
-  (for/fold ([resolved (car parts)]) ([part (in-list (cdr parts))])
-    (define candidate (build-path resolved part))
-    (if (link-exists? candidate)
-        (resolve-path candidate)
-        candidate)))
+  (define (resolve-components path seen)
+    (define lexical (simplify-path (path->complete-path path) #f))
+    (define parts (explode-path lexical))
+    (for/fold ([resolved (car parts)]) ([part (in-list (cdr parts))])
+      (define candidate (build-path resolved part))
+      (define kind (file-or-directory-type candidate #f))
+      (cond
+        [(memq kind '(link directory-link))
+         (define key (path->string candidate))
+         (when (member key seen)
+           (raise-arguments-error 'path-permission "cyclic symbolic link" "path" p))
+         ;; resolve-path may return the link target as a relative path on Unix;
+         ;; interpret it relative to the directory that owns the link.
+         (define target (resolve-path candidate))
+         (define complete-target
+           (if (complete-path? target)
+               target
+               (path->complete-path target (path-only candidate))))
+         (resolve-components complete-target (cons key seen))]
+        [else candidate])))
+  (resolve-components p '()))
 
 (define (path-key p)
   (define normalized (regexp-replace* #rx"\\\\" (path->string (canonical-path p)) "/"))
