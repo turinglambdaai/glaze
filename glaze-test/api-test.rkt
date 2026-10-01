@@ -6,11 +6,14 @@
 ;; the same pieces.
 
 (require rackunit
+         racket/async-channel
          racket/file
          racket/string
+         racket/tcp
          racket/port
          json
          net/http-client
+         web-server/http/response-structs
          glaze/server
          glaze/api)
 
@@ -104,3 +107,122 @@
 (check-false (route-match r 'GET '("a" "7")) "length mismatch -> #f")
 (check-false (route-match r 'POST '("a" "7" "x")) "method mismatch -> #f")
 (check-false (route-match r 'GET '("b" "7" "x")) "literal segment mismatch -> #f")
+
+;; ---- streaming responses (chunked + SSE) ----
+
+;; Drain `in` on a side thread, chunk by chunk (read-bytes-avail! returns as
+;; soon as ANY byte lands, so incrementality is observable), until eof or
+;; timeout. Returns the accumulated bytes.
+(define (drain-thread in)
+  (define ch (make-async-channel))
+  (define buf (make-bytes 256))
+  (define t
+    (thread (lambda ()
+              (let loop ()
+                (define n (read-bytes-avail! buf in))
+                (cond
+                  [(eof-object? n) (async-channel-put ch 'eof)]
+                  [else
+                   (async-channel-put ch (subbytes buf 0 n))
+                   (loop)])))))
+  (values ch t))
+
+(define sdir (make-temporary-file "glaze-stream-~a" 'directory))
+(call-with-output-file (build-path sdir "index.html")
+                       (lambda (o) (display #"<html>idx</html>" o))
+                       #:exists 'replace)
+
+(define unblock (make-semaphore))
+
+(define-values (_sport sdown)
+  (start-server
+   #:port 18961
+   #:public-dir sdir
+   #:api (list (GET "api/stream"
+                    (lambda (req)
+                      (streaming-response (lambda (out)
+                                            (display "one" out)
+                                            (flush-output out)
+                                            ;; The test releases this only after it has seen "one"
+                                            ;; on the wire, so end-buffering would fail the test.
+                                            (semaphore-wait unblock)
+                                            (display "two" out)
+                                            (flush-output out))
+                                          #:mime #"text/plain")))
+               (GET "api/sse"
+                    (lambda (req)
+                      (event-stream-response (lambda (send)
+                                               (send 'delta (hasheq 'text "hel"))
+                                               (send 'delta (hasheq 'text "lo"))
+                                               (send 'done (hasheq 'ok #t)))))))))
+
+;; Unit level: constructors produce response? values, reject junk.
+(check-true (response? (streaming-response (lambda (out) (void)))) "streaming-response -> response?")
+(check-true (response? (event-stream-response (lambda (send) (void))))
+            "event-stream-response -> response?")
+(check-exn exn:fail:contract?
+           (lambda () (streaming-response 42))
+           "streaming-response rejects non-procedure")
+(check-exn exn:fail:contract?
+           (lambda () (event-stream-response 42))
+           "event-stream-response rejects non-procedure")
+
+;; Wire level, chunked: "one" must arrive while the writer is still blocked.
+(define-values (sin sout) (tcp-connect "127.0.0.1" 18961))
+(fprintf sout "GET /api/stream HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+(flush-output sout)
+(define-values (stream-ch stream-reader) (drain-thread sin))
+(define seen-one?
+  (let loop ([acc #""])
+    (cond
+      [(regexp-match? #rx"one" acc) #t]
+      [else
+       (define c (sync/timeout 5 stream-ch))
+       (cond
+         [(or (not c) (eq? c 'eof)) #f]
+         [else (loop (bytes-append acc c))])])))
+(check-true seen-one? "first chunk delivered before writer finishes")
+
+(semaphore-post unblock)
+(define stream-rest
+  (let loop ([acc #""]
+             [eof? #f])
+    (cond
+      [eof? acc]
+      [else
+       (define c (sync/timeout 5 stream-ch))
+       (cond
+         [(not c) (bytes-append acc #"!!timeout")]
+         [(eq? c 'eof) (loop acc #t)]
+         [else (loop (bytes-append acc c) #f)])])))
+(check-true (regexp-match? #rx"two" stream-rest) "second chunk delivered after unblock")
+(close-input-port sin)
+(close-output-port sout)
+
+;; Wire level, SSE: frames well-formed, headers right, connection closes.
+(define-values (sin2 sout2) (tcp-connect "127.0.0.1" 18961))
+(fprintf sout2 "GET /api/sse HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+(flush-output sout2)
+(define-values (sse-ch sse-reader) (drain-thread sin2))
+(define sse-raw
+  (let loop ([acc #""])
+    (define c (sync/timeout 5 sse-ch))
+    (cond
+      [(not c) (bytes-append acc #"!!timeout")]
+      [(eq? c 'eof) acc]
+      [else (loop (bytes-append acc c))])))
+(check-true (regexp-match? #rx#"200" sse-raw) "SSE route matched")
+(check-true (regexp-match? #rx#"text/event-stream" sse-raw) "SSE content type")
+(check-true (regexp-match? #rx#"Cache-Control: no-cache" sse-raw) "SSE no-cache header")
+(check-true
+ (regexp-match?
+  #px"event: delta\ndata: \\{\"text\":\"hel\"\\}\n\nevent: delta\ndata: \\{\"text\":\"lo\"\\}\n\nevent: done\ndata: \\{\"ok\":true\\}\n\n$"
+  sse-raw)
+ "SSE frames well-formed and stream ends when sender returns")
+(close-input-port sin2)
+(close-output-port sout2)
+(kill-thread stream-reader)
+(kill-thread sse-reader)
+
+(sdown)
+(delete-directory/files sdir)

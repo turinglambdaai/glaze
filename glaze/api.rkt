@@ -13,10 +13,15 @@
 ;;   (POST "api/items/:id/bump" (lambda (req id) ...))
 ;;
 ;; A handler takes the web-server request followed by the captured :params.
-;; It returns a jsexpr (auto-wrapped as a 200 JSON response) or a full
-;; response (e.g. via json-response with your own status). request-json-body
-;; parses the JSON request body. Handlers that raise produce a 500 JSON
-;; error, never a half-written response.
+;; It returns a jsexpr (auto-wrapped as a 200 JSON response), a full
+;; response (e.g. via json-response with your own status), or a streaming
+;; response (streaming-response / event-stream-response below). Passing a
+;; web-server response? through is part of the contract: the dispatcher
+;; normalizes jsexpr -> 200 JSON but hands response values to the connection
+;; untouched. request-json-body parses the JSON request body. Handlers that
+;; raise produce a 500 JSON error, never a half-written response (streaming
+;; is the exception — once the writer has started, the response is on the
+;; wire).
 
 (require json
          racket/list
@@ -38,6 +43,8 @@
          (struct-out exn:fail:glaze:bad-param)
          json-response
          api-response
+         streaming-response
+         event-stream-response
          request-json-body
          error-response
          route-match
@@ -131,3 +138,40 @@
                  #"application/json; charset=utf-8"
                  '()
                  (list (string->bytes/utf-8 (jsexpr->string (hasheq 'error msg))))))
+
+;; ---- streaming responses ----
+
+;; Chunked 200 response: writer is (-> output-port? any) and runs on the
+;; connection thread after the status line and headers go out — same
+;; mechanism as the built-in /glaze/events SSE endpoint. Write bytes to the
+;; port and call (flush-output out) after each chunk that should be
+;; delivered immediately; returning from the writer ends the response.
+;;
+;; Error split: a handler that raises before returning still maps to a 500
+;; JSON (nothing is on the wire yet); an exception inside the writer closes
+;; the connection mid-stream — wrap your own errors there if truncation is
+;; unacceptable. The typical use is proxying a streaming LLM endpoint so
+;; tokens reach the page as they arrive (keys stay in Racket, and the page
+;; never makes a cross-origin call).
+(define (streaming-response writer
+                            #:mime [mime #"application/octet-stream"]
+                            #:headers [extra-headers '()])
+  (unless (procedure? writer)
+    (raise-argument-error 'streaming-response "procedure?" writer))
+  (response 200 #"OK" (current-seconds) mime extra-headers writer))
+
+;; SSE flavor of streaming-response: sender is (-> (-> (or/c symbol? string?)
+;; jsexpr? void?) any); each (send name data) emits one
+;; "event: name\ndata: <json>\n\n" frame and flushes. Cache-Control: no-cache
+;; is added automatically (supply #:headers to add more).
+(define (event-stream-response sender #:headers [extra-headers '()])
+  (unless (procedure? sender)
+    (raise-argument-error 'event-stream-response "procedure?" sender))
+  (streaming-response (lambda (out)
+                        (sender (lambda (name data)
+                                  (unless (or (symbol? name) (string? name))
+                                    (raise-argument-error 'send "(or/c symbol? string?)" name))
+                                  (fprintf out "event: ~a\ndata: ~a\n\n" name (jsexpr->string data))
+                                  (flush-output out))))
+                      #:mime #"text/event-stream"
+                      #:headers (cons (header #"Cache-Control" #"no-cache") extra-headers)))
