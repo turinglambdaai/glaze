@@ -20,6 +20,7 @@ You get:
 - **Web for UI** — Tailwind, Svelte, React, or any web framework
 - **Native desktop shell** — a real OS window with an embedded system WebView
 - **JSON API bridge** — the page calls Racket with plain `fetch("/api/...")`
+- **Runtime capabilities** — default-deny route permissions with path and command scopes
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -31,6 +32,7 @@ Glaze is deliberately **GUI-first**. If the required native WebView runtime is m
 | Native toolchain needed | **none** (pure FFI) | Rust + cargo | none | Go + WebView2 deps |
 | Binary size | tiny (Racket exe + assets) | small | 100 MB+ | small |
 | Frontend→backend | HTTP JSON routes (`fetch`) | `invoke()` IPC | Node APIs | bindings |
+| Runtime authority | Route permissions + resource scopes | Capabilities + permissions | app-defined | app-defined |
 | WebView backends | WebView2 / WKWebView / WebKitGTK | system WebView | bundled Chromium | WebView2/WKWebView |
 | Missing WebView behavior | **fail fast + install guidance** | prerequisite error | n/a (bundled) | prerequisite error |
 | Agent-friendly UI verification (`title`/`url`/screenshot) | **built-in** | via WebDriver | via CDP | limited |
@@ -44,6 +46,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Local HTTP application server | ✅ | ✅ | ✅ |
 | System tray | ✅ | ✅ | ✅ (CI-verified) |
 | JSON API bridge | ✅ | ✅ | ✅ |
+| Capability-gated API routes | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -260,6 +263,7 @@ The one-call entry: picks a free port, starts the server (static + JSON API), op
 ```racket
 (run-app #:public-dir "public"
          #:api (list (GET "api/ping" ...))
+         #:capability main-capability
          #:app-id "com.example.myapp"
          #:window-state #t)
 ;; window closes -> server stops -> (values 'webview shutdown)
@@ -295,14 +299,49 @@ The embedded frontend calls Racket with plain `fetch("/api/...")` — Glaze's an
 (GET  "api/ping"            (lambda (req) (hasheq 'pong #t)))
 (POST "api/items/:id/bump"  (lambda (req id) (hasheq 'id id 'bumped #t)))
 (POST "api/echo"            (lambda (req)
-                              (define body (request-json-body req))
-                              (hasheq 'echo body)))
+                               (define body (request-json-body req))
+                               (hasheq 'echo body)))
 ```
 
 - Handlers take the request plus captured `:params`; return a jsexpr (auto-wrapped as JSON 200) or a full response.
 - `request-json-body` parses the JSON body — Racket jsexpr parses JSON object keys as **symbols** (`(hash-ref body 'delta)`).
 - A handler that raises becomes a 500 JSON error, never a broken connection.
 - Unmatched requests fall through to static files (SPA `index.html` fallback).
+
+### Runtime capabilities and scopes
+
+Capabilities are opt-in and strict. Once `#:capability` is supplied, every API
+route must declare `#:permission`; unmarked or ungranted routes return 403 and
+their handlers never run. `run-app` automatically generates and bootstraps an
+API token when a capability is active.
+
+```racket
+(define main-capability
+  (make-capability
+   "main"
+   (list 'settings:read
+         (path-permission 'files:read
+                          #:allow (list app-data-dir)
+                          #:deny (list secrets-dir))
+         (command-permission 'tools:run
+                             #:allow '("git")
+                             #:arguments (lambda (args)
+                                           (equal? args '("--version")))))))
+
+(define routes
+  (list (GET "api/settings" settings-handler
+             #:permission 'settings:read)
+        (POST "api/files/read" read-handler
+              #:permission 'files:read
+              #:resource (lambda (req)
+                           (hash-ref (request-json-body req) 'path)))))
+
+(run-app #:public-dir "public" #:api routes #:capability main-capability)
+```
+
+Use `command-resource` from a route's `#:resource` procedure when enforcing a
+`command-permission`. Deny paths/programs take precedence over allow entries.
+Grant `'glaze:events` when an application capability should access SSE.
 
 ### Typed routes, one declaration — `define-api-routes`
 
@@ -334,6 +373,7 @@ The event stream uses the same local origin as the embedded WebView frontend.
 - Requests are only served for Host headers `127.0.0.1` / `localhost` / `[::1]`.
 - API handler parameter errors become 400 JSON; handler exceptions become 500 JSON and reach `run-app`'s `#:on-error` hook.
 - Optional `#:api-token` protects API routes and SSE. The native app window uses a one-time bootstrap URL to obtain an HttpOnly cookie; programmatic clients use `X-Glaze-Token`.
+- Optional `#:capability` enables default-deny runtime authority. Declared route permissions may be unscoped, path-scoped, or command/argument-scoped; denied handlers are never invoked.
 - Update checks remain opt-in through `run-app #:check-update ...`.
 
 ## System Integrations (`glaze/sys`)

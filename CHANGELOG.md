@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   persistence. Windows, macOS, and Linux now expose outer position, size, and
   maximized state; `run-app #:app-id ... #:window-state #t` restores it and
   clamps stale coordinates to the current virtual desktop.
+- Add a Tauri-style runtime authority layer. Opt-in capabilities make API
+  routes default-deny, bind authority to the WebView token, omit ungranted
+  routes from the generated client, and support deny-first path and
+  command/argument scopes.
 
 ## [0.8.0] - 2026-09-30
 

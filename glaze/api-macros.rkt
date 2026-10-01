@@ -65,7 +65,11 @@
 
   (define (expand-clause c)
     (syntax-parse c
-      [[(method:id path:str) (proc:id param ...) body ...+]
+      [[(method:id path:str
+                   (~optional (~seq #:permission permission:expr) #:defaults ([permission #'#f]))
+                   (~optional (~seq #:resource resource:expr) #:defaults ([resource #'#f])))
+        (proc:id param ...)
+        body ...+]
        (define parts (map param-parts (syntax->list #'(param ...))))
        (define ids (map first parts))
        (define pps (path-params #'path))
@@ -91,7 +95,9 @@
                #`(method path
                          (lambda (req . captured-path-args)
                            (define req-body (request-json-body req))
-                           (proc arg-e ...)))))])))
+                           (proc arg-e ...))
+                         #:permission permission
+                         #:resource resource)))])))
 
 (define-syntax (define-api-routes stx)
   (syntax-parse stx
