@@ -172,6 +172,8 @@ return a true value to authorize the request.}
                           [#:deny deny-roots list? '()]) any/c]{
 Allows resources inside the listed roots except those inside a denied root.
 Paths are simplified through existing symlinks; deny entries take precedence.
+The checked resource may be one path or a non-empty list of paths; every path
+in a list must be authorized.
 }
 
 @defproc[(command-permission [id (or/c symbol? string?)]
@@ -194,6 +196,43 @@ authority without invoking a route.}
 
 @defparam[current-capability-id id (or/c #f string?)]{Bound to the active
 capability ID while a protected route handler or resource extractor runs.}
+
+@section[#:tag "filesystem"]{Scoped Filesystem}
+
+@defmodule[glaze/filesystem]
+
+@defproc[(make-filesystem-routes [#:prefix prefix string? "api/fs"])
+         (listof route?)]{
+Creates frontend routes for text and binary file I/O, directories, metadata,
+existence checks, file copy, move, and removal. The routes declare
+@racket['fs:read] or @racket['fs:write]; use @racket[path-permission] grants in
+the active capability. Copy and move expose both paths as one resource, so both
+source and destination must be in scope.
+
+The default prefix generates client functions such as
+@litchar{glaze.api.fsReadText}, @litchar{glaze.api.fsWriteFile}, and
+@litchar{glaze.api.fsMove}. Binary payloads use base64 strings in JSON.
+}
+
+@defproc[(fs-read-text [path path-string?]) string?]{}
+@defproc[(fs-write-text! [path path-string?] [text string?]) void?]{Writes via a
+same-directory temporary file and atomic replacement.}
+@defproc[(fs-read-bytes [path path-string?]) bytes?]{}
+@defproc[(fs-write-bytes! [path path-string?] [data bytes?]) void?]{Writes via a
+same-directory temporary file and atomic replacement.}
+@defproc[(fs-read-dir [path path-string?]) (listof hash?)]{}
+@defproc[(fs-create-dir! [path path-string?]
+                         [#:recursive? recursive? boolean? #t]) void?]{}
+@defproc[(fs-remove! [path path-string?]
+                     [#:recursive? recursive? boolean? #f]) void?]{}
+@defproc[(fs-copy! [source path-string?]
+                   [destination path-string?]
+                   [#:replace? replace? boolean? #f]) void?]{}
+@defproc[(fs-move! [source path-string?]
+                   [destination path-string?]
+                   [#:replace? replace? boolean? #f]) void?]{}
+@defproc[(fs-stat [path path-string?]) hash?]{}
+@defproc[(fs-exists? [path path-string?]) boolean?]{}
 
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;

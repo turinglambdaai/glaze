@@ -127,15 +127,22 @@
     (raise-argument-error 'path-permission "list of path strings" deny-roots))
   (define allowed (map canonical-path allow-roots))
   (define denied (map canonical-path deny-roots))
-  (scoped-permission id
-                     (lambda (resource)
-                       (and (path-string? resource)
-                            (with-handlers ([exn:fail? (lambda (e) #f)])
-                              (define candidate (canonical-path resource))
-                              (and (for/or ([root (in-list allowed)])
-                                     (path-inside? root candidate))
-                                   (not (for/or ([root (in-list denied)])
-                                          (path-inside? root candidate)))))))))
+  (scoped-permission
+   id
+   (lambda (resource)
+     (define resources
+       (cond
+         [(path-string? resource) (list resource)]
+         [(and (list? resource) (pair? resource) (andmap path-string? resource)) resource]
+         [else #f]))
+     (and resources
+          (with-handlers ([exn:fail? (lambda (e) #f)])
+            (for/and ([resource-path (in-list resources)])
+              (define candidate (canonical-path resource-path))
+              (and (for/or ([root (in-list allowed)])
+                     (path-inside? root candidate))
+                   (not (for/or ([root (in-list denied)])
+                          (path-inside? root candidate))))))))))
 
 (define (command-key program)
   (unless (path-string? program)
