@@ -48,6 +48,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
 | `#:devtools?` | ✅（inspectable，macOS 13+） | ✅（`OpenDevToolsWindow`） | ✅（WebKitGTK inspector） |
+| 窗口几何信息与状态持久化 | ✅ | ✅ | ✅ |
 
 原生 WebView 是应用启动的必要条件。`run-app` / `open-window` **不会**在失败时打开系统浏览器。
 
@@ -269,7 +270,7 @@ SSE 与嵌入式 WebView 前端共享同一个本地 origin。
 (unless (single-instance? "com.me.app") (exit 0))
 ```
 
-窗口控制：`webview-set-title!`、`webview-set-size!`、`webview-set-fullscreen!`、`webview-focus!`。
+窗口控制：`webview-set-title!`、`webview-set-size!`、`webview-set-fullscreen!`、`webview-focus!`。`webview-window-state` / `webview-set-window-state!` 可跨三平台读写窗口外框位置、尺寸与最大化状态。使用 `run-app #:app-id "com.example.app" #:window-state #t` 即可在关闭时保存、下次启动时恢复；恢复值会限制到当前虚拟桌面内，拔掉外接显示器后也不会把窗口留在屏幕外。
 
 ## 系统托盘
 

@@ -14,6 +14,9 @@
          set-title!
          set-size!
          set-fullscreen!
+         geometry
+         set-geometry!
+         screen-area
          focus!
          set-menu!
          closed?)
@@ -46,6 +49,12 @@
   (void))
 (define (set-fullscreen! h on?)
   (void))
+(define (geometry h)
+  #f)
+(define (set-geometry! h x y width height maximized?)
+  #f)
+(define (screen-area)
+  #f)
 
 (define (focus! h)
   (void))

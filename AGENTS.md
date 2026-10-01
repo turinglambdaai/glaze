@@ -116,6 +116,9 @@ capture!
 set-title!
 set-size!
 set-fullscreen!
+geometry
+set-geometry!
+screen-area
 focus!
 set-menu!
 closed?

@@ -44,6 +44,9 @@
          set-title!
          set-size!
          set-fullscreen!
+         geometry
+         set-geometry!
+         screen-area
          focus!
          set-menu!
          closed?
@@ -69,6 +72,14 @@
   (maybe-bind gtk-lib "gtk_window_set_title" (_fun _pointer _string -> _void)))
 (define gtk_window_set_default_size
   (maybe-bind gtk-lib "gtk_window_set_default_size" (_fun _pointer _int _int -> _void)))
+(define gtk_window_resize (maybe-bind gtk-lib "gtk_window_resize" (_fun _pointer _int _int -> _void)))
+(define gtk_window_get_position
+  (maybe-bind gtk-lib "gtk_window_get_position" (_fun _pointer _pointer _pointer -> _void)))
+(define gtk_window_get_size
+  (maybe-bind gtk-lib "gtk_window_get_size" (_fun _pointer _pointer _pointer -> _void)))
+(define gtk_window_move (maybe-bind gtk-lib "gtk_window_move" (_fun _pointer _int _int -> _void)))
+(define gtk_window_is_maximized
+  (maybe-bind gtk-lib "gtk_window_is_maximized" (_fun _pointer -> _bool)))
 (define gtk_container_add (maybe-bind gtk-lib "gtk_container_add" (_fun _pointer _pointer -> _void)))
 (define gtk_widget_show_all (maybe-bind gtk-lib "gtk_widget_show_all" (_fun _pointer -> _void)))
 (define gtk_widget_destroy (maybe-bind gtk-lib "gtk_widget_destroy" (_fun _pointer -> _void)))
@@ -90,7 +101,9 @@
               "g_signal_connect_data"
               (_fun _pointer _string _fpointer _pointer _pointer _uint -> _uintptr)))
 
-(struct lin:webview (window webview [url #:mutable] closed?-box [thread #:mutable]) #:transparent)
+(struct lin:webview
+        (window webview [url #:mutable] closed?-box normal-geometry-box [thread #:mutable])
+  #:transparent)
 
 (define (supported?)
   (define components
@@ -146,6 +159,10 @@
       ;; Non-blocking iteration of the shared default main context (the one
       ;; gtk_init installed); FALSE = don't block waiting for events.
       (g_main_context_iteration #f #f)
+      (unless (and gtk_window_is_maximized (gtk_window_is_maximized (lin:webview-window wv)))
+        (define current (raw-geometry wv))
+        (when current
+          (set-box! (lin:webview-normal-geometry-box wv) current)))
       ;; Mandatory scheduler yield — same reasoning as the macOS pump.
       (sleep 0.005)
       (loop))))
@@ -187,7 +204,8 @@
                        (set-box! closed? #t)
                        (on-close)))
 
-  (define wv (lin:webview window webview url closed? #f))
+  (define wv (lin:webview window webview url closed? (box #f) #f))
+  (set-box! (lin:webview-normal-geometry-box wv) (raw-geometry wv))
   (set-lin:webview-thread! wv (thread (lambda () (pump-loop wv))))
   wv)
 
@@ -274,17 +292,62 @@
 (define gtk_window_fullscreen (maybe-bind gtk-lib "gtk_window_fullscreen" (_fun _pointer -> _void)))
 (define gtk_window_unfullscreen
   (maybe-bind gtk-lib "gtk_window_unfullscreen" (_fun _pointer -> _void)))
+(define gtk_window_maximize (maybe-bind gtk-lib "gtk_window_maximize" (_fun _pointer -> _void)))
+(define gtk_window_unmaximize (maybe-bind gtk-lib "gtk_window_unmaximize" (_fun _pointer -> _void)))
+(define gdk-lib (try-ffi-lib "gdk-3" '("0")))
+(define gdk_screen_get_default (maybe-bind gdk-lib "gdk_screen_get_default" (_fun -> _pointer)))
+(define gdk_screen_get_width (maybe-bind gdk-lib "gdk_screen_get_width" (_fun _pointer -> _int)))
+(define gdk_screen_get_height (maybe-bind gdk-lib "gdk_screen_get_height" (_fun _pointer -> _int)))
 
 (define (set-title! wv t)
   (gtk_window_set_title (lin:webview-window wv) t))
 
 (define (set-size! wv width height)
-  (gtk_window_set_default_size (lin:webview-window wv) width height))
+  ((or gtk_window_resize gtk_window_set_default_size) (lin:webview-window wv) width height))
 
 (define (set-fullscreen! wv on?)
   (if on?
       (gtk_window_fullscreen (lin:webview-window wv))
       (gtk_window_unfullscreen (lin:webview-window wv))))
+
+(define (raw-geometry wv)
+  (and gtk_window_get_position
+       gtk_window_get_size
+       (let ([x (malloc _int 'atomic)]
+             [y (malloc _int 'atomic)]
+             [width (malloc _int 'atomic)]
+             [height (malloc _int 'atomic)])
+         (gtk_window_get_position (lin:webview-window wv) x y)
+         (gtk_window_get_size (lin:webview-window wv) width height)
+         (list (ptr-ref x _int) (ptr-ref y _int) (ptr-ref width _int) (ptr-ref height _int)))))
+
+(define (geometry wv)
+  (define maximized?
+    (and gtk_window_is_maximized (gtk_window_is_maximized (lin:webview-window wv)) #t))
+  (define current (raw-geometry wv))
+  (when (and current (not maximized?))
+    (set-box! (lin:webview-normal-geometry-box wv) current))
+  (define normal (or (unbox (lin:webview-normal-geometry-box wv)) current))
+  (and normal (append normal (list maximized?))))
+
+(define (set-geometry! wv x y width height maximized?)
+  (and gtk_window_move
+       (begin
+         (when gtk_window_unmaximize
+           (gtk_window_unmaximize (lin:webview-window wv)))
+         (gtk_window_move (lin:webview-window wv) x y)
+         ((or gtk_window_resize gtk_window_set_default_size) (lin:webview-window wv) width height)
+         (set-box! (lin:webview-normal-geometry-box wv) (list x y width height))
+         (when (and maximized? gtk_window_maximize)
+           (gtk_window_maximize (lin:webview-window wv)))
+         #t)))
+
+(define (screen-area)
+  (and gdk_screen_get_default
+       gdk_screen_get_width
+       gdk_screen_get_height
+       (let ([screen (gdk_screen_get_default)])
+         (and screen (list 0 0 (gdk_screen_get_width screen) (gdk_screen_get_height screen))))))
 
 (define gtk_window_present (maybe-bind gtk-lib "gtk_window_present" (_fun _pointer -> _pointer)))
 (define (focus! wv)

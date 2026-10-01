@@ -68,6 +68,9 @@
          set-title!
          set-size!
          set-fullscreen!
+         geometry
+         set-geometry!
+         screen-area
          focus!
          set-menu!
          closed?
@@ -93,6 +96,7 @@
               NSProcessInfo
               NSMenu
               NSMenuItem
+              NSScreen
               NSWindow
               NSView
               NSNotification
@@ -587,6 +591,68 @@
   (unless (eq? (unbox (mac:webview-fullscreen?-box wv)) (and on? #t))
     (set-box! (mac:webview-fullscreen?-box wv) (and on? #t))
     (tellv window toggleFullScreen: #:type _id window)))
+
+(define (geometry wv)
+  (define window (mac:webview-window wv))
+  (define maximized? (and (tell #:type _bool window isZoomed) #t))
+  ;; NSWindow keeps the user's pre-zoom frame internally. Briefly toggling to
+  ;; that state lets persistence store the frame that should be restored,
+  ;; rather than the screen-filling zoomed frame.
+  (when maximized?
+    (tellv window zoom: #:type _id window))
+  (define frame (tell #:type _NSRect window frame))
+  (when maximized?
+    (tellv window zoom: #:type _id window))
+  (list (inexact->exact (round (NSPoint-x (NSRect-origin frame))))
+        (inexact->exact (round (NSPoint-y (NSRect-origin frame))))
+        (inexact->exact (round (NSSize-width (NSRect-size frame))))
+        (inexact->exact (round (NSSize-height (NSRect-size frame))))
+        maximized?))
+
+(define (set-geometry! wv x y width height maximized?)
+  (define window (mac:webview-window wv))
+  (define currently-maximized? (and (tell #:type _bool window isZoomed) #t))
+  (when (and currently-maximized? (not maximized?))
+    (tellv window zoom: #:type _id window))
+  (tellv window
+         setFrame:
+         #:type _NSRect
+         (make-NSRect (make-NSPoint (exact->inexact x) (exact->inexact y))
+                      (make-NSSize (exact->inexact width) (exact->inexact height)))
+         display:
+         #:type _bool
+         #t)
+  (when (and maximized? (not currently-maximized?))
+    (tellv window zoom: #:type _id window))
+  #t)
+
+(define (screen-area)
+  (define screens (tell #:type _id NSScreen screens))
+  (define count (tell #:type _uintptr screens count))
+  (and (positive? count)
+       (let loop ([index 0]
+                  [minimum-x +inf.0]
+                  [minimum-y +inf.0]
+                  [maximum-x -inf.0]
+                  [maximum-y -inf.0])
+         (cond
+           [(= index count)
+            (list (inexact->exact (floor minimum-x))
+                  (inexact->exact (floor minimum-y))
+                  (inexact->exact (ceiling (- maximum-x minimum-x)))
+                  (inexact->exact (ceiling (- maximum-y minimum-y))))]
+           [else
+            (define screen (tell screens objectAtIndex: #:type _uintptr index))
+            (define frame (tell #:type _NSRect screen visibleFrame))
+            (define x (NSPoint-x (NSRect-origin frame)))
+            (define y (NSPoint-y (NSRect-origin frame)))
+            (define width (NSSize-width (NSRect-size frame)))
+            (define height (NSSize-height (NSRect-size frame)))
+            (loop (add1 index)
+                  (min minimum-x x)
+                  (min minimum-y y)
+                  (max maximum-x (+ x width))
+                  (max maximum-y (+ y height)))]))))
 
 ;; Bring the window to the front (app activation included) — the right
 ;; way to surface a background window; external osascript frontmost calls

@@ -17,12 +17,14 @@
          glaze/webview/main)
 
 ;; stderr logging so the run leaves evidence in CI logs.
-(define (log msg) (fprintf (current-error-port) "[e2e] ~a\n" msg))
+(define (log msg)
+  (fprintf (current-error-port) "[e2e] ~a\n" msg))
 
 (define failures '())
 (define (check! name ok?)
   (printf "[e2e] ~a ~a\n" (if ok? "PASS" "FAIL") name)
-  (unless ok? (set! failures (cons name failures))))
+  (unless ok?
+    (set! failures (cons name failures))))
 
 (define (wait-until pred [secs 30])
   (define deadline (+ (current-inexact-milliseconds) (* secs 1000)))
@@ -30,28 +32,35 @@
     (cond
       [(pred) #t]
       [(> (current-inexact-milliseconds) deadline) #f]
-      [else (sleep 0.25) (loop)])))
+      [else
+       (sleep 0.25)
+       (loop)])))
 
 (define dir (make-temporary-file "glaze-e2e-~a" 'directory))
 (for ([page '("index.html" "p2.html")]
       [doc '(("<title>E2E One</title>" "ONE") ("<title>E2E Two</title>" "TWO"))])
-  (call-with-output-file (build-path dir page)
-    (lambda (o)
-      (fprintf o
-               "<html><head>~a</head><body style=\"background:#C15F3C;color:#fff\"><h1>~a</h1></body></html>"
-               (first doc)
-               (second doc)))
-    #:exists 'replace))
+  (call-with-output-file
+   (build-path dir page)
+   (lambda (o)
+     (fprintf
+      o
+      "<html><head>~a</head><body style=\"background:#C15F3C;color:#fff\"><h1>~a</h1></body></html>"
+      (first doc)
+      (second doc)))
+   #:exists 'replace))
 
 (define-values (port stop) (start-server #:port 18970 #:public-dir dir))
 (printf "[e2e] server up on ~a, backend-supported?=~a\n" port (webview-supported?))
 
 (define closed? (box #f))
-(define wv (open-window (format "http://127.0.0.1:~a/" port)
-                        #:title "glaze e2e"
-                        #:width 640
-                        #:height 480
-                        #:on-close (lambda () (set-box! closed? #t))))
+(define state-path (make-temporary-file "glaze-window-state-e2e-~a.json"))
+(define wv
+  (open-window (format "http://127.0.0.1:~a/" port)
+               #:title "glaze e2e"
+               #:width 640
+               #:height 480
+               #:window-state state-path
+               #:on-close (lambda () (set-box! closed? #t))))
 (check! "open-window returns webview" (webview? wv))
 (unless (webview? wv)
   (printf "[e2e] backend unavailable on this host — FAIL\n")
@@ -63,6 +72,22 @@
 (check! "page 1 title commits" title1-ok?)
 (check! "page 1 url" (equal? (webview-url wv) (format "http://127.0.0.1:~a/" port)))
 
+(define geometry-ready? (wait-until (lambda () (webview-window-state wv)) 10))
+(check! "window geometry is observable" geometry-ready?)
+(check! "virtual desktop is observable" (screen-area? (webview-screen-area)))
+(when geometry-ready?
+  (define current (webview-window-state wv))
+  (webview-set-window-state!
+   wv
+   (window-state (window-state-x current) (window-state-y current) 620 460 #f))
+  (check! "window geometry is mutable"
+          (wait-until (lambda ()
+                        (define changed (webview-window-state wv))
+                        (and changed
+                             (>= (window-state-width changed) 600)
+                             (>= (window-state-height changed) 440)))
+                      10)))
+
 ;; capture: may need the window to composite first.
 (define shot
   (let retry ([deadline (+ (current-inexact-milliseconds) 10000)])
@@ -70,9 +95,12 @@
     (cond
       [(and s (file-exists? s) (>= (file-size s) 2000)) s]
       [(> (current-inexact-milliseconds) deadline) #f]
-      [else (sleep 0.3) (retry deadline)])))
+      [else
+       (sleep 0.3)
+       (retry deadline)])))
 (check! "capture produces a non-trivial PNG" (and shot #t))
-(when shot (log (format "capture: ~a (~a bytes)" shot (file-size shot))))
+(when shot
+  (log (format "capture: ~a (~a bytes)" shot (file-size shot))))
 
 (webview-navigate wv (format "http://127.0.0.1:~a/p2.html" port))
 (define title2-ok? (wait-until (lambda () (equal? (webview-title wv) "E2E Two"))))
@@ -83,11 +111,17 @@
 (webview-close wv)
 (sleep 0.5)
 (check! "on-close fired" (unbox closed?))
+(check! "window state persisted on close" (window-state? (read-window-state state-path)))
 
 (stop)
 (delete-directory/files dir)
+(when (file-exists? state-path)
+  (delete-file state-path))
 
 (if (null? failures)
-    (begin (printf "[e2e] ALL PASS\n") (exit 0))
-    (begin (printf "[e2e] FAILURES: ~a\n" (string-join (reverse failures) ", "))
-           (exit 1)))
+    (begin
+      (printf "[e2e] ALL PASS\n")
+      (exit 0))
+    (begin
+      (printf "[e2e] FAILURES: ~a\n" (string-join (reverse failures) ", "))
+      (exit 1)))

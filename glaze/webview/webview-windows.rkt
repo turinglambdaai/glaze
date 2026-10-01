@@ -57,6 +57,9 @@
          set-title!
          set-size!
          set-fullscreen!
+         geometry
+         set-geometry!
+         screen-area
          focus!
          set-menu!
          closed?
@@ -239,7 +242,15 @@
                                  [time _uint]
                                  [pt _int]
                                  [pt2 _int]))
+(define-cstruct _POINT ([x _long] [y _long]))
 (define-cstruct _RECT ([left _long] [top _long] [right _long] [bottom _long]))
+(define-cstruct _WINDOWPLACEMENT
+                ([length _uint] [flags _uint]
+                                [showCmd _uint]
+                                [ptMinPosition _POINT]
+                                [ptMaxPosition _POINT]
+                                [rcNormalPosition _RECT]
+                                [rcDevice _RECT]))
 ;; BITMAPINFOHEADER + BITMAPINFO for GetDIBits.
 (define-cstruct _BMIH
                 ([biSize _uint] [biWidth _long]
@@ -610,6 +621,20 @@
                user32
                (_fun _pointer _pointer _int _int _int _int _uint -> _bool)
                (lambda () #f)))
+(define GetWindowRect
+  (get-ffi-obj "GetWindowRect" user32 (_fun _pointer _RECT-pointer -> _bool) (lambda () #f)))
+(define GetWindowPlacement
+  (get-ffi-obj "GetWindowPlacement"
+               user32
+               (_fun _pointer _WINDOWPLACEMENT-pointer -> _bool)
+               (lambda () #f)))
+(define SetWindowPlacement
+  (get-ffi-obj "SetWindowPlacement"
+               user32
+               (_fun _pointer _WINDOWPLACEMENT-pointer -> _bool)
+               (lambda () #f)))
+(define IsZoomed (get-ffi-obj "IsZoomed" user32 (_fun _pointer -> _bool) (lambda () #f)))
+(define GetSystemMetrics (get-ffi-obj "GetSystemMetrics" user32 (_fun _int -> _int) (lambda () #f)))
 (define GetWindowLongPtrW
   (get-ffi-obj "GetWindowLongPtrW" user32 (_fun _pointer _int -> _intptr) (lambda () #f)))
 (define SetWindowLongPtrW
@@ -617,11 +642,18 @@
 
 (define SWP_NOMOVE #x0002)
 (define SWP_NOZORDER #x0004)
+(define SM_CXSCREEN 0)
+(define SM_CYSCREEN 1)
+(define SM_XVIRTUALSCREEN 76)
+(define SM_YVIRTUALSCREEN 77)
+(define SM_CXVIRTUALSCREEN 78)
+(define SM_CYVIRTUALSCREEN 79)
 (define GWL_STYLE -16)
 (define WS_MAXIMIZEBOX #x00010000)
 (define WS_MINIMIZEBOX #x00020000)
 (define SW_MAXIMIZE 3)
 (define SW_RESTORE 9)
+(define SW_SHOWNORMAL 1)
 
 (define (set-title! wv t)
   (define hwnd (unbox (win:webview-hwnd-box wv)))
@@ -636,6 +668,66 @@
 (define (set-fullscreen! wv on?)
   (define hwnd (unbox (win:webview-hwnd-box wv)))
   (and hwnd ShowWindow (ShowWindow hwnd (if on? SW_MAXIMIZE SW_RESTORE))))
+
+(define (geometry wv)
+  (define hwnd (unbox (win:webview-hwnd-box wv)))
+  (and hwnd
+       (let* ([placement (make-WINDOWPLACEMENT (ctype-sizeof _WINDOWPLACEMENT)
+                                               0
+                                               0
+                                               (make-POINT 0 0)
+                                               (make-POINT 0 0)
+                                               (make-RECT 0 0 0 0)
+                                               (make-RECT 0 0 0 0))]
+              [placement-ok? (and GetWindowPlacement (GetWindowPlacement hwnd placement))]
+              [rect (if placement-ok?
+                        (WINDOWPLACEMENT-rcNormalPosition placement)
+                        (make-RECT 0 0 0 0))]
+              [rect-ok? (or placement-ok? (and GetWindowRect (GetWindowRect hwnd rect)))])
+         (and rect-ok?
+              (list (RECT-left rect)
+                    (RECT-top rect)
+                    (- (RECT-right rect) (RECT-left rect))
+                    (- (RECT-bottom rect) (RECT-top rect))
+                    (and IsZoomed (IsZoomed hwnd) #t))))))
+
+(define (set-geometry! wv x y width height maximized?)
+  (define hwnd (unbox (win:webview-hwnd-box wv)))
+  (and hwnd
+       (let ([placement (make-WINDOWPLACEMENT (ctype-sizeof _WINDOWPLACEMENT)
+                                              0
+                                              (if maximized? SW_MAXIMIZE SW_SHOWNORMAL)
+                                              (make-POINT 0 0)
+                                              (make-POINT 0 0)
+                                              (make-RECT x y (+ x width) (+ y height))
+                                              (make-RECT 0 0 0 0))])
+         (cond
+           [(and GetWindowPlacement SetWindowPlacement (GetWindowPlacement hwnd placement))
+            (set-WINDOWPLACEMENT-showCmd! placement (if maximized? SW_MAXIMIZE SW_SHOWNORMAL))
+            (set-WINDOWPLACEMENT-rcNormalPosition! placement (make-RECT x y (+ x width) (+ y height)))
+            (SetWindowPlacement hwnd placement)]
+           [SetWindowPos
+            (and (SetWindowPos hwnd #f x y width height SWP_NOZORDER)
+                 (or (not ShowWindow) (ShowWindow hwnd (if maximized? SW_MAXIMIZE SW_RESTORE))))]
+           [else #f]))))
+
+(define (screen-area)
+  (and GetSystemMetrics
+       (let* ([width (GetSystemMetrics SM_CXVIRTUALSCREEN)]
+              [height (GetSystemMetrics SM_CYVIRTUALSCREEN)]
+              [virtual? (and (> width 0) (> height 0))])
+         (list (if virtual?
+                   (GetSystemMetrics SM_XVIRTUALSCREEN)
+                   0)
+               (if virtual?
+                   (GetSystemMetrics SM_YVIRTUALSCREEN)
+                   0)
+               (if virtual?
+                   width
+                   (GetSystemMetrics SM_CXSCREEN))
+               (if virtual?
+                   height
+                   (GetSystemMetrics SM_CYSCREEN))))))
 
 (define SetForegroundWindow
   (get-ffi-obj "SetForegroundWindow" user32 (_fun _pointer -> _bool) (lambda () #f)))

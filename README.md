@@ -48,6 +48,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
 | `#:devtools?` | ✅ (inspectable, macOS 13+) | ✅ (`OpenDevToolsWindow`) | ✅ (WebKitGTK inspector) |
+| Window geometry + persisted state | ✅ | ✅ | ✅ |
 
 Native WebView support is mandatory for application startup. `run-app` and `open-window` never open the system browser as a fallback.
 
@@ -258,7 +259,9 @@ The one-call entry: picks a free port, starts the server (static + JSON API), op
 
 ```racket
 (run-app #:public-dir "public"
-         #:api (list (GET "api/ping" ...)))
+         #:api (list (GET "api/ping" ...))
+         #:app-id "com.example.myapp"
+         #:window-state #t)
 ;; window closes -> server stops -> (values 'webview shutdown)
 ```
 
@@ -344,7 +347,7 @@ The event stream uses the same local origin as the embedded WebView frontend.
 (unless (single-instance? "com.me.app") (exit 0))
 ```
 
-Window controls include `webview-set-title!`, `webview-set-size!`, `webview-set-fullscreen!`, and `webview-focus!`.
+Window controls include `webview-set-title!`, `webview-set-size!`, `webview-set-fullscreen!`, and `webview-focus!`. `webview-window-state` / `webview-set-window-state!` expose outer position, size, and maximized state on every backend. Opt into automatic close/save + launch/restore with `run-app #:app-id "com.example.app" #:window-state #t`, or pass an explicit state path. Restored geometry is clamped to the current virtual desktop so unplugging a monitor cannot strand the window off-screen.
 
 ## System Tray
 

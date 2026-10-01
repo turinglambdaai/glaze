@@ -29,14 +29,22 @@
          webview-set-title!
          webview-set-size!
          webview-set-fullscreen!
+         webview-window-state
+         webview-set-window-state!
+         webview-screen-area
+         webview-save-state!
+         webview-restore-state!
          webview-focus!
          webview-set-menu!
          webview-closed?
          all-webviews
          close-all-webviews!
-         wait-for-webviews)
+         wait-for-webviews
+         (all-from-out "../window-state.rkt"))
 
-(require "startup-feedback.rkt"
+(require racket/match
+         "../window-state.rkt"
+         "startup-feedback.rkt"
          (only-in "../tray/tray-protocol.rkt" menu?))
 
 ;; A webview handle wraps the backend-specific handle + the backend tag.
@@ -119,6 +127,9 @@
                                         set-title!
                                         set-size!
                                         set-fullscreen!
+                                        geometry
+                                        set-geometry!
+                                        screen-area
                                         focus!
                                         set-menu!
                                         closed?))])
@@ -148,12 +159,14 @@
                      #:width [width 1024]
                      #:height [height 768]
                      #:devtools? [devtools? #f]
+                     #:window-state [state-path #f]
                      #:on-close [on-close (lambda () (void))])
   (open-webview url
                 #:title title
                 #:width width
                 #:height height
                 #:devtools? devtools?
+                #:window-state state-path
                 #:on-close on-close))
 
 (define (open-webview url
@@ -161,22 +174,49 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:window-state [state-path #f]
                       #:on-close [on-close (lambda () (void))])
   (clear-webview-error!)
+  (define saved-state (and state-path (read-window-state state-path)))
+  (define normalized-state
+    (and saved-state
+         (let ([area (webview-screen-area)])
+           (if area
+               (normalize-window-state saved-state area)
+               saved-state))))
+  (define handle-box (box #f))
+  (define (save-before-close)
+    (define handle (unbox handle-box))
+    (when (and state-path handle)
+      (with-handlers ([exn:fail? (lambda (error)
+                                   (fprintf (current-error-port)
+                                            "[glaze] could not save window state: ~a~n"
+                                            (exn-message error)))])
+        (define state (backend-window-state handle))
+        (when state
+          (write-window-state! state-path state))))
+    (on-close))
   (define h
     (with-handlers ([exn:fail? (lambda (e)
                                  (remember-webview-error! e)
                                  #f)])
       ((ref 'open-webview) url
                            #:title title
-                           #:width width
-                           #:height height
+                           #:width (if normalized-state
+                                       (window-state-width normalized-state)
+                                       width)
+                           #:height (if normalized-state
+                                        (window-state-height normalized-state)
+                                        height)
                            #:devtools? devtools?
-                           #:on-close on-close)))
+                           #:on-close save-before-close)))
   (cond
     [h
+     (set-box! handle-box h)
      (define wv (webview (detected-backend) h))
      (hash-set! open-registry wv #t)
+     (when normalized-state
+       (webview-set-window-state! wv normalized-state))
      wv]
     [else
      (unless (webview-last-error)
@@ -226,6 +266,59 @@
   ((ref 'set-size!) (webview-handle wv) width height))
 (define (webview-set-fullscreen! wv on?)
   ((ref 'set-fullscreen!) (webview-handle wv) on?))
+
+(define (list->window-state value)
+  (match value
+    [(list x y width height maximized?)
+     (and (real? x)
+          (real? y)
+          (real? width)
+          (real? height)
+          (boolean? maximized?)
+          (window-state x y width height maximized?))]
+    [_ #f]))
+
+(define (backend-window-state handle)
+  (list->window-state ((ref 'geometry) handle)))
+
+(define (webview-window-state wv)
+  (backend-window-state (webview-handle wv)))
+
+(define (webview-set-window-state! wv state)
+  (unless (window-state? state)
+    (raise-argument-error 'webview-set-window-state! "window-state?" state))
+  ((ref 'set-geometry!) (webview-handle wv)
+                        (window-state-x state)
+                        (window-state-y state)
+                        (window-state-width state)
+                        (window-state-height state)
+                        (window-state-maximized? state)))
+
+(define (webview-screen-area)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (match ((ref 'screen-area))
+      [(list x y width height)
+       (and (real? x)
+            (real? y)
+            (real? width)
+            (real? height)
+            (> width 0)
+            (> height 0)
+            (screen-area x y width height))]
+      [_ #f])))
+
+(define (webview-save-state! wv path)
+  (define state (webview-window-state wv))
+  (and state (write-window-state! path state)))
+
+(define (webview-restore-state! wv path)
+  (define saved (read-window-state path))
+  (and saved
+       (let* ([area (webview-screen-area)]
+              [normalized (if area
+                              (normalize-window-state saved area)
+                              saved)])
+         (webview-set-window-state! wv normalized))))
 
 (define (webview-focus! wv)
   ((ref 'focus!) (webview-handle wv)))
