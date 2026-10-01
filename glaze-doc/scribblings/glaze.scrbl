@@ -234,6 +234,60 @@ same-directory temporary file and atomic replacement.}
 @defproc[(fs-stat [path path-string?]) hash?]{}
 @defproc[(fs-exists? [path path-string?]) boolean?]{}
 
+@section[#:tag "shell"]{Scoped Shell and Child Processes}
+
+@defmodule[glaze/shell]
+
+@defproc[(make-shell-routes [#:prefix prefix string? "api/shell"]
+                            [#:max-output max-output exact-positive-integer? (* 1024 1024)]
+                            [#:max-processes max-processes exact-positive-integer? 32]
+                            [#:cwd-roots cwd-roots (listof path-string?) '()]
+                            [#:allow-environment allowed-environment list? '()]
+                            [#:retention-seconds retention-seconds positive-real? 300])
+         (listof route?)]{
+Creates frontend routes for direct command execution. @racket['shell:execute]
+authorizes @racket[command-resource] values before synchronous or background
+execution; @racket['shell:manage] authorizes background status, stdin, and kill
+operations. Handles are additionally bound to the capability that spawned
+them. Programs are never passed through a system shell. Frontend working
+directories and environment-variable names are denied by default; applications
+must opt in with @racket[cwd-roots] and @racket[allowed-environment]. The
+registry retains at most @racket[max-processes] handles, evicting completed
+handles first.
+
+The default prefix generates @litchar{glaze.api.shellOutput},
+@litchar{shellSpawn}, @litchar{shellStatus}, @litchar{shellWrite},
+@litchar{shellCloseStdin}, and @litchar{shellKill}. Completed handles remain
+available for @racket[retention-seconds].
+}
+
+@defproc[(shell-output [program path-string?]
+                       [arguments (listof string?) '()]
+                       [#:cwd cwd (or/c #f path-string?) #f]
+                       [#:env environment (or/c #f hash?) #f]
+                       [#:timeout timeout (or/c #f positive-real?) 30]
+                       [#:max-output max-output exact-positive-integer? (* 1024 1024)])
+         hash?]{Executes a program directly, closes stdin, waits up to the
+timeout, and returns exit status plus bounded UTF-8 stdout and stderr.}
+
+@defproc[(shell-spawn! [program path-string?]
+                       [arguments (listof string?) '()]
+                       [#:cwd cwd (or/c #f path-string?) #f]
+                       [#:env environment (or/c #f hash?) #f]
+                       [#:max-output max-output exact-positive-integer? (* 1024 1024)])
+         shell-process?]{Starts a background child process without invoking a
+system shell.}
+@defproc[(shell-process-id [child shell-process?]) string?]{}
+@defproc[(shell-process-pid [child shell-process?]) exact-integer?]{}
+@defproc[(shell-process-info [child shell-process?]) hash?]{}
+@defproc[(shell-process-write! [child shell-process?]
+                               [data (or/c string? bytes?)]) void?]{}
+@defproc[(shell-process-close-input! [child shell-process?]) void?]{}
+@defproc[(shell-process-kill! [child shell-process?]
+                              [force? boolean? #t]) void?]{}
+@defproc[(shell-process-wait [child shell-process?]
+                             [timeout (or/c #f nonnegative-real?) #f]) boolean?]{}
+
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;
 a full response value may also be returned, including a streaming response

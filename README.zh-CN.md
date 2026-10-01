@@ -22,6 +22,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **JSON API 桥接** —— 页面用普通 `fetch("/api/...")` 调用 Racket
 - **运行时权限能力** —— API 路由默认拒绝，并支持文件路径与命令参数范围
 - **受限文件系统插件** —— 文本/二进制、目录、元数据、复制/移动/删除
+- **受限 Shell 插件** —— 有界输出、超时、可管理的后台子进程
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -49,6 +50,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | JSON API 桥接 | ✅ | ✅ | ✅ |
 | Capability 限制 API 路由 | ✅ | ✅ | ✅ |
 | 路径 scope 文件系统插件 | ✅ | ✅ | ✅ |
+| 命令 scope Shell/子进程插件 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -303,6 +305,34 @@ allow。应用需要 SSE 时，在 capability 中授予 `'glaze:events`。
 生成的客户端包含 `glaze.api.fsReadText(body)`、`fsWriteFile(body)`、
 `fsReadDir(body)`、`fsMove(body)` 等函数。复制/移动会同时检查源和目标；写入
 使用同目录临时文件后原子替换。
+
+### 受命令 scope 约束的 Shell/子进程插件
+
+`make-shell-routes` 向前端提供不经过系统 shell 的命令执行。进程创建前，程序名
+和参数会先由 `command-permission` 检查；同步调用有超时，输出大小有上限，后台
+进程句柄还会绑定到创建它的 capability：
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (command-permission
+          'shell:execute
+          #:allow '("git")
+          #:arguments (lambda (args) (member args '(("--version") ("status")))))
+         'shell:manage)))
+
+(run-app #:public-dir "public"
+         #:api (make-shell-routes)
+         #:capability authority)
+```
+
+生成的客户端包含 `glaze.api.shellOutput(body)`，以及 `shellSpawn`、
+`shellStatus`、`shellWrite`、`shellCloseStdin`、`shellKill`。程序直接执行，
+不会经由 `cmd.exe` 或 `/bin/sh`，因此没有 shell 插值或展开。前端传入的
+`cwd` 根目录和环境变量名默认拒绝，必须通过 `#:cwd-roots` 和
+`#:allow-environment` 显式开放；每个 stdout/stderr 默认最多保留 1 MiB，
+句柄注册表也有数量上限。
 
 ### 后端 → 前端推送（SSE）
 
