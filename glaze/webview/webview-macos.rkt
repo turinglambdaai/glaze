@@ -617,7 +617,8 @@
   (tellv window
          setFrame:
          #:type _NSRect
-         (make-NSRect (make-NSPoint (* 1.0 x) (* 1.0 y)) (make-NSSize (* 1.0 width) (* 1.0 height)))
+         (make-NSRect (make-NSPoint (exact->inexact x) (exact->inexact y))
+                      (make-NSSize (exact->inexact width) (exact->inexact height)))
          display:
          #:type _bool
          #t)
