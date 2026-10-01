@@ -367,6 +367,68 @@ Returns @racket[#t] only for a verified digest; @racket[#f] also covers cases
 where verification could not be performed.
 }
 
+For installed applications, the signed updater is the preferred path. An
+@racket[update-manifest] binds the application id, SemVer version, release
+channel, minimum supported version, staged rollout percentage, and a set of
+platform/architecture @racket[update-artifact] values into one Ed25519-signed
+payload. Artifact records include a bounded size, SHA-256 digest, installer
+kind and arguments, and an optional second Ed25519 signature.
+
+@defproc[(fetch-update-manifest [manifest-url string?]
+                                [public-key path-string?]
+                                [#:key-id key-id (or/c #f string?) #f]
+                                [#:maximum-bytes maximum-bytes exact-positive-integer?
+                                 (* 1024 1024)])
+         update-manifest?]{
+Downloads an HTTPS manifest with a hard byte limit and verifies its signature.
+If @racket[key-id] is provided, a valid signature from any other release key
+is rejected.
+}
+
+@defproc[(select-update [config updater-config?]
+                        [manifest update-manifest?])
+         (or/c #f update-candidate?)]{
+Checks application identity, channel, exact SemVer precedence, minimum version,
+rollout bucket, platform, and architecture.
+}
+
+@defproc[(download-update [config updater-config?]
+                          [candidate update-candidate?]
+                          [destination path-string?])
+         path?]{
+Downloads to a partial file over HTTPS, enforces the configured maximum and
+signed artifact size, verifies SHA-256 plus the optional artifact signature,
+then atomically renames the verified file into place.
+}
+
+@defproc[(make-install-plan [candidate update-candidate?]
+                            [downloaded-path path-string?]
+                            [#:backup-path backup-path (or/c #f path-string?) #f]
+                            [#:install install procedure?]
+                            [#:restart restart procedure? void]
+                            [#:rollback rollback procedure? void])
+         install-plan?]{}
+
+@defproc[(make-replace-install-plan [candidate update-candidate?]
+                                    [downloaded-path path-string?]
+                                    [target-path path-string?]
+                                    [#:backup-path backup-path path-string?]
+                                    [#:restart restart procedure? void])
+         install-plan?]{
+Creates the atomic portable-artifact strategy, suitable for AppImage-style or
+self-contained deployments. Native installers use @racket[make-install-plan]
+with a platform adapter that owns elevation and process handoff.
+}
+
+@defproc[(execute-install-plan! [plan install-plan?]) any]{
+Runs install and restart. If installation raises and the signed manifest allows
+rollback, the rollback callback runs before the original exception is raised.
+}
+
+Release automation can validate and sign a payload with
+@exec{raco glaze manifest-sign}, then verify the wrapper and pinned key id with
+@exec{raco glaze manifest-verify}.
+
 @section{Licensing}
 
 @defmodule[glaze/license]

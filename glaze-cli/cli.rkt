@@ -8,6 +8,7 @@
          glaze/build
          glaze/license
          glaze/signing
+         glaze/update
          glaze-cli/pkg
          glaze-cli/inspect)
 
@@ -430,6 +431,8 @@ VERIFY
   (displayln "  updater-keygen  Create an Ed25519 keypair for update signing")
   (displayln "  update-sign   Sign an update artifact (Ed25519 over its sha256)")
   (displayln "  update-verify Verify an update artifact signature")
+  (displayln "  manifest-sign Sign a validated update manifest")
+  (displayln "  manifest-verify Verify a signed update manifest")
   (displayln "  license       Sign or verify offline license files")
   (displayln "  install       Pin the glaze package to a revision and link it")
   (displayln "  doctor        Diagnose package/WebView readiness (--json for agents)")
@@ -700,6 +703,93 @@ VERIFY
        (loop (cddr args) out (require-option-value 'updater-keygen "--password" args))]
       [else (error 'updater-keygen "unexpected argument: ~a" (car args))])))
 
+(define (manifest-sign-command rest)
+  (let loop ([args rest]
+             [manifest-path #f]
+             [key #f]
+             [key-id #f]
+             [password #f]
+             [out #f])
+    (cond
+      [(null? args)
+       (unless (and manifest-path key key-id out)
+         (error
+          'manifest-sign
+          "usage: raco glaze manifest-sign --manifest <payload.json> --key <private.pem> --key-id <id> --out <signed.json> [--password <pw>]"))
+       (define manifest (payload-bytes->update-manifest (file->bytes manifest-path)))
+       (call-with-output-file
+        out
+        #:exists 'replace
+        (lambda (output)
+          (write-signed-update-manifest manifest key key-id output #:password password)))
+       (printf "signed update manifest ~a -> ~a\n" manifest-path out)]
+      [(equal? (car args) "--manifest")
+       (loop (cddr args)
+             (require-option-value 'manifest-sign "--manifest" args)
+             key
+             key-id
+             password
+             out)]
+      [(equal? (car args) "--key")
+       (loop (cddr args)
+             manifest-path
+             (require-option-value 'manifest-sign "--key" args)
+             key-id
+             password
+             out)]
+      [(equal? (car args) "--key-id")
+       (loop (cddr args)
+             manifest-path
+             key
+             (require-option-value 'manifest-sign "--key-id" args)
+             password
+             out)]
+      [(equal? (car args) "--password")
+       (loop (cddr args)
+             manifest-path
+             key
+             key-id
+             (require-option-value 'manifest-sign "--password" args)
+             out)]
+      [(equal? (car args) "--out")
+       (loop (cddr args)
+             manifest-path
+             key
+             key-id
+             password
+             (require-option-value 'manifest-sign "--out" args))]
+      [else (error 'manifest-sign "unexpected argument: ~a" (car args))])))
+
+(define (manifest-verify-command rest)
+  (let loop ([args rest]
+             [manifest-path #f]
+             [public-key #f]
+             [key-id #f])
+    (cond
+      [(null? args)
+       (unless (and manifest-path public-key)
+         (error
+          'manifest-verify
+          "usage: raco glaze manifest-verify --manifest <signed.json> --pub <public.pem> [--key-id <id>]"))
+       (define manifest
+         (call-with-input-file manifest-path
+                               (lambda (input)
+                                 (verify-signed-update-manifest input public-key #:key-id key-id))))
+       (printf "VALID: ~a ~a (~a)\n"
+               (update-manifest-application-id manifest)
+               (update-manifest-version manifest)
+               (update-manifest-channel manifest))]
+      [(equal? (car args) "--manifest")
+       (loop (cddr args) (require-option-value 'manifest-verify "--manifest" args) public-key key-id)]
+      [(equal? (car args) "--pub")
+       (loop (cddr args) manifest-path (require-option-value 'manifest-verify "--pub" args) key-id)]
+      [(equal? (car args) "--key-id")
+       (loop (cddr args)
+             manifest-path
+             public-key
+             (require-option-value 'manifest-verify "--key-id" args))]
+      [else (error 'manifest-verify "unexpected argument: ~a" (car args))])))
+
 ;; Dispatch CLI commands
 (define args (vector->list (current-command-line-arguments)))
 (cond
@@ -728,6 +818,8 @@ VERIFY
      ["updater-keygen" (updater-keygen-command rest)]
      ["update-sign" (updater-sign-command rest)]
      ["update-verify" (updater-verify-command rest)]
+     ["manifest-sign" (manifest-sign-command rest)]
+     ["manifest-verify" (manifest-verify-command rest)]
      ["install" (install-command rest)]
      ["doctor" (doctor-command rest)]
      ["help" (print-help)]

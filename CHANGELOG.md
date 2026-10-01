@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Add a complete signed update pipeline alongside the legacy notification
+  helper: SemVer/channel selection, application and key-id pinning, staged
+  rollout, bounded HTTPS downloads, SHA-256 and optional Ed25519 artifact
+  verification, atomic portable replacement, install/restart callbacks, and
+  failure rollback.
+- Add `raco glaze manifest-sign` and `manifest-verify` so release automation
+  can validate, sign, and verify the exact manifest consumed by applications.
+
 ## [0.8.0] - 2026-09-30
 
 ### Changed
