@@ -435,11 +435,20 @@ NSI
 ;; app would exit 0 without executing anything (the entry wrapper itself has
 ;; no main submodule either).
 (define (entry-module-source user-entry)
-  (define entry-filename
-    (let ([p (if (complete-path? user-entry)
-                 user-entry
-                 (path->complete-path user-entry))])
-      (path->string (file-name-from-path p))))
+  (define entry-path
+    (if (complete-path? user-entry)
+        user-entry
+        (path->complete-path user-entry)))
+  (define entry-filename (path->string (file-name-from-path entry-path)))
+  ;; Does the entry declare (module+ main)? Detected textually at build time:
+  ;; in raco-exe builds `module-declared?` reports #f and `dynamic-require`
+  ;; cannot resolve the submod (it falls back to source resolution and dies
+  ;; on a missing reader collection), so a runtime probe silently skips the
+  ;; program body (glaze#1). A static submodule require is embedded-safe and
+  ;; instantiates the submodule exactly like `racket main.rkt` does;
+  ;; top-level-style entries need no extra form.
+  (define has-main-submod?
+    (and (regexp-match #px"\\(module\\+\\s+main\\b" (file->string entry-path)) #t))
   (string-append
    "#lang racket/base\n"
    "(require racket/path)\n"
@@ -457,17 +466,9 @@ NSI
    ;; Static require: embeds the user module and its full dependency closure
    ;; (raco exe cannot see dynamic-requires), and runs top-level code once.
    (format "(require \"~a\")\n" entry-filename)
-   ";; Run the user entry the way `racket main.rkt` would: the (module+ main)\n"
-   ";; submodule when declared, else the module body. The static require above\n"
-   ";; embeds the full dependency closure and runs top-level code once; the\n"
-   ";; main submodule itself is only instantiated for the program's top module,\n"
-   ";; which is this wrapper — so run it explicitly here.\n"
-   "(when (module-declared? '(submod \""
-   entry-filename
-   "\" main) #t)\n"
-   "  (dynamic-require '(submod \""
-   entry-filename
-   "\" main) 0))\n"))
+   (if has-main-submod?
+       (format "(require (submod \"~a\" main))\n" entry-filename)
+       "")))
 
 ;; Assemble a canonical macOS .app bundle from whatever `raco distribute`
 ;; produced. Current versions lay out <dist>/bin/<name> + <dist>/lib/; older
