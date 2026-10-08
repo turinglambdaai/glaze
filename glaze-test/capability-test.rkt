@@ -18,14 +18,17 @@
 (define outside (make-temporary-file "glaze-capability-outside-~a" 'directory))
 
 (define authority
-  (make-capability "main"
-                   (list 'app:read
-                         (path-permission 'fs:read #:allow (list root) #:deny (list private-dir))
-                         (command-permission 'shell:execute
-                                             #:allow '("git" "racket")
-                                             #:deny '("racket")
-                                             #:arguments (lambda (arguments)
-                                                           (equal? arguments '("--version")))))))
+  (make-capability
+   "main"
+   (list 'app:read
+         (path-permission 'fs:read #:allow (list root) #:deny (list private-dir))
+         (url-permission 'opener:open-url
+                         #:allow (list "https://tauri.app" #px"^https://docs\\.example\\.com/")
+                         #:deny (list #px"/private(?:/|$)"))
+         (command-permission 'shell:execute
+                             #:allow '("git" "racket")
+                             #:deny '("racket")
+                             #:arguments (lambda (arguments) (equal? arguments '("--version")))))))
 
 (check-equal? (capability-id authority) "main")
 (check-true (capability-has-permission? authority 'app:read))
@@ -34,6 +37,11 @@
 (check-true (capability-authorized? authority 'fs:read (build-path root "ok.txt")))
 (check-false (capability-authorized? authority 'fs:read (build-path private-dir "secret.txt")))
 (check-false (capability-authorized? authority 'fs:read (build-path outside "not-allowed.txt")))
+(check-true (capability-authorized? authority 'opener:open-url "https://tauri.app"))
+(check-true (capability-authorized? authority 'opener:open-url "https://docs.example.com/guide"))
+(check-false
+ (capability-authorized? authority 'opener:open-url "https://docs.example.com/private/page"))
+(check-false (capability-authorized? authority 'opener:open-url "https://example.com"))
 (define linked-outside (build-path root "linked-outside"))
 (define symlink-supported?
   (with-handlers ([exn:fail? (lambda (e) #f)])
@@ -50,6 +58,7 @@
  (capability-authorized? authority 'shell:execute (command-resource "powershell" '("--version"))))
 (check-false (capability-authorized? authority 'shell:execute (command-resource 42 '("--version"))))
 (check-false (current-capability-id))
+(check-exn exn:fail:contract? (lambda () (url-permission 'bad:url #:allow (list #rx#"^https:"))))
 (check-exn exn:fail:contract?
            (lambda () (make-capability "duplicate" '(same same)))
            "duplicate grants cannot bypass scoped denials")

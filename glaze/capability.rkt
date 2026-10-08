@@ -15,6 +15,7 @@
          allow-permission
          scoped-permission
          path-permission
+         url-permission
          command-permission
          command-resource
          command-resource?
@@ -143,6 +144,28 @@
                      (path-inside? root candidate))
                    (not (for/or ([root (in-list denied)])
                           (path-inside? root candidate))))))))))
+
+;; URL scopes deliberately use exact strings or explicit regular expressions.
+;; There is no implicit wildcard expansion, so a typo cannot silently broaden
+;; an opener/network capability.
+(define (url-permission id #:allow allowed-patterns #:deny [denied-patterns '()])
+  (define (pattern? value)
+    (or (string? value) (and (regexp? value) (not (byte-regexp? value)))))
+  (unless (and (list? allowed-patterns) (andmap pattern? allowed-patterns))
+    (raise-argument-error 'url-permission "list of strings or regexps" allowed-patterns))
+  (unless (and (list? denied-patterns) (andmap pattern? denied-patterns))
+    (raise-argument-error 'url-permission "list of strings or regexps" denied-patterns))
+  (define (matches? pattern url)
+    (if (string? pattern)
+        (string=? pattern url)
+        (and (regexp-match? pattern url) #t)))
+  (scoped-permission id
+                     (lambda (resource)
+                       (and (string? resource)
+                            (for/or ([pattern (in-list allowed-patterns)])
+                              (matches? pattern resource))
+                            (not (for/or ([pattern (in-list denied-patterns)])
+                                   (matches? pattern resource)))))))
 
 (define (command-key program)
   (unless (path-string? program)
