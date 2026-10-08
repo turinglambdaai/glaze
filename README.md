@@ -22,6 +22,7 @@ You get:
 - **JSON API bridge** — the page calls Racket with plain `fetch("/api/...")`
 - **Runtime capabilities** — default-deny route permissions with path and command scopes
 - **Scoped filesystem plugin** — text/binary I/O, directories, metadata, copy/move/remove
+- **Scoped shell plugin** — bounded command output, timeouts, managed background processes
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -49,6 +50,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | JSON API bridge | ✅ | ✅ | ✅ |
 | Capability-gated API routes | ✅ | ✅ | ✅ |
 | Scoped filesystem plugin | ✅ | ✅ | ✅ |
+| Scoped shell/process plugin | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -368,6 +370,36 @@ The generated client exposes functions such as `glaze.api.fsReadText(body)`,
 `fsWriteFile(body)`, `fsReadDir(body)`, and `fsMove(body)`. Copy and move scope
 checks cover both source and destination. Writes use same-directory temporary
 files followed by atomic replacement.
+
+### Scoped shell/process plugin
+
+`make-shell-routes` exposes direct, non-shell command execution to the frontend.
+Commands and arguments are checked by `command-permission` before a process is
+created. Output is bounded, synchronous calls have a timeout, and background
+handles are bound to the capability that spawned them:
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (command-permission
+          'shell:execute
+          #:allow '("git")
+          #:arguments (lambda (args) (member args '(("--version") ("status")))))
+         'shell:manage)))
+
+(run-app #:public-dir "public"
+         #:api (make-shell-routes)
+         #:capability authority)
+```
+
+The generated client provides `glaze.api.shellOutput(body)` plus managed
+`shellSpawn`, `shellStatus`, `shellWrite`, `shellCloseStdin`, and `shellKill`
+calls. Programs are executed directly rather than through `cmd.exe` or
+`/bin/sh`; no shell interpolation or expansion is performed. Frontend `cwd`
+roots and environment-variable names are denied by default and can be
+explicitly allowed with `#:cwd-roots` and `#:allow-environment`. Retained
+stdout/stderr default to 1 MiB per stream, and the handle registry is bounded.
 
 ### Typed routes, one declaration — `define-api-routes`
 
