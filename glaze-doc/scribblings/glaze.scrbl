@@ -176,6 +176,14 @@ The checked resource may be one path or a non-empty list of paths; every path
 in a list must be authorized.
 }
 
+@defproc[(url-permission [id (or/c symbol? string?)]
+                         [#:allow allowed-patterns list?]
+                         [#:deny denied-patterns list? '()]) any/c]{
+Allows URL resources that match an exact string or an explicitly supplied
+regular expression. Deny patterns take precedence. Strings never gain implicit
+wildcards.
+}
+
 @defproc[(command-permission [id (or/c symbol? string?)]
                              [#:allow allow-programs list?]
                              [#:deny deny-programs list? '()]
@@ -340,6 +348,34 @@ from defaults. The file is created on the first save.}
 @defproc[(store-reload! [storage store?]
                         [#:ignore-defaults? ignore-defaults? boolean? #f]) void?]{}
 @defproc[(store-close! [storage store?]) void?]{}
+
+@section[#:tag "system-plugins"]{Capability-Gated System Plugins}
+
+@defmodule[glaze/system]
+
+@defproc[(make-system-routes [#:prefix prefix string? "api/system"])
+         (listof route?)]{
+Creates frontend routes for clipboard text, desktop notifications, opening or
+revealing paths, opening URLs, and OS information. The routes use distinct
+permissions: @racket['clipboard:read], @racket['clipboard:write],
+@racket['notification:send], @racket['opener:open-path],
+@racket['opener:reveal-path], @racket['opener:open-url], @racket['os:read],
+and @racket['os:hostname]. Path operations should use @racket[path-permission]
+grants and URL opening should use @racket[url-permission]. Resource scopes are
+checked before native handlers run.
+
+The default prefix generates @litchar{systemClipboardRead},
+@litchar{systemClipboardWrite}, @litchar{systemNotificationSend},
+@litchar{systemOpenerOpenPath}, @litchar{systemOpenerRevealPath},
+@litchar{systemOpenerOpenUrl}, @litchar{systemOsInfo}, and
+@litchar{systemOsHostname}.
+}
+
+@defproc[(system-information) hash?]{Returns platform, OS type, family,
+architecture, executable extension, locale, and the runtime-reported system
+version string.}
+@defproc[(system-hostname) string?]{Returns the local host name. Frontend access
+uses the separate @racket['os:hostname] permission.}
 
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;

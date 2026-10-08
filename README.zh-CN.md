@@ -24,6 +24,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **受限文件系统插件** —— 文本/二进制、目录、元数据、复制/移动/删除
 - **受限 Shell 插件** —— 有界输出、超时、可管理的后台子进程
 - **持久化 Store 插件** —— 原子 JSON、自动保存防抖与变更事件
+- **系统插件** —— 受限剪贴板、通知、Opener 与操作系统信息
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -53,6 +54,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 路径 scope 文件系统插件 | ✅ | ✅ | ✅ |
 | 命令 scope Shell/子进程插件 | ✅ | ✅ | ✅ |
 | 持久化键值 Store 插件 | ✅ | ✅ | ✅ |
+| Capability 限制系统插件 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -391,6 +393,32 @@ SSE 与嵌入式 WebView 前端共享同一个本地 origin。
 (reveal-path "/Users/me/report.pdf")
 (unless (single-instance? "com.me.app") (exit 0))
 ```
+
+同一组桌面能力也可通过 `make-system-routes` 安全地开放给嵌入式前端。
+所有操作仍然默认拒绝：剪贴板读写分别授权，通知需要
+`notification:send`，打开/定位文件使用路径 scope，URL 使用精确字符串或
+正则 scope，hostname 也与普通 OS 信息分开授权：
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list 'clipboard:write
+         'notification:send
+         'os:read
+         (path-permission 'opener:open-path #:allow (list documents-dir))
+         (url-permission 'opener:open-url
+                         #:allow (list #px"^https://docs\\.example\\.com/")))))
+
+(run-app ...
+         #:api (make-system-routes)
+         #:capability authority)
+```
+
+获得对应权限后，生成的客户端提供 `systemClipboardRead`、
+`systemClipboardWrite`、`systemNotificationSend`、`systemOpenerOpenPath`、
+`systemOpenerRevealPath`、`systemOpenerOpenUrl`、`systemOsInfo` 与
+`systemOsHostname`。
 
 窗口控制：`webview-set-title!`、`webview-set-size!`、`webview-set-fullscreen!`、`webview-focus!`。`webview-window-state` / `webview-set-window-state!` 可跨三平台读写窗口外框位置、尺寸与最大化状态。使用 `run-app #:app-id "com.example.app" #:window-state #t` 即可在关闭时保存、下次启动时恢复；恢复值会限制到当前虚拟桌面内，拔掉外接显示器后也不会把窗口留在屏幕外。
 

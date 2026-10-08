@@ -24,6 +24,7 @@ You get:
 - **Scoped filesystem plugin** — text/binary I/O, directories, metadata, copy/move/remove
 - **Scoped shell plugin** — bounded command output, timeouts, managed background processes
 - **Persistent store plugin** — atomic JSON stores, debounced auto-save, change events
+- **System plugins** — scoped clipboard, notifications, opener, and OS information
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -53,6 +54,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Scoped filesystem plugin | ✅ | ✅ | ✅ |
 | Scoped shell/process plugin | ✅ | ✅ | ✅ |
 | Persistent key-value store plugin | ✅ | ✅ | ✅ |
+| Capability-gated system plugins | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -474,6 +476,33 @@ The event stream uses the same local origin as the embedded WebView frontend.
 (reveal-path "/Users/me/report.pdf")
 (unless (single-instance? "com.me.app") (exit 0))
 ```
+
+The same desktop features are available to the embedded frontend through
+`make-system-routes`. Every operation remains default-deny: clipboard read and
+write are separate permissions, notifications require `notification:send`,
+file opening/reveal uses path scopes, URLs use exact or regular-expression
+scopes, and hostname access is separate from ordinary OS information:
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list 'clipboard:write
+         'notification:send
+         'os:read
+         (path-permission 'opener:open-path #:allow (list documents-dir))
+         (url-permission 'opener:open-url
+                         #:allow (list #px"^https://docs\\.example\\.com/")))))
+
+(run-app ...
+         #:api (make-system-routes)
+         #:capability authority)
+```
+
+The generated client includes `systemClipboardRead`, `systemClipboardWrite`,
+`systemNotificationSend`, `systemOpenerOpenPath`, `systemOpenerRevealPath`,
+`systemOpenerOpenUrl`, `systemOsInfo`, and `systemOsHostname` when their
+permissions are granted.
 
 Window controls include `webview-set-title!`, `webview-set-size!`, `webview-set-fullscreen!`, and `webview-focus!`. `webview-window-state` / `webview-set-window-state!` expose outer position, size, and maximized state on every backend. Opt into automatic close/save + launch/restore with `run-app #:app-id "com.example.app" #:window-state #t`, or pass an explicit state path. Restored geometry is clamped to the current virtual desktop so unplugging a monitor cannot strand the window off-screen.
 

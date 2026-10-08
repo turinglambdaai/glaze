@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Add a capability-gated persistent JSON store plugin with defaults,
   debounced auto-save, atomic writes, reload/reset/save/close lifecycle,
   deterministic enumeration, rooted paths, and optional SSE change events.
+- Add capability-gated frontend routes for clipboard text, notifications,
+  opening and revealing scoped paths, opening scoped URLs, and OS information.
+  Clipboard read/write and hostname access are independently granted; URL
+  scopes accept exact strings or explicit regular expressions.
 
 ## [0.8.0] - 2026-09-30
 

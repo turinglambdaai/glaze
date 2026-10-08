@@ -260,6 +260,7 @@ SSE 事件流使用同一个 origin；这套 HTTP 机制服务的是**嵌入式 
 - 内置 filesystem routes 必须在 handler 前检查 `fs:read` / `fs:write`；复制和移动同时检查源与目标；
 - 内置 shell routes 必须直接执行程序而不拼接系统 shell；创建前校验命令/参数 scope，前端 cwd/env 默认拒绝，限制输出/句柄数，并把后台句柄绑定到 capability；
 - 内置 store routes 必须在 handler 前检查 `store:read` / `store:write`，root 不可穿越，写盘保持原子性，缓存按 capability 隔离；
+- 内置 system routes 的 clipboard 读写、notification、opener 与 OS/hostname 必须分别授权；路径和 URL 都在 handler 前完成 scope 检查；
 - 同用户本地进程仍可能读进程内存，因此这不是强隔离边界。
 
 ## 系统托盘
