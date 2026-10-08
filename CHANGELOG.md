@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   opening and revealing scoped paths, opening scoped URLs, and OS information.
   Clipboard read/write and hostname access are independently granted; URL
   scopes accept exact strings or explicit regular expressions.
+- Add a Tauri-style path resolver for application, user, temporary,
+  executable, and resource directories; portable/per-directory overrides;
+  resource-root confinement; and capability-gated frontend path utilities.
 
 ## [0.8.0] - 2026-09-30
 

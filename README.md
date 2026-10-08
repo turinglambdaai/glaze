@@ -25,6 +25,7 @@ You get:
 - **Scoped shell plugin** — bounded command output, timeouts, managed background processes
 - **Persistent store plugin** — atomic JSON stores, debounced auto-save, change events
 - **System plugins** — scoped clipboard, notifications, opener, and OS information
+- **Path resolver** — app directories, resources, portable overrides, path utilities
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -55,6 +56,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Scoped shell/process plugin | ✅ | ✅ | ✅ |
 | Persistent key-value store plugin | ✅ | ✅ | ✅ |
 | Capability-gated system plugins | ✅ | ✅ | ✅ |
+| App/user/resource path resolver | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -432,6 +434,34 @@ root is rejected independently of the capability check. Generated functions
 include `storeLoad`, `storeGet`, `storeSet`, `storeEntries`, `storeReset`,
 `storeSave`, `storeReload`, and `storeClose`. Mutations publish
 `store:change` over the existing SSE event bus when `#:events` is supplied.
+
+### Application paths
+
+`make-path-resolver` provides the Tauri-style config/data/local-data/cache/log
+directories namespaced by the application identifier, plus user, temporary,
+font, template, executable, and resource locations. Linux user directories
+honor `user-dirs.dirs`. A single portable root or per-directory
+overrides are supported:
+
+```racket
+(define paths
+  (make-path-resolver
+   "com.example.app"
+   #:resource-root bundled-assets
+   #:app-directories-override (hasheq 'data "$DOCUMENT/My App"
+                                       'cache "$CACHE/my-app")))
+
+(define settings-root (app-data-dir paths))
+(define icon-path (resolve-resource paths "icons/app.png"))
+```
+
+`make-path-routes` exposes independently permissioned directory queries and
+`join`, `resolve`, `normalize`, `basename`, `dirname`, `extname`, and
+`is-absolute` utilities to the generated frontend client. Resource resolution
+rejects absolute paths, `..` traversal, and existing symlink escapes. Override
+variables include `$AUDIO`, `$CACHE`, `$CONFIG`, `$DATA`, `$LOCALDATA`,
+`$DESKTOP`, `$DOCUMENT`, `$DOWNLOAD`, `$HOME`, `$PICTURE`, `$PUBLIC`, `$TEMP`,
+and `$VIDEO`.
 
 ### Typed routes, one declaration — `define-api-routes`
 
