@@ -25,6 +25,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **受限 Shell 插件** —— 有界输出、超时、可管理的后台子进程
 - **持久化 Store 插件** —— 原子 JSON、自动保存防抖与变更事件
 - **系统插件** —— 受限剪贴板、通知、Opener 与操作系统信息
+- **路径解析器** —— 应用目录、资源、便携覆盖与路径工具
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -55,6 +56,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 命令 scope Shell/子进程插件 | ✅ | ✅ | ✅ |
 | 持久化键值 Store 插件 | ✅ | ✅ | ✅ |
 | Capability 限制系统插件 | ✅ | ✅ | ✅ |
+| 应用/用户/资源路径解析 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -364,6 +366,32 @@ save。Store 使用 JSON，写入采用原子替换，自动保存默认以 100 
 该根目录。生成的函数包括 `storeLoad`、`storeGet`、`storeSet`、
 `storeEntries`、`storeReset`、`storeSave`、`storeReload`、`storeClose`。
 传入 `#:events` 后，变更会通过现有 SSE 总线发布为 `store:change`。
+
+### 应用路径
+
+`make-path-resolver` 提供 Tauri 风格的 config/data/local-data/cache/log
+目录，并按应用标识符隔离；同时提供用户目录、临时目录、可执行文件目录和资源
+目录，以及字体和模板目录；Linux 会读取 `user-dirs.dirs`。既支持单一便携
+根目录，也支持逐目录覆盖：
+
+```racket
+(define paths
+  (make-path-resolver
+   "com.example.app"
+   #:resource-root bundled-assets
+   #:app-directories-override (hasheq 'data "$DOCUMENT/My App"
+                                       'cache "$CACHE/my-app")))
+
+(define settings-root (app-data-dir paths))
+(define icon-path (resolve-resource paths "icons/app.png"))
+```
+
+`make-path-routes` 将目录查询和 `join`、`resolve`、`normalize`、
+`basename`、`dirname`、`extname`、`is-absolute` 分别按权限开放给生成的前端
+客户端。资源解析会拒绝绝对路径、`..` 穿越和已有符号链接逃逸。覆盖变量支持
+`$AUDIO`、`$CACHE`、`$CONFIG`、`$DATA`、`$LOCALDATA`、`$DESKTOP`、
+`$DOCUMENT`、`$DOWNLOAD`、`$HOME`、`$PICTURE`、`$PUBLIC`、`$TEMP`、
+`$VIDEO`。
 
 ### 后端 → 前端推送（SSE）
 

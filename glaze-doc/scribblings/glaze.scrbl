@@ -377,6 +377,50 @@ version string.}
 @defproc[(system-hostname) string?]{Returns the local host name. Frontend access
 uses the separate @racket['os:hostname] permission.}
 
+@section[#:tag "paths"]{Application and Resource Paths}
+
+@defmodule[glaze/path]
+
+@defproc[(make-path-resolver [app-id string?]
+                             [#:resource-root resource-root path-string?]
+                             [#:app-directories-override overrides
+                              (or/c #f path-string? hash?) #f])
+         path-resolver?]{
+Creates a resolver for Tauri-style application directories. A path override
+uses one portable root: config/data/local-data use the root, cache uses its
+@litchar{caches} child, and log uses @litchar{logs}. A hash may override
+@racket['config], @racket['data], @racket['localData], @racket['cache], and
+@racket['log] individually. Overrides accept the documented @litchar{$HOME},
+@litchar{$DATA}, @litchar{$LOCALDATA}, and other base-directory variables.
+}
+
+@defproc[(make-path-routes [#:app-id app-id string?]
+                           [#:resource-root resource-root path-string?]
+                           [#:app-directories-override overrides
+                            (or/c #f path-string? hash?) #f]
+                           [#:prefix prefix string? "api/path"])
+         (listof route?)]{
+Creates granular, default-deny frontend routes for application/user/resource
+directories and path utilities. Resource resolution is confined to the
+configured resource root even through existing symbolic links.
+}
+
+@defproc[(app-config-dir [resolver path-resolver?]) path?]{}
+@defproc[(app-data-dir [resolver path-resolver?]) path?]{}
+@defproc[(app-local-data-dir [resolver path-resolver?]) path?]{}
+@defproc[(app-cache-dir [resolver path-resolver?]) path?]{}
+@defproc[(app-log-dir [resolver path-resolver?]) path?]{}
+@defproc[(resource-dir [resolver path-resolver?]) path?]{}
+@defproc[(resolve-resource [resolver path-resolver?]
+                           [relative-path path-string?]) path?]{}
+@defproc[(path-join [path path-string?] ...) path?]{}
+@defproc[(path-resolve [path path-string?] ...) path?]{}
+@defproc[(path-normalize [path path-string?]) path?]{}
+@defproc[(path-basename [path path-string?]) string?]{}
+@defproc[(path-dirname [path path-string?]) string?]{}
+@defproc[(path-extname [path path-string?]) string?]{}
+@defproc[(path-absolute? [path path-string?]) boolean?]{}
+
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;
 a full response value may also be returned, including a streaming response
