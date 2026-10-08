@@ -23,13 +23,20 @@
          command-resource-arguments
          capability-has-permission?
          capability-authorized?
-         current-capability-id)
+         current-capability-id
+         current-capability-authorizer
+         current-capability-authorized?)
 
 (struct capability (id grants) #:transparent)
 (struct permission-grant (id authorize) #:transparent)
 (struct command-resource (program arguments) #:transparent)
 
 (define current-capability-id (make-parameter #f))
+(define current-capability-authorizer (make-parameter #f))
+
+(define (current-capability-authorized? id [resource #f])
+  (define authorize (current-capability-authorizer))
+  (and authorize (authorize id resource)))
 
 (define (permission-id who id)
   (cond

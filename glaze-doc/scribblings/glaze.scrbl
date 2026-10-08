@@ -205,6 +205,15 @@ authority without invoking a route.}
 @defparam[current-capability-id id (or/c #f string?)]{Bound to the active
 capability ID while a protected route handler or resource extractor runs.}
 
+@defparam[current-capability-authorizer authorize (or/c #f procedure?)]{
+Bound to the active capability's authorizer while a protected route resource
+extractor or handler runs. This permits a handler to authorize resources that
+are only discovered during execution, such as HTTP redirect targets.}
+
+@defproc[(current-capability-authorized? [permission (or/c symbol? string?)]
+                                         [resource any/c #f]) boolean?]{Checks
+the dynamically active capability. Returns false outside a protected route.}
+
 @section[#:tag "filesystem"]{Scoped Filesystem}
 
 @defmodule[glaze/filesystem]
@@ -420,6 +429,44 @@ configured resource root even through existing symbolic links.
 @defproc[(path-dirname [path path-string?]) string?]{}
 @defproc[(path-extname [path path-string?]) string?]{}
 @defproc[(path-absolute? [path path-string?]) boolean?]{}
+
+@section[#:tag "http-client"]{Scoped HTTP Client}
+
+@defmodule[glaze/http]
+
+@defproc[(http-request [url string?]
+                       [#:method method (or/c string? symbol? bytes?) "GET"]
+                       [#:headers headers hash? (hasheq)]
+                       [#:body body (or/c #f string? bytes?) #f]
+                       [#:timeout timeout real? 30]
+                       [#:max-request-bytes max-request-bytes exact-positive-integer?
+                        (* 10 1024 1024)]
+                       [#:max-response-bytes max-response-bytes exact-positive-integer?
+                        (* 10 1024 1024)]
+                       [#:max-redirects max-redirects exact-nonnegative-integer? 5]
+                       [#:authorize-url? authorize-url? procedure?
+                        (lambda (candidate) #t)])
+         hash?]{
+Performs a bounded HTTP or HTTPS request and returns the status, final URL,
+headers, UTF-8 replacement-decoded text, and base64 body. The timeout is a
+total deadline across redirects. Every URL, including every redirect target,
+is checked before connecting. Cross-origin redirects remove
+@litchar{Authorization} and @litchar{Cookie}.}
+
+@defproc[(make-http-routes [#:prefix prefix string? "api/http"]
+                           [#:max-request-bytes max-request-bytes
+                            exact-positive-integer? (* 10 1024 1024)]
+                           [#:max-response-bytes max-response-bytes
+                            exact-positive-integer? (* 10 1024 1024)]
+                           [#:timeout timeout real? 30]
+                           [#:max-redirects max-redirects
+                            exact-nonnegative-integer? 5])
+         (listof route?)]{
+Creates @racket['http:request]-protected frontend access. The generated client
+contains @litchar{glaze.api.httpRequest}. Initial and redirected URLs are
+checked against the active URL-scoped capability before connecting. Frontend
+callers may lower configured limits but cannot raise them. Connection-managed
+headers such as @litchar{Host} and @litchar{Content-Length} are rejected.}
 
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;
