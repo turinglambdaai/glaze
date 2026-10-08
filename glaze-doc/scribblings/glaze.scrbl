@@ -288,6 +288,59 @@ system shell.}
 @defproc[(shell-process-wait [child shell-process?]
                              [timeout (or/c #f nonnegative-real?) #f]) boolean?]{}
 
+@section[#:tag "store"]{Persistent JSON Store}
+
+@defmodule[glaze/store]
+
+@defproc[(make-store-routes [#:root root path-string?]
+                            [#:prefix prefix string? "api/store"]
+                            [#:defaults defaults hash? (hasheq)]
+                            [#:auto-save auto-save (or/c boolean? nonnegative-real?) 100]
+                            [#:events events (or/c #f event-bus?) #f])
+         (listof route?)]{
+Creates capability-gated frontend routes for persistent JSON key-value stores.
+Read operations declare @racket['store:read] and mutations declare
+@racket['store:write]. Frontend paths must be relative and cannot escape the
+required @racket[root]. Mutations optionally publish
+@racket['store:change] on @racket[events]. Auto-save uses a debounce interval in
+milliseconds; @racket[#f] disables it.
+
+The generated client includes @litchar{storeLoad}, @litchar{storeGet},
+@litchar{storeSet}, @litchar{storeHas}, @litchar{storeDelete},
+@litchar{storeClear}, @litchar{storeReset}, @litchar{storeKeys},
+@litchar{storeValues}, @litchar{storeEntries}, @litchar{storeLength},
+@litchar{storeSave}, @litchar{storeReload}, and @litchar{storeClose}.
+}
+
+@defproc[(load-store [path path-string?]
+                     [#:defaults defaults hash? (hasheq)]
+                     [#:auto-save auto-save (or/c boolean? nonnegative-real?) 100]
+                     [#:create-new? create-new? boolean? #f]
+                     [#:override-defaults? override-defaults? boolean? #f])
+         store?]{Loads a JSON object from disk or creates an in-memory store
+from defaults. The file is created on the first save.}
+@defproc[(store-get [storage store?]
+                    [key (or/c string? symbol?)]
+                    [default any/c #f]) any/c]{}
+@defproc[(store-set! [storage store?]
+                     [key (or/c string? symbol?)]
+                     [value jsexpr?]) void?]{}
+@defproc[(store-has-key? [storage store?]
+                         [key (or/c string? symbol?)]) boolean?]{}
+@defproc[(store-delete! [storage store?]
+                        [key (or/c string? symbol?)]) boolean?]{}
+@defproc[(store-clear! [storage store?]) void?]{}
+@defproc[(store-reset! [storage store?]) void?]{}
+@defproc[(store-keys [storage store?]) (listof string?)]{}
+@defproc[(store-values [storage store?]) list?]{}
+@defproc[(store-entries [storage store?]) list?]{}
+@defproc[(store-count [storage store?]) exact-nonnegative-integer?]{}
+@defproc[(store-snapshot [storage store?]) hash?]{}
+@defproc[(store-save! [storage store?]) void?]{}
+@defproc[(store-reload! [storage store?]
+                        [#:ignore-defaults? ignore-defaults? boolean? #f]) void?]{}
+@defproc[(store-close! [storage store?]) void?]{}
+
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;
 a full response value may also be returned, including a streaming response
