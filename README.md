@@ -23,6 +23,7 @@ You get:
 - **Runtime capabilities** — default-deny route permissions with path and command scopes
 - **Scoped filesystem plugin** — text/binary I/O, directories, metadata, copy/move/remove
 - **Scoped shell plugin** — bounded command output, timeouts, managed background processes
+- **Persistent store plugin** — atomic JSON stores, debounced auto-save, change events
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -51,6 +52,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Capability-gated API routes | ✅ | ✅ | ✅ |
 | Scoped filesystem plugin | ✅ | ✅ | ✅ |
 | Scoped shell/process plugin | ✅ | ✅ | ✅ |
+| Persistent key-value store plugin | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -400,6 +402,34 @@ calls. Programs are executed directly rather than through `cmd.exe` or
 roots and environment-variable names are denied by default and can be
 explicitly allowed with `#:cwd-roots` and `#:allow-environment`. Retained
 stdout/stderr default to 1 MiB per stream, and the handle registry is bounded.
+
+### Persistent store plugin
+
+`make-store-routes` provides the Tauri-style persistent key-value lifecycle:
+load/close, get/set/has/delete, clear/reset, keys/values/entries/length,
+reload, and explicit save. Stores are JSON, writes are atomic, and auto-save is
+debounced by 100 ms by default (`#f` disables it):
+
+```racket
+(define bus (make-event-bus))
+(define authority
+  (make-capability
+   "main"
+   (list (path-permission 'store:read #:allow (list app-data-dir))
+         (path-permission 'store:write #:allow (list app-data-dir))
+         'glaze:events)))
+
+(run-app #:public-dir "public"
+         #:api (make-store-routes #:root app-data-dir #:events bus)
+         #:events bus
+         #:capability authority)
+```
+
+With `#:root`, frontend paths are relative and traversal outside the configured
+root is rejected independently of the capability check. Generated functions
+include `storeLoad`, `storeGet`, `storeSet`, `storeEntries`, `storeReset`,
+`storeSave`, `storeReload`, and `storeClose`. Mutations publish
+`store:change` over the existing SSE event bus when `#:events` is supplied.
 
 ### Typed routes, one declaration — `define-api-routes`
 

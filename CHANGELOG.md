@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and capability-owned background handles for stdin, status, and termination.
   Frontend environment names and working-directory roots are opt-in, and the
   retained process registry is bounded.
+- Add a capability-gated persistent JSON store plugin with defaults,
+  debounced auto-save, atomic writes, reload/reset/save/close lifecycle,
+  deterministic enumeration, rooted paths, and optional SSE change events.
 
 ## [0.8.0] - 2026-09-30
 

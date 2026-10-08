@@ -23,6 +23,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **运行时权限能力** —— API 路由默认拒绝，并支持文件路径与命令参数范围
 - **受限文件系统插件** —— 文本/二进制、目录、元数据、复制/移动/删除
 - **受限 Shell 插件** —— 有界输出、超时、可管理的后台子进程
+- **持久化 Store 插件** —— 原子 JSON、自动保存防抖与变更事件
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -51,6 +52,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | Capability 限制 API 路由 | ✅ | ✅ | ✅ |
 | 路径 scope 文件系统插件 | ✅ | ✅ | ✅ |
 | 命令 scope Shell/子进程插件 | ✅ | ✅ | ✅ |
+| 持久化键值 Store 插件 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -333,6 +335,33 @@ allow。应用需要 SSE 时，在 capability 中授予 `'glaze:events`。
 `cwd` 根目录和环境变量名默认拒绝，必须通过 `#:cwd-roots` 和
 `#:allow-environment` 显式开放；每个 stdout/stderr 默认最多保留 1 MiB，
 句柄注册表也有数量上限。
+
+### 持久化 Store 插件
+
+`make-store-routes` 提供与 Tauri Store 对齐的生命周期：load/close、
+get/set/has/delete、clear/reset、keys/values/entries/length、reload 和显式
+save。Store 使用 JSON，写入采用原子替换，自动保存默认以 100 ms 防抖（传 `#f`
+可禁用）：
+
+```racket
+(define bus (make-event-bus))
+(define authority
+  (make-capability
+   "main"
+   (list (path-permission 'store:read #:allow (list app-data-dir))
+         (path-permission 'store:write #:allow (list app-data-dir))
+         'glaze:events)))
+
+(run-app #:public-dir "public"
+         #:api (make-store-routes #:root app-data-dir #:events bus)
+         #:events bus
+         #:capability authority)
+```
+
+配置 `#:root` 后，前端路径必须是相对路径；即使 capability 允许，也不能穿越
+该根目录。生成的函数包括 `storeLoad`、`storeGet`、`storeSet`、
+`storeEntries`、`storeReset`、`storeSave`、`storeReload`、`storeClose`。
+传入 `#:events` 后，变更会通过现有 SSE 总线发布为 `store:change`。
 
 ### 后端 → 前端推送（SSE）
 
