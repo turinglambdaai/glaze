@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ship a valid generated placeholder PNG (pure Racket zlib/PNG encoder).
   CI builds and validates all three formats per run.
 
+### Changed
+- Tagged releases now ship the full native asset matrix: a macOS dmg and
+  Linux deb/rpm/AppImage packages beside the source zip and Windows MSI,
+  each with a SHA-256 checksum, and the publish job asserts the complete
+  matrix exists before creating the release.
+
 ## [0.10.0] - 2026-10-09
 
 ### Added

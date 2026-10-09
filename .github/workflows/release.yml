@@ -200,9 +200,115 @@ jobs:
           path: release-assets/
           if-no-files-found: error
 
+  linux-packages:
+    name: Build Linux packages
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: '9.3'
+
+      - name: Install packaging toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          sudo wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
+          sudo chmod +x /usr/local/bin/appimagetool
+
+      - name: Install Glaze package
+        run: raco pkg install --auto --no-docs --link "$PWD"
+
+      - name: Build Glaze showcase packages
+        run: |
+          set -euo pipefail
+          test "$(dpkg --print-architecture)" = amd64
+          cd examples/showcase
+          raco glaze build \
+            --name Glaze \
+            --version '${{ needs.source.outputs.version }}' \
+            --publisher 'Turing Lambda' \
+            --identifier 'TuringLambda.Glaze' \
+            --out dist \
+            --installer
+          test -f dist/Glaze.deb
+          test -f dist/Glaze.rpm
+          test -f dist/Glaze.AppImage
+
+      - name: Stage Linux release assets
+        run: |
+          set -euo pipefail
+          version='${{ needs.source.outputs.version }}'
+          mkdir -p release-assets
+          mv "examples/showcase/dist/Glaze.deb" "release-assets/glaze-${version}-linux-amd64.deb"
+          mv "examples/showcase/dist/Glaze.rpm" "release-assets/glaze-${version}-linux-x86_64.rpm"
+          mv "examples/showcase/dist/Glaze.AppImage" "release-assets/glaze-${version}-linux-x86_64.AppImage"
+          cd release-assets
+          for f in glaze-${version}-linux-*; do sha256sum "$f" > "$f.sha256"; done
+          ls -la
+
+      - name: Upload Linux release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: release-assets/
+          if-no-files-found: error
+
+  macos-dmg:
+    name: Build macOS dmg
+    needs: source
+    runs-on: macOS-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: '9.3'
+
+      - name: Install Glaze package
+        run: raco pkg install --auto --no-docs --link "$PWD"
+
+      - name: Build Glaze showcase dmg
+        run: |
+          set -euo pipefail
+          cd examples/showcase
+          raco glaze build \
+            --name Glaze \
+            --version '${{ needs.source.outputs.version }}' \
+            --publisher 'Turing Lambda' \
+            --identifier 'TuringLambda.Glaze' \
+            --out dist \
+            --installer
+          test -f dist/Glaze.dmg
+
+      - name: Stage macOS release assets
+        run: |
+          set -euo pipefail
+          version='${{ needs.source.outputs.version }}'
+          mkdir -p release-assets
+          mv "examples/showcase/dist/Glaze.dmg" "release-assets/glaze-${version}-macos.dmg"
+          cd release-assets
+          sha256sum "glaze-${version}-macos.dmg" > "glaze-${version}-macos.dmg.sha256"
+          ls -la
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: release-assets/
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
-    needs: [source, windows-installer]
+    needs: [source, windows-installer, linux-packages, macos-dmg]
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -214,6 +320,22 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Assert the full asset matrix
+        run: |
+          set -euo pipefail
+          version='${{ needs.source.outputs.version }}'
+          cd release-assets
+          for f in \
+            "glaze-${version}.zip" \
+            "glaze-${version}-windows-x64.msi" \
+            "glaze-${version}-macos.dmg" \
+            "glaze-${version}-linux-amd64.deb" \
+            "glaze-${version}-linux-x86_64.rpm" \
+            "glaze-${version}-linux-x86_64.AppImage"; do
+            test -f "$f"
+            test -f "$f.sha256"
+          done
+
       - name: Publish GitHub Release
         shell: bash
         env:
@@ -221,12 +343,21 @@ jobs:
         run: |
           set -euo pipefail
           version='${{ needs.source.outputs.version }}'
+          cd release-assets
           gh release create "$GITHUB_REF_NAME" \
-            "release-assets/glaze-${version}.zip" \
-            "release-assets/glaze-${version}.zip.sha256" \
-            "release-assets/glaze-${version}-windows-x64.msi" \
-            "release-assets/glaze-${version}-windows-x64.msi.sha256" \
+            "glaze-${version}.zip" \
+            "glaze-${version}.zip.sha256" \
+            "glaze-${version}-windows-x64.msi" \
+            "glaze-${version}-windows-x64.msi.sha256" \
+            "glaze-${version}-macos.dmg" \
+            "glaze-${version}-macos.dmg.sha256" \
+            "glaze-${version}-linux-amd64.deb" \
+            "glaze-${version}-linux-amd64.deb.sha256" \
+            "glaze-${version}-linux-x86_64.rpm" \
+            "glaze-${version}-linux-x86_64.rpm.sha256" \
+            "glaze-${version}-linux-x86_64.AppImage" \
+            "glaze-${version}-linux-x86_64.AppImage.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "Glaze ${version}" \
-            --notes-file release-assets/release-notes.md
+            --notes-file release-notes.md
