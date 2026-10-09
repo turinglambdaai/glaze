@@ -928,6 +928,8 @@ bundle at build time.
           [#:entry entry (or/c string? path?) "main.rkt"]
           [#:name name (or/c #f string?) #f]
           [#:version version (or/c #f string?) #f]
+          [#:publisher publisher (or/c #f string?) #f]
+          [#:identifier identifier (or/c #f string?) #f]
           [#:icon icon any/c #f]
           [#:out-dir out-dir (or/c string? path?) "dist"]
           [#:embed-dlls? embed-dlls? boolean? #f]
@@ -947,6 +949,10 @@ also attempt an OS-level error dialog.
 Installer-toolchain absence may degrade an installer request to an archive
 with a loud warning. That packaging fallback is unrelated to runtime startup:
 the built application still requires its native WebView.
+
+The publisher is written to native installer metadata. Keep the identifier
+stable across releases: it deterministically defines the WiX UpgradeCode and
+the NSIS Add/Remove Programs identity.
 }
 
 @section{CLI Commands}

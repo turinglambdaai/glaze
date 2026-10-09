@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Strengthen real-window CI with a high-entropy canvas capture so a committed
   page title cannot hide a missing first paint.
 
+### Changed
+- Harden Windows installers with configurable publisher and stable application
+  identifiers, deterministic WiX upgrade codes, and complete NSIS silent
+  install/uninstall metadata for Windows Apps & Features and winget.
+- Publish a validated, self-contained Windows MSI and SHA-256 checksum beside
+  the source archive for every tagged Glaze release.
+
 ### Added
 - Add a complete signed update pipeline alongside the legacy notification
   helper: SemVer/channel selection, application and key-id pinning, staged

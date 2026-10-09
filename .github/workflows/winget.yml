@@ -1,0 +1,88 @@
+# WinGet distribution.
+#
+# - Published releases update an existing package through winget-releaser.
+# - The one-time bootstrap job copies the committed seed manifests into a
+#   fork of microsoft/winget-pkgs and opens the initial package PR.
+name: winget
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Update manifest on winget-pkgs
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for WINGET_TOKEN
+        id: token
+        run: echo "ok=${{ secrets.WINGET_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+      - uses: vedantmgoyal9/winget-releaser@main
+        if: steps.token.outputs.ok == 'true'
+        with:
+          identifier: TuringLambda.Glaze
+          installers-regex: '-windows-x64\.msi$'
+          max-versions-to-keep: 5
+          token: ${{ secrets.WINGET_TOKEN }}
+
+  bootstrap:
+    name: First-time package submission (run once)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require submission token and seed manifests
+        run: |
+          set -euo pipefail
+          test -n "$WINGET_TOKEN" || {
+            echo "WINGET_TOKEN (classic PAT with public_repo) is required" >&2
+            exit 1
+          }
+          test -d packaging/winget/TuringLambda.Glaze || {
+            echo "No TuringLambda.Glaze seed manifests are committed" >&2
+            exit 1
+          }
+      - name: Open first-submission PR on microsoft/winget-pkgs
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          PKG_DIR="$(find packaging/winget/TuringLambda.Glaze -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          ID="$(basename "$(dirname "$PKG_DIR")")"
+          VER="$(basename "$PKG_DIR")"
+          PUBLISHER="${ID%.*}"
+          PACKAGE="${ID##*.}"
+          FIRST_LETTER="$(printf '%s' "$PUBLISHER" | cut -c1 | tr '[:upper:]' '[:lower:]')"
+          MANIFESTS_DIR="manifests/$FIRST_LETTER/$PUBLISHER/$PACKAGE"
+          BRANCH="$ID-$VER"
+
+          if gh api "repos/microsoft/winget-pkgs/contents/$MANIFESTS_DIR" > /dev/null 2>&1; then
+            echo "Package $ID already exists on winget-pkgs - nothing to bootstrap."
+            exit 0
+          fi
+
+          gh repo fork microsoft/winget-pkgs --clone=false > /dev/null
+          gh repo sync "$OWNER/winget-pkgs" --source microsoft/winget-pkgs > /dev/null 2>&1 || true
+          git clone --quiet --depth=1 "https://x-access-token:$WINGET_TOKEN@github.com/$OWNER/winget-pkgs.git" winget-pkgs
+          cd winget-pkgs
+          git config user.name "turinglambdaai"
+          git config user.email "turinglambdaai@users.noreply.github.com"
+          git remote add upstream https://github.com/microsoft/winget-pkgs.git
+          git fetch --quiet --depth=1 upstream master
+          git checkout --quiet -B "$BRANCH" FETCH_HEAD
+          mkdir -p "$MANIFESTS_DIR"
+          cp -R "../$PKG_DIR" "$MANIFESTS_DIR/$VER"
+          git add "$MANIFESTS_DIR/$VER"
+          git commit --quiet -m "New package: $ID version $VER"
+          git push --quiet --force "https://x-access-token:$WINGET_TOKEN@github.com/$OWNER/winget-pkgs.git" "HEAD:refs/heads/$BRANCH"
+          gh pr create --repo microsoft/winget-pkgs \
+            --base master --head "$OWNER:$BRANCH" \
+            --title "New package: $ID version $VER" \
+            --body "First submission of $ID version $VER. Source: https://github.com/${GITHUB_REPOSITORY}."

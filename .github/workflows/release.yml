@@ -13,10 +13,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Validate and publish Glaze
+  source:
+    name: Validate and build source release
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +56,7 @@ jobs:
           version: '9.3'
 
       - name: Validate release metadata
+        id: metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -76,6 +79,7 @@ jobs:
             echo "CHANGELOG.md has no $release_version section" >&2
             exit 1
           fi
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
           echo "GLAZE_VERSION=$release_version" >> "$GITHUB_ENV"
 
       - name: Install and test Glaze
@@ -92,18 +96,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          raco pkg create --from-dir --source --format zip --dest dist "$PWD"
-          archive="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
-          destination="dist/glaze-${GLAZE_VERSION}.zip"
+          mkdir -p release-assets package-dist
+          raco pkg create --from-dir --source --format zip --dest package-dist "$PWD"
+          archive="$(find package-dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          destination="release-assets/glaze-${GLAZE_VERSION}.zip"
           mv "$archive" "$destination"
           sha256sum "$destination" > "${destination}.sha256"
           awk -v version="$GLAZE_VERSION" '
             $0 ~ ("^## \\[" version "\\]") { capture = 1; next }
             capture && /^## / { exit }
             capture { print }
-          ' CHANGELOG.md > dist/release-notes.md
-          test -s dist/release-notes.md
+          ' CHANGELOG.md > release-assets/release-notes.md
+          test -s release-assets/release-notes.md
 
       - name: Smoke-test exact source package
         shell: bash
@@ -112,10 +116,103 @@ jobs:
           smoke_root="$(mktemp -d)"
           PLTUSERHOME="$smoke_root/racket-user" \
             raco pkg install --auto --no-docs --name glaze \
-            "$PWD/dist/glaze-${GLAZE_VERSION}.zip"
+            "$PWD/release-assets/glaze-${GLAZE_VERSION}.zip"
           PLTUSERHOME="$smoke_root/racket-user" \
             racket -e '(require glaze glaze/server glaze/events)'
           PLTUSERHOME="$smoke_root/racket-user" raco glaze help >/dev/null
+
+      - name: Upload source release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-source
+          path: release-assets/
+          if-no-files-found: error
+
+  windows-installer:
+    name: Build and validate Windows installer
+    needs: source
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: '9.3'
+
+      - name: Install WiX 5.0.2
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build Glaze showcase MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          raco pkg install --auto --no-docs --name glaze --link $PWD
+          Push-Location examples/showcase
+          raco glaze build `
+            --name Glaze `
+            --version '${{ needs.source.outputs.version }}' `
+            --publisher 'Turing Lambda' `
+            --identifier 'TuringLambda.Glaze' `
+            --out dist `
+            --installer
+          Pop-Location
+          $msi = 'examples/showcase/dist/Glaze.msi'
+          if (-not (Test-Path -LiteralPath $msi -PathType Leaf)) {
+            throw "Glaze MSI was not produced: $msi"
+          }
+          wix msi validate $msi
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          $asset = "glaze-${{ needs.source.outputs.version }}-windows-x64.msi"
+          Move-Item -LiteralPath $msi -Destination (Join-Path release-assets $asset)
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path release-assets $asset)).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content -Encoding ascii (Join-Path release-assets "$asset.sha256")
+
+      - name: Verify installer metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Resolve-Path 'release-assets/*.msi').Path
+          $wxs = Join-Path $env:RUNNER_TEMP 'glaze-release.wxs'
+          wix msi decompile $msi -o $wxs
+          [xml] $xml = Get-Content -Raw $wxs
+          $package = $xml.Wix.Package
+          if ($package.Name -ne 'Glaze') { throw "unexpected MSI name: $($package.Name)" }
+          if ($package.Manufacturer -ne 'Turing Lambda') {
+            throw "unexpected MSI publisher: $($package.Manufacturer)"
+          }
+          if ($package.Version -ne '${{ needs.source.outputs.version }}') {
+            throw "unexpected MSI version: $($package.Version)"
+          }
+          if (-not $package.ProductCode -or -not $package.UpgradeCode) {
+            throw 'MSI is missing ProductCode or UpgradeCode'
+          }
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets/
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [source, windows-installer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
 
       - name: Publish GitHub Release
         shell: bash
@@ -123,9 +220,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          version='${{ needs.source.outputs.version }}'
           gh release create "$GITHUB_REF_NAME" \
-            "dist/glaze-${GLAZE_VERSION}.zip" \
-            "dist/glaze-${GLAZE_VERSION}.zip.sha256" \
+            "release-assets/glaze-${version}.zip" \
+            "release-assets/glaze-${version}.zip.sha256" \
+            "release-assets/glaze-${version}-windows-x64.msi" \
+            "release-assets/glaze-${version}-windows-x64.msi.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "Glaze ${GLAZE_VERSION}" \
-            --notes-file dist/release-notes.md
+            --title "Glaze ${version}" \
+            --notes-file release-assets/release-notes.md

@@ -133,6 +133,8 @@ VERIFY
 ;; Parse the rest args for `build`. Recognized flags:
 ;;   --name <name>        app/bundle name (default: project dir name)
 ;;   --version <v>        app version (Info.plist / MSI ProductVersion)
+;;   --publisher <name>   human-readable native installer publisher
+;;   --identifier <id>    stable package identifier used for upgrades/uninstall
 ;;   --icon <path>        .ico (Windows) / .icns (macOS)
 ;;   --entry <path>       entry file (default: main.rkt)
 ;;   --out <dir>          output directory (default: dist)
@@ -147,7 +149,20 @@ VERIFY
 ;;   --notarize <profile> macOS: notarytool keychain profile
 ;;   --url-scheme <name>  deep-link URL scheme (repeatable)
 (define (parse-build-opts rest)
-  (let loop ([args rest]
+  ;; Extract installer identity separately so the established positional
+  ;; parser below stays backward compatible and these options can appear in
+  ;; any order.
+  (define-values (publisher identifier filtered-rest)
+    (let extract ([args rest]
+                  [publisher #f]
+                  [identifier #f]
+                  [kept '()])
+      (match args
+        [(list* "--publisher" value more) (extract more value identifier kept)]
+        [(list* "--identifier" value more) (extract more publisher value kept)]
+        [(cons value more) (extract more publisher identifier (cons value kept))]
+        ['() (values publisher identifier (reverse kept))])))
+  (let loop ([args filtered-rest]
              [name #f]
              [version #f]
              [icon #f]
@@ -175,7 +190,9 @@ VERIFY
                no-hardened
                ts-url
                notarize
-               (reverse schemes))]
+               (reverse schemes)
+               publisher
+               identifier)]
       [(and (equal? (car args) "--name") (pair? (cdr args)))
        (loop (cddr args)
              (cadr args)
@@ -401,13 +418,17 @@ VERIFY
                   no-hardened
                   ts-url
                   notarize
-                  schemes)
+                  schemes
+                  publisher
+                  identifier)
     (parse-build-opts rest))
   (printf "Building Glaze app (entry=~a, name=~a)...\n" entry (or name "<project dir>"))
   (define dist-path
     (build-app #:entry entry
                #:name name
                #:version version
+               #:publisher publisher
+               #:identifier identifier
                #:icon icon
                #:out-dir out
                #:embed-dlls? embed
@@ -447,6 +468,8 @@ VERIFY
   (displayln "build options:")
   (displayln "  --name <name>        app/bundle name (default: project dir)")
   (displayln "  --version <v>        app version (Info.plist / MSI metadata)")
+  (displayln "  --publisher <name>   native installer publisher (default: app name)")
+  (displayln "  --identifier <id>    stable installer identity (default: app name)")
   (displayln "  --icon <path>        .ico (Windows) / .icns (macOS)")
   (displayln "  --entry <path>       entry file (default: main.rkt)")
   (displayln "  --out <dir>          output directory (default: dist)")

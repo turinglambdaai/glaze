@@ -157,10 +157,11 @@ Glaze **不提供浏览器模式的 `dev` / `serve` 命令**。开发和发布�
 
 ```bash
 raco glaze build --name myapp
-raco glaze build --name myapp --version 1.2.0 --installer
+raco glaze build --name myapp --version 1.2.0 \
+  --publisher "Acme Inc" --identifier com.acme.myapp --installer
 ```
 
-选项：`--name`、`--version`、`--icon <.ico/.icns>`、`--entry <path>`（默认 `main.rkt`）、`--out <dir>`（默认 `dist`）、`--embed-dlls`（Windows：单文件 exe）、`--installer`。
+选项：`--name`、`--version`、`--publisher`、`--identifier`、`--icon <.ico/.icns>`、`--entry <path>`（默认 `main.rkt`）、`--out <dir>`（默认 `dist`）、`--embed-dlls`（Windows：单文件 exe）、`--installer`。不同版本必须保持 `--identifier` 不变；Glaze 会用它派生稳定的 WiX `UpgradeCode` 和 NSIS 卸载注册表标识。
 
 > installer 步骤缺少 WiX / NSIS / create-dmg / appimagetool 等打包工具时，可以降级为 `.zip` / `.tar.gz` 并响亮告警。这里降级的是**分发格式**，不是应用 UI；应用启动本身没有浏览器 fallback。
 

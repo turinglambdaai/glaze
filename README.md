@@ -147,10 +147,11 @@ Package a Glaze project into a platform distribution (`raco exe` + `raco distrib
 
 ```bash
 raco glaze build --name myapp
-raco glaze build --name myapp --version 1.2.0 --installer
+raco glaze build --name myapp --version 1.2.0 \
+  --publisher "Acme Inc" --identifier com.acme.myapp --installer
 ```
 
-Options: `--name`, `--version`, `--icon <.ico/.icns>`, `--entry <path>` (default `main.rkt`), `--out <dir>` (default `dist`), `--embed-dlls` (Windows: single-file exe), `--installer`.
+Options: `--name`, `--version`, `--publisher`, `--identifier`, `--icon <.ico/.icns>`, `--entry <path>` (default `main.rkt`), `--out <dir>` (default `dist`), `--embed-dlls` (Windows: single-file exe), `--installer`. Keep `--identifier` stable across releases: Glaze derives the WiX `UpgradeCode` and NSIS uninstall registry identity from it.
 
 > The installer step probes for the native packaging toolchain (WiX / NSIS on Windows, `create-dmg` / `hdiutil` on macOS, `appimagetool` / `linuxdeploy` on Linux) and **degrades gracefully** to a `.zip` / `.tar.gz` when that packaging toolchain is absent, printing a warning naming what to install. This packaging fallback is unrelated to application startup: the app itself still requires a native WebView.
 
