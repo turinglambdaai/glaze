@@ -785,7 +785,8 @@ other processes running as the same OS user.
                         [#:current-version current-version string? "0.0.0"])
          (or/c #f hash?)]{
 Checks a JSON manifest for a newer version. An optional @litchar{sha256} field
-is passed through for artifact verification.
+is passed through for artifact verification. Absolute and relative redirects
+are followed for at most ten hops.
 }
 @defproc[(newer-version? [candidate string?] [current string?]) boolean?]{}
 @defproc[(verify-file-sha256 [path (or/c string? path?)]
@@ -809,7 +810,8 @@ kind and arguments, and an optional second Ed25519 signature.
          update-manifest?]{
 Downloads an HTTPS manifest with a hard byte limit and verifies its signature.
 If @racket[key-id] is provided, a valid signature from any other release key
-is rejected.
+is rejected. Redirects are followed for at most ten hops, and every target
+must remain HTTPS.
 }
 
 @defproc[(select-update [config updater-config?]
@@ -825,7 +827,8 @@ rollout bucket, platform, and architecture.
          path?]{
 Downloads to a partial file over HTTPS, enforces the configured maximum and
 signed artifact size, verifies SHA-256 plus the optional artifact signature,
-then atomically renames the verified file into place.
+then atomically renames the verified file into place. Redirects are followed
+for at most ten hops, and every target must remain HTTPS.
 }
 
 @defproc[(make-install-plan [candidate update-candidate?]

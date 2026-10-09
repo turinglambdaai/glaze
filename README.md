@@ -201,6 +201,10 @@ Failure reasons are stable tags (`missing-file`, `malformed`, `signature`, `prod
 
 `check-update` remains the small, backward-compatible notification helper. For installed applications, the full updater validates a signed manifest, selects the platform/architecture and release channel, enforces staged-rollout and download-size limits, verifies SHA-256 plus an optional artifact signature, and executes an install plan with rollback:
 
+All updater fetches follow absolute and relative redirects for up to ten hops.
+Signed manifests and artifacts remain HTTPS-only across every redirect, so a
+release alias cannot downgrade verification traffic to plaintext.
+
 ```racket
 (define manifest
   (fetch-update-manifest manifest-url pinned-public-key
