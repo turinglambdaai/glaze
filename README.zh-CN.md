@@ -29,6 +29,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **受限 HTTP 客户端** —— 大小上限、超时与重定向逐跳鉴权
 - **受限 SQLite 插件** —— 参数化 select/execute 与连接所有权隔离
 - **全局快捷键** —— 系统级热键、加速键 scope 约束与 SSE 触发事件
+- **结构化日志** —— 按 sink 分级、文件轮转、SSE 推送与有界历史
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -63,6 +64,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | Capability 限制 HTTP 客户端 | ✅ | ✅ | ✅ |
 | Capability 限制 SQLite 插件 | ✅ | ✅ | ✅ |
 | Capability 限制全局快捷键 | ✅ | ✅ | ✅ X11/XWayland |
+| Capability 限制结构化日志 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -478,6 +480,27 @@ capability 与数据库路径隔离缓存，并限制总连接数。查询使用
 不会扩大授权。触发以 `global-shortcut` SSE 事件送达页面，携带规范化加速键：
 `glaze.on('global-shortcut', ({accelerator}) => ...)`。Linux 后端经 X11 抓键，
 XWayland 会话可用；没有 X 的 Wayland 会话注册会返回失败而不是抛异常。
+
+### 结构化日志
+
+一个 logger 把记录扇出到多个 sink，每个 sink 有自己的最低级别：
+
+```racket
+(define logger
+  (make-glaze-logger #:min-level 'info
+                     #:file-root (app-log-dir paths)
+                     #:events bus))
+
+(log-info logger "server started" #:data (hasheq 'port 8080))
+(log-error logger "handler failed" #:data (hasheq 'message "..."))
+```
+
+默认 stderr sink 常驻；`#:file-root` 增加轮转文件 sink（轮转而非截断，
+写入中途崩溃不会毁掉更早的日志）；`#:events` 把每条记录以 `log` SSE 事件
+推给页面；自定义 sink（过程或 `log-sink` 值）经 `#:sinks` 接入。有界内存
+历史支撑 `make-log-routes`，生成的 `logWrite` 与 `logHistory` 函数受
+`log:write` 与 `log:read` 门禁。前端写入记录自带来源与 capability ID——
+页面无法伪造后端日志行——并与后端记录一样遵守 logger 的最低级别。
 
 ### 后端 → 前端推送（SSE）
 
