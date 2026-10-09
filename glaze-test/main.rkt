@@ -163,3 +163,24 @@
 (let ([src ((default-entry-template) "main.rkt")])
   (check-true (string-contains? src "(require glaze)") "entry requires glaze")
   (check-true (string-contains? src "find-system-path 'run-file") "entry redirects CWD"))
+
+;; Packaged entries need a static main-submodule require, but comments and
+;; strings that merely mention `(module+ main ...)` must not trigger one.
+(define wrapper-dir (make-temporary-file "glaze-wrapper-~a" 'directory))
+(define wrapper-entry (build-path wrapper-dir "entry.rkt"))
+(define (write-wrapper-entry source)
+  (call-with-output-file wrapper-entry (lambda (output) (display source output)) #:exists 'replace)
+  ((default-entry-template) wrapper-entry))
+(define plain-wrapper
+  (write-wrapper-entry
+   "#lang racket/base\n;; (module+ main (error \"not real\"))\n(define marker \"(module+ main fake)\")\n"))
+(check-false (string-contains? plain-wrapper "(require (submod \"entry.rkt\" main))")
+             "comments and strings do not invent a main submodule")
+(define main-wrapper (write-wrapper-entry "#lang racket/base\n(module+ main (displayln \"runs\"))\n"))
+(check-true (string-contains? main-wrapper "(require (submod \"entry.rkt\" main))")
+            "module+ main gets a static require")
+(define explicit-wrapper
+  (write-wrapper-entry "#lang racket/base\n(module main racket/base (displayln \"runs\"))\n"))
+(check-true (string-contains? explicit-wrapper "(require (submod \"entry.rkt\" main))")
+            "explicit main submodule gets a static require")
+(delete-directory/files wrapper-dir)
