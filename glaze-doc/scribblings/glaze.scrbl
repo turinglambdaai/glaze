@@ -197,6 +197,16 @@ list. Deny entries take precedence.
                            [arguments list?]) command-resource?]{Constructs the
 resource returned by a command route's @racket[#:resource] procedure.}
 
+@defproc[(accelerator-permission [id (or/c symbol? string?)]
+                                 [#:allow allowed-patterns list?]
+                                 [#:deny denied-patterns '()]) any/c]{
+Allows global-shortcut accelerators that match an exact string or an
+explicitly supplied regular expression. Both the declared patterns and the
+requested accelerator are matched in canonical form, so
+@litchar{CmdOrCtrl+Shift+D} and @litchar{COMMANDORCONTROL+shift+d} authorize
+the same hotkey on the same platform. Plain strings must parse as
+accelerators at construction time; deny entries take precedence.}
+
 @defproc[(capability-authorized? [capability capability?]
                                  [permission (or/c symbol? string?)]
                                  [resource any/c #f]) boolean?]{Checks runtime
@@ -385,6 +395,57 @@ architecture, executable extension, locale, and the runtime-reported system
 version string.}
 @defproc[(system-hostname) string?]{Returns the local host name. Frontend access
 uses the separate @racket['os:hostname] permission.}
+
+@section[#:tag "global-shortcuts"]{Global Shortcuts}
+
+@defmodule[glaze/global-shortcut]
+
+System-wide hotkeys with Tauri-style accelerators such as
+@litchar{CmdOrCtrl+Shift+D}. The native backends are Win32
+@litchar{RegisterHotKey} on Windows, Carbon @litchar{RegisterEventHotKey} on
+macOS, and X11 @litchar{XGrabKey} on Linux (XWayland sessions included; a
+Wayland session without X fails registration rather than raising). Linux
+grabs use exact modifiers, so pressed lock keys such as Caps Lock suppress
+the event there.
+
+@defproc[(string->hotkey [s string?]) (or/c hotkey? #f)]{
+Parses an accelerator. Modifier spellings are case-insensitive:
+@litchar{Command}/@litchar{Cmd}/@litchar{Super}/@litchar{Meta},
+@litchar{Control}/@litchar{Ctrl}, @litchar{Option}/@litchar{Alt},
+@litchar{Shift}, and the per-platform @litchar{CommandOrControl}/
+@litchar{CmdOrCtrl} (cmd on macOS, ctrl elsewhere). Keys accept bare and
+@litchar{KeyA}/@litchar{Digit7}/@litchar{Code}-style spellings, F1 through
+F24, numpad keys, and named keys such as @litchar{Space} or
+@litchar{BracketLeft}. Returns @racket[#f] for any malformed input.}
+
+@defproc[(hotkey->string [hk hotkey?]) string?]{Renders the canonical form,
+for example @litchar{Ctrl+Shift+D} on Windows and Linux.}
+
+@defproc[(hotkey-register! [hk hotkey?] [thunk procedure?]) boolean?]{
+Registers a system-wide hotkey; the thunk runs each time the combination is
+pressed anywhere in the session. Duplicate registrations report @racket[#f].
+@racket[hotkey-unregister!], @racket[hotkey-unregister-all!], and
+@racket[hotkey-registered?] manage the lifecycle.}
+
+@defproc[(make-global-shortcut-routes [#:prefix prefix string?
+                                       "api/global-shortcut"]
+                                      [#:backend backend hotkey-backend?
+                                       default-hotkey-backend]
+                                      [#:events event-bus (or/c event-bus? #f)
+                                       #f])
+         (listof route?)]{
+Creates register, unregister, unregister-all, and is-registered routes under
+the permissions @racket['global-shortcut:register],
+@racket['global-shortcut:unregister],
+@racket['global-shortcut:unregister-all], and
+@racket['global-shortcut:is-registered]; pair them with
+@racket[accelerator-permission] scopes so a page can only grab the
+combinations the app declared. Triggers reach the page as
+@litchar{global-shortcut} SSE events carrying the canonical accelerator. The
+generated client contains @litchar{glaze.api.globalShortcutRegister},
+@litchar{glaze.api.globalShortcutUnregister},
+@litchar{glaze.api.globalShortcutUnregisterAll}, and
+@litchar{glaze.api.globalShortcutIsRegistered}.}
 
 @section[#:tag "paths"]{Application and Resource Paths}
 
