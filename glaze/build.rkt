@@ -20,7 +20,16 @@
 
 (provide build-app
          default-entry-template
-         platform-backend-modules)
+         platform-backend-modules
+         make-linux-installer
+         deb-arch-name
+         rpm-arch-name
+         sanitize-package-name
+         sanitize-package-version
+         desktop-entry
+         deb-control
+         rpm-spec
+         icon-png-bytes)
 
 ;; Modules that glaze's webview/sys/tray schedulers reach only via runtime
 ;; dispatch (dynamic-require keyed on (system-type 'os)). raco exe's static
@@ -255,7 +264,7 @@
   (case os
     [(windows) (make-windows-installer out-dir app-name version publisher identifier)]
     [(macosx) (make-macos-installer out-dir app-name)]
-    [else (make-linux-installer out-dir app-name)]))
+    [else (make-linux-installer out-dir app-name version publisher identifier)]))
 
 ;; Returns the first argv[0]-resolvable command among names, or #f.
 (define (find-tool . names)
@@ -362,30 +371,382 @@
      (displayln "producing a .zip instead." (current-error-port))
      (archive-directory dist app-name "zip")]))
 
-;; Linux: prefer appimagetool / linuxdeploy; else tar.gz.
-(define (make-linux-installer out-dir app-name)
+;; Linux: build every available native package format — AppImage
+;; (appimagetool / linuxdeploy), deb (dpkg-deb), and rpm (rpmbuild) — and
+;; fall back to tar.gz only when none of the tools can run. Each format
+;; degrades independently; one failing tool never blocks the others.
+;; Returns the first produced artifact path.
+(define (make-linux-installer out-dir app-name version publisher identifier)
   (define dist (path->complete-path out-dir))
-  (define appimage-path (build-path dist (string-append app-name ".AppImage")))
+  (define artifacts
+    (filter values
+            (list (linux-appimage! dist app-name)
+                  (linux-deb! dist app-name version publisher identifier)
+                  (linux-rpm! dist app-name version publisher identifier))))
   (cond
-    [(find-tool "appimagetool")
-     (define appdir (build-path dist "AppDir"))
-     (and (run (find-executable-path "appimagetool" #f)
-               (path->string appdir)
-               (path->string appimage-path))
-          appimage-path)]
-    [(find-tool "linuxdeploy")
-     (putenv "OUTPUT" (path->string appimage-path))
-     (and (run (find-executable-path "linuxdeploy" #f)
-               "--appdir"
-               (path->string (build-path dist "AppDir"))
-               "--output"
-               "appimage")
-          appimage-path)]
+    [(pair? artifacts)
+     (for ([artifact (in-list artifacts)])
+       (fprintf (current-error-port) "[glaze] Linux package: ~a\n" artifact))
+     (first artifacts)]
     [else
-     (display "[glaze] No Linux AppImage toolchain found (appimagetool / linuxdeploy); "
+     (display "[glaze] No Linux packaging toolchain found "
+              "(appimagetool / dpkg-deb / rpmbuild); "
               (current-error-port))
      (displayln "producing a .tar.gz instead." (current-error-port))
      (archive-directory dist app-name "tar.gz")]))
+
+;; ---- shared Linux package metadata ----
+
+;; deb Architecture / rpm BuildArch names.
+(define (deb-arch-name)
+  (case (system-type 'arch)
+    [(x86_64 amd64) "amd64"]
+    [(aarch64 arm64) "arm64"]
+    [else "all"]))
+
+(define (rpm-arch-name)
+  (case (system-type 'arch)
+    [(x86_64 amd64) "x86_64"]
+    [(aarch64 arm64) "aarch64"]
+    [else "noarch"]))
+
+;; deb Package names are lowercase [a-z0-9+-.].
+(define (sanitize-package-name app-name)
+  (define lowered (string-downcase app-name))
+  (define cleaned
+    (regexp-replace* #rx"-*$"
+                     (regexp-replace* #rx"^-*"
+                                      (apply string-append
+                                             (for/list ([c (in-string lowered)])
+                                               (if (or (char<=? #\a c #\z)
+                                                       (char<=? #\0 c #\9)
+                                                       (memq c '(#\. #\+ #\-)))
+                                                   (string c)
+                                                   "-")))
+                                      "")
+                     ""))
+  (if (non-empty-string? cleaned) cleaned "app"))
+
+;; rpm Version fields reject dashes.
+(define (sanitize-package-version version)
+  (define cleaned
+    (apply string-append
+           (for/list ([c (in-string version)])
+             (if (or (char-alphabetic? c) (char-numeric? c) (memq c '(#\. #\_)))
+                 (string c)
+                 "."))))
+  (if (non-empty-string? cleaned) cleaned "0.0.0"))
+
+;; The icon name is the hicolor/AppDir icon stem; appimagetool refuses a
+;; desktop file without a resolvable Icon entry.
+(define (desktop-entry app-name [icon-name #f])
+  (format
+   "[Desktop Entry]\nType=Application\nName=~a\nExec=~a~a\nTerminal=false\nCategories=Utility;\n"
+   app-name
+   app-name
+   (if icon-name
+       (format "\nIcon=~a" icon-name)
+       "")))
+
+(define (deb-control app-name version publisher arch)
+  (format
+   "Package: ~a\nVersion: ~a\nArchitecture: ~a\nMaintainer: ~a\nSection: utils\nPriority: optional\nDescription: ~a desktop application (built with Glaze)\n"
+   (sanitize-package-name app-name)
+   (sanitize-package-version version)
+   arch
+   (if (non-empty-string? publisher) publisher "Unknown maintainer")
+   app-name))
+
+(define (rpm-spec app-name version publisher staging-root)
+  (format #<<SPECEOF
+Name: ~a
+Version: ~a
+Release: 1
+Summary: ~a desktop application (built with Glaze)
+License: Unknown
+BuildArch: ~a
+%description
+~a desktop application packaged by Glaze; publisher: ~a.
+%prep
+%build
+%install
+mkdir -p %{buildroot}
+cp -a ~a/usr %{buildroot}/
+%files
+/usr/bin/~a
+/usr/lib/~a
+/usr/share/applications/~a.desktop
+/usr/share/icons/hicolor/64x64/apps/~a.png
+SPECEOF
+          (sanitize-package-name app-name)
+          (sanitize-package-version version)
+          app-name
+          (rpm-arch-name)
+          app-name
+          (if (non-empty-string? publisher) publisher "unknown")
+          (path->string staging-root)
+          app-name
+          app-name
+          app-name
+          (sanitize-package-name app-name)))
+
+;; ---- generated placeholder icon ----
+
+;; A flat-color square PNG in pure Racket (zlib stored blocks + adler32):
+;; projects without an icon still get a valid hicolor/AppDir icon instead
+;; of a broken desktop integration or a failing appimagetool run.
+(define (crc32-bytes data)
+  (define table
+    (for/vector #:length 256
+                ([n (in-naturals)])
+      (for/fold ([c n]) ([_ (in-range 8)])
+        (if (zero? (bitwise-and c 1))
+            (arithmetic-shift c -1)
+            (bitwise-xor #xEDB88320 (arithmetic-shift c -1))))))
+  (bitwise-xor #xFFFFFFFF
+               (for/fold ([c #xFFFFFFFF]) ([b (in-bytes data)])
+                 (bitwise-and #xFFFFFFFF (vector-ref table (bitwise-xor (bitwise-and c #xFF) b))))))
+
+(define (adler32-bytes data)
+  ;; RFC 1950: s1/s2 accumulate modulo 65521, not a 16-bit mask — masking
+  ;; instead of reducing silently corrupts the checksum for larger payloads.
+  (define mod 65521)
+  (let loop ([i 0]
+             [a 1]
+             [b 0])
+    (if (= i (bytes-length data))
+        (+ (* (modulo b mod) 65536) (modulo a mod))
+        (let ([a2 (modulo (+ a (bytes-ref data i)) mod)]) (loop (add1 i) a2 (modulo (+ b a2) mod))))))
+
+;; zlib stream using stored (uncompressed) deflate blocks.
+(define (zlib-store-bytes data)
+  (define block-size 65535)
+  (define blocks
+    (let loop ([offset 0])
+      (cond
+        [(>= offset (bytes-length data)) '()]
+        [else
+         (define len (min block-size (- (bytes-length data) offset)))
+         (define final? (>= (+ offset len) (bytes-length data)))
+         (define chunk (subbytes data offset (+ offset len)))
+         (cons (cons final? chunk) (loop (+ offset len)))])))
+  (apply bytes-append
+         (cons (bytes #x78 #x01)
+               (append (for/list ([block (in-list blocks)])
+                         (define final? (car block))
+                         (define chunk (cdr block))
+                         (define len (bytes-length chunk))
+                         (bytes (if final? 1 0)
+                                (bitwise-and len #xFF)
+                                (arithmetic-shift (bitwise-and len #xFF00) -8)
+                                (bitwise-and (bitwise-not len) #xFF)
+                                (arithmetic-shift (bitwise-and (bitwise-not len) #xFF00) -8)))
+                       (map cdr blocks)
+                       (list (integer->integer-bytes (adler32-bytes data) 4 #f #t))))))
+
+(define (png-chunk type data)
+  (define type-bytes (string->bytes/latin-1 type))
+  (define body (bytes-append type-bytes data))
+  (bytes-append (integer->integer-bytes (bytes-length data) 4 #f #t)
+                body
+                (integer->integer-bytes (crc32-bytes body) 4 #f #t)))
+
+(define (icon-png-bytes [size 64] [r #xC1] [g #x5F] [b #x3C])
+  ;; PNG RGB scanlines are per-pixel interleaved: a filter byte, then R G B
+  ;; for each pixel in the row.
+  (define row (apply bytes (cons 0 (append-map (lambda (_) (list r g b)) (range size)))))
+  (define raw (apply bytes-append (make-list size row)))
+  (bytes-append #"\211PNG\r\n\032\n"
+                (png-chunk "IHDR"
+                           (bytes-append (integer->integer-bytes size 4 #f #t)
+                                         (integer->integer-bytes size 4 #f #t)
+                                         (bytes 8 2 0 0 0)))
+                (png-chunk "IDAT" (zlib-store-bytes raw))
+                (png-chunk "IEND" #"")))
+
+;; ---- staging tree shared by deb / rpm / AppImage ----
+
+;; Build a /usr-style tree outside dist: the whole runtime lands in
+;; /usr/lib/<app>, a shell wrapper at /usr/bin/<app> keeps raco
+;; distribute's relative bin/ + lib/ layout intact, and a desktop entry
+;; plus hicolor icon integrate with the desktop environment.
+(define (linux-staging-tree dist app-name)
+  (define root (make-temporary-file "glaze-pkg-~a" 'directory))
+  (define lib-dir (build-path root "usr" "lib" app-name))
+  (make-directory* lib-dir)
+  (define artifact-suffixes '(".AppImage" ".deb" ".rpm" ".msi" ".exe" ".zip" ".tar.gz"))
+  (define (artifact? path)
+    (define name (path->string (file-name-from-path path)))
+    (or (string=? name "AppDir")
+        (for/or ([suffix (in-list artifact-suffixes)])
+          (string-suffix? name suffix))))
+  (for ([entry (in-list (directory-list dist))])
+    (unless (artifact? entry)
+      (copy-directory/files (build-path dist entry) (build-path lib-dir entry))))
+  (define exe (build-path lib-dir "bin" app-name))
+  (and (file-exists? exe)
+       (let ()
+         (define bin-dir (build-path root "usr" "bin"))
+         (make-directory* bin-dir)
+         (define wrapper (build-path bin-dir app-name))
+         (call-with-output-file
+          wrapper
+          (lambda (out) (fprintf out "#!/bin/sh\nexec /usr/lib/~a/bin/~a \"$@\"\n" app-name app-name))
+          #:exists 'replace)
+         (file-or-directory-permissions wrapper #o755)
+         (define apps-dir (build-path root "usr" "share" "applications"))
+         (make-directory* apps-dir)
+         (call-with-output-file
+          (build-path apps-dir (string-append app-name ".desktop"))
+          (lambda (out) (display (desktop-entry app-name (sanitize-package-name app-name)) out))
+          #:exists 'replace)
+         (define icon-dir (build-path root "usr" "share" "icons" "hicolor" "64x64" "apps"))
+         (make-directory* icon-dir)
+         (call-with-output-file (build-path icon-dir
+                                            (string-append (sanitize-package-name app-name) ".png"))
+                                (lambda (out) (write-bytes (icon-png-bytes) out))
+                                #:exists 'replace)
+         root)))
+
+(define (delete-tree-quietly! root)
+  (with-handlers ([exn:fail? (lambda (e) (void))])
+    (delete-directory/files root)))
+
+;; ---- format builders (each degrades to #f) ----
+
+(define (linux-deb! dist app-name version publisher identifier)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (fprintf (current-error-port)
+                                        "[glaze] deb packaging unavailable: ~a\n"
+                                        (exn-message e))
+                               #f)])
+    (define dpkg-deb (find-executable-path "dpkg-deb" #f))
+    (and dpkg-deb
+         (let ()
+           (define root (linux-staging-tree dist app-name))
+           (and root
+                (dynamic-wind
+                 (lambda () (void))
+                 (lambda ()
+                   (make-directory* (build-path root "DEBIAN"))
+                   (call-with-output-file
+                    (build-path root "DEBIAN" "control")
+                    (lambda (out)
+                      (display (deb-control app-name version publisher (deb-arch-name)) out))
+                    #:exists 'replace)
+                   (define deb-path (build-path dist (string-append app-name ".deb")))
+                   (and (run dpkg-deb "--root-owner-group" "--build" root (path->string deb-path))
+                        (file-exists? deb-path)
+                        deb-path))
+                 (lambda () (delete-tree-quietly! root))))))))
+
+(define (linux-rpm! dist app-name version publisher identifier)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (fprintf (current-error-port)
+                                        "[glaze] rpm packaging unavailable: ~a\n"
+                                        (exn-message e))
+                               #f)])
+    (define rpmbuild (find-executable-path "rpmbuild" #f))
+    (and rpmbuild
+         (let ()
+           (define root (linux-staging-tree dist app-name))
+           (and root
+                (dynamic-wind
+                 (lambda () (void))
+                 (lambda ()
+                   (define top (make-temporary-file "glaze-rpm-~a" 'directory))
+                   (for ([sub (in-list '("BUILD" "RPMS" "SOURCES" "SPECS" "SRPMS"))])
+                     (make-directory* (build-path top sub)))
+                   (define spec-path (build-path top "SPECS" (string-append app-name ".spec")))
+                   (call-with-output-file spec-path
+                                          (lambda (out)
+                                            (display (rpm-spec app-name version publisher root) out))
+                                          #:exists 'replace)
+                   (define ok?
+                     (run rpmbuild
+                          "-bb"
+                          (path->string spec-path)
+                          "--define"
+                          (string-append "_topdir " (path->string top))))
+                   (define rpm-path (build-path dist (string-append app-name ".rpm")))
+                   (when ok?
+                     (define candidate
+                       (let loop ([dir (build-path top "RPMS")])
+                         (append-map (lambda (entry)
+                                       (define full (build-path dir entry))
+                                       (cond
+                                         [(directory-exists? full) (loop full)]
+                                         [(string-suffix? (path->string entry) ".rpm") (list full)]
+                                         [else '()]))
+                                     (directory-list dir))))
+                     (when (pair? candidate)
+                       (copy-file (first candidate) rpm-path #t)))
+                   (and (file-exists? rpm-path) rpm-path))
+                 (lambda () (delete-tree-quietly! root))))))))
+
+(define (linux-appimage! dist app-name)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (fprintf (current-error-port)
+                                        "[glaze] AppImage packaging unavailable: ~a\n"
+                                        (exn-message e))
+                               #f)])
+    (define tool (find-tool "appimagetool" "linuxdeploy"))
+    (and
+     tool
+     (let ()
+       (define root (linux-staging-tree dist app-name))
+       (and root
+            (dynamic-wind
+             (lambda () (void))
+             (lambda ()
+               ;; AppDir: the /usr tree plus the desktop entry, icon,
+               ;; and AppRun at the root, which is what appimagetool
+               ;; and desktop launchers expect.
+               (define appdir (build-path dist "AppDir"))
+               (when (directory-exists? appdir)
+                 (delete-tree-quietly! appdir))
+               (make-directory* appdir)
+               (copy-directory/files (build-path root "usr") (build-path appdir "usr"))
+               (call-with-output-file
+                (build-path appdir (string-append app-name ".desktop"))
+                (lambda (out) (display (desktop-entry app-name (sanitize-package-name app-name)) out))
+                #:exists 'replace)
+               (copy-file (build-path root
+                                      "usr"
+                                      "share"
+                                      "icons"
+                                      "hicolor"
+                                      "64x64"
+                                      "apps"
+                                      (string-append (sanitize-package-name app-name) ".png"))
+                          (build-path appdir (string-append (sanitize-package-name app-name) ".png"))
+                          #t)
+               (call-with-output-file
+                (build-path appdir "AppRun")
+                (lambda (out)
+                  (fprintf out "#!/bin/sh\nexec /usr/lib/~a/bin/~a \"$@\"\n" app-name app-name))
+                #:exists 'replace)
+               (file-or-directory-permissions (build-path appdir "AppRun") #o755)
+               (define appimage-path (build-path dist (string-append app-name ".AppImage")))
+               (define ok?
+                 (case tool
+                   [("appimagetool")
+                    ;; appimagetool ships AS an AppImage; hosts without
+                    ;; FUSE (CI runners, containers) must run it via
+                    ;; self-extraction instead of a runtime mount.
+                    (putenv "APPIMAGE_EXTRACT_AND_RUN" "1")
+                    (run (find-executable-path "appimagetool" #f)
+                         (path->string appdir)
+                         (path->string appimage-path))]
+                   [else
+                    (putenv "OUTPUT" (path->string appimage-path))
+                    (run (find-executable-path "linuxdeploy" #f)
+                         "--appdir"
+                         (path->string appdir)
+                         "--output"
+                         "appimage")]))
+               (and ok? (file-exists? appimage-path) appimage-path))
+             (lambda () (delete-tree-quietly! root))))))))
 
 ;; Derive a stable UUIDv5-shaped UpgradeCode from the application identifier.
 ;; The ProductCode remains WiX-generated per version, while this value is

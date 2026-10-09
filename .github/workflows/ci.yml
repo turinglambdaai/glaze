@@ -150,8 +150,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libayatana-appindicator3-dev libgtk-3-dev
-          # AppImage tooling (optional; build falls back to tar.gz if missing)
+          sudo apt-get install -y libayatana-appindicator3-dev libgtk-3-dev rpm
+          # AppImage tooling (optional; build falls back to other formats if missing)
           sudo wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
           sudo chmod +x /usr/local/bin/appimagetool
 
@@ -189,6 +189,20 @@ jobs:
           # while CI stays green.
           if [ "$RUNNER_OS" = "Windows" ]; then
             test -f dist/WebView2Loader.dll
+          fi
+          # Every native Linux format must actually be produced and valid;
+          # a green build with a missing package format is the same silent
+          # hole the WebView loader assertion closes. (cwd is sampleapp/.)
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            test -f dist/sampleapp.deb
+            test -f dist/sampleapp.rpm
+            test -f dist/sampleapp.AppImage
+            dpkg-deb --info dist/sampleapp.deb | grep -q 'Package: sampleapp'
+            dpkg-deb --info dist/sampleapp.deb | grep -q 'Version: 0.0.1'
+            dpkg-deb --contents dist/sampleapp.deb | grep -q 'usr/bin/sampleapp'
+            dpkg-deb --contents dist/sampleapp.deb | grep -q 'usr/share/applications/sampleapp.desktop'
+            rpm -qpl dist/sampleapp.rpm | grep -q 'usr/bin/sampleapp'
+            rpm -qpl dist/sampleapp.rpm | grep -q 'usr/lib/sampleapp'
           fi
 
       - name: Validate Windows installer upgrade identity

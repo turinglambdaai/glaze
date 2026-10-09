@@ -5,6 +5,17 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Package Linux apps as deb and rpm alongside AppImage, matching the Tauri
+  bundler's format matrix. Every available format is built from one FHS
+  staging tree (`/usr/lib/<app>` payload, `/usr/bin/<app>` wrapper,
+  `.desktop` entry, hicolor icon); AppImage now gets a real populated
+  AppDir instead of relying on one existing, and projects without an icon
+  ship a valid generated placeholder PNG (pure Racket zlib/PNG encoder).
+  CI builds and validates all three formats per run.
+
 ## [0.10.0] - 2026-10-09
 
 ### Added
