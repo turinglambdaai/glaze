@@ -42,6 +42,8 @@
 (check-true (string-contains? spec "/usr/bin/Test App"))
 (check-true (string-contains? spec "/usr/lib/Test App"))
 (check-true (string-contains? spec "cp -a /tmp/stage/usr %{buildroot}/"))
+(check-true (string-contains? spec "/usr/share/icons/hicolor/64x64/apps/test-app.png")
+            "the icon is declared so rpm accepts every installed file")
 
 ;; ---- generated placeholder icon ----
 

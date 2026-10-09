@@ -470,6 +470,7 @@ cp -a ~a/usr %{buildroot}/
 /usr/bin/~a
 /usr/lib/~a
 /usr/share/applications/~a.desktop
+/usr/share/icons/hicolor/64x64/apps/~a.png
 SPECEOF
           (sanitize-package-name app-name)
           (sanitize-package-version version)
@@ -480,7 +481,8 @@ SPECEOF
           (path->string staging-root)
           app-name
           app-name
-          app-name))
+          app-name
+          (sanitize-package-name app-name)))
 
 ;; ---- generated placeholder icon ----
 
