@@ -27,6 +27,7 @@ You get:
 - **System plugins** — scoped clipboard, notifications, opener, and OS information
 - **Path resolver** — app directories, resources, portable overrides, path utilities
 - **Scoped HTTP client** — bounded requests, timeouts, redirect re-authorization
+- **Scoped SQLite plugin** — parameterized select/execute and owned connections
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -59,6 +60,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Capability-gated system plugins | ✅ | ✅ | ✅ |
 | App/user/resource path resolver | ✅ | ✅ | ✅ |
 | Capability-gated HTTP client | ✅ | ✅ | ✅ |
+| Capability-gated SQLite plugin | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -491,6 +493,34 @@ and redirect count are bounded. Every redirect target is authorized before the
 connection is made; cross-origin redirects drop `Authorization` and `Cookie`.
 Connection-managed headers such as `Host` and `Content-Length` cannot be
 overridden by the frontend.
+
+### Scoped SQLite
+
+`open-sqlite-database`, `sql-select`, `sql-execute!`, and `sql-close!` provide
+the direct Racket API. `make-sql-routes` adds `sqlLoad`, `sqlSelect`,
+`sqlExecute`, and `sqlClose` to the generated client:
+
+```racket
+(define database-root (app-data-dir paths))
+(define authority
+  (make-capability
+   "main"
+   (list (path-permission 'sql:load #:allow (list database-root))
+         (path-permission 'sql:select #:allow (list database-root))
+         (path-permission 'sql:execute #:allow (list database-root))
+         (path-permission 'sql:close #:allow (list database-root)))))
+
+(run-app ...
+         #:api (make-sql-routes #:root database-root)
+         #:capability authority)
+```
+
+Frontend paths are relative to the configured root and cannot escape through
+`..` or existing symlinks. Connections are cached by capability and path, and
+the bounded registry prevents one frontend from consuming unlimited handles.
+Queries use positional parameters; `sqlSelect` only accepts `SELECT`/`WITH`
+queries and enforces a row limit. Binary values use `{ "blobBase64": "..." }`
+and SQL NULL maps to JSON `null`.
 
 ### Typed routes, one declaration — `define-api-routes`
 

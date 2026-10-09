@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   request and response sizes, total timeouts, controlled redirects, and
   generated frontend access. Every redirect is re-authorized; cross-origin
   redirects strip credentials and connection-managed headers are rejected.
+- Add a capability-gated SQLite plugin with parameterized select/execute,
+  load/close lifecycle, affected-row and insert-id results, JSON NULL and
+  base64 BLOB conversion, confined database paths, bounded results and
+  capability-owned connection caching.
 
 ## [0.8.0] - 2026-09-30
 

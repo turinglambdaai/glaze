@@ -13,6 +13,7 @@
   '(["base" #:version "9.0"]
     "web-server"
     "web-server-lib"
+    "db-lib"
     ;; Tests ship inside this package, so rackunit is a runtime dep.
     "rackunit-lib"))
 (define build-deps
