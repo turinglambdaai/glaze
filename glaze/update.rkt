@@ -113,7 +113,8 @@
 ;; particular, http-sendrecv/url does not follow the GitHub release aliases
 ;; used by desktop updaters.  The caller owns the returned input port.
 (define (open-update-input url who #:https-only? [https-only? #f])
-  (let loop ([current-url url] [remaining updater-max-redirects])
+  (let loop ([current-url url]
+             [remaining updater-max-redirects])
     (unless (http-url? current-url)
       (raise-arguments-error who "URL is not absolute HTTP(S)" "url" current-url))
     (when (and https-only? (not (https-url? current-url)))
@@ -121,15 +122,13 @@
     (define-values (status headers input)
       (http-sendrecv/url (string->url current-url) #:headers updater-user-agent))
     (define code (status-code status who))
-    (define location
-      (and (member code redirect-statuses) (response-header headers "Location")))
+    (define location (and (member code redirect-statuses) (response-header headers "Location")))
     (cond
       [location
        (close-input-port input)
        (when (zero? remaining)
          (error who "too many redirects fetching ~a" url))
-       (define next-url
-         (url->string (combine-url/relative (string->url current-url) location)))
+       (define next-url (url->string (combine-url/relative (string->url current-url) location)))
        (loop next-url (sub1 remaining))]
       [(<= 200 code 299) input]
       [else
@@ -439,8 +438,7 @@
        (loop next)])))
 
 (define (https-url? value)
-  (and (http-url? value)
-       (string-ci=? (url-scheme (string->url value)) "https")))
+  (and (http-url? value) (string-ci=? (url-scheme (string->url value)) "https")))
 
 (define (fetch-update-manifest manifest-url
                                public-key
@@ -448,8 +446,7 @@
                                #:maximum-bytes [maximum-bytes (* 1024 1024)])
   (unless (https-url? manifest-url)
     (raise-argument-error 'fetch-update-manifest "HTTPS URL string" manifest-url))
-  (define input
-    (open-update-input manifest-url 'fetch-update-manifest #:https-only? #t))
+  (define input (open-update-input manifest-url 'fetch-update-manifest #:https-only? #t))
   (dynamic-wind void
                 (lambda ()
                   (define output (open-output-bytes))

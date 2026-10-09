@@ -122,20 +122,16 @@
                 #:public-dir dir
                 #:api (list (GET "api/latest" (lambda (_) (redirect "../manifest.json")))
                             (GET "api/latest-absolute"
-                                 (lambda (_)
-                                   (redirect "http://127.0.0.1:18997/manifest.json")))
+                                 (lambda (_) (redirect "http://127.0.0.1:18997/manifest.json")))
                             (GET "api/loop" (lambda (_) (redirect "/api/loop"))))))
 (define info (check-update "http://127.0.0.1:18997/manifest.json" #:current-version "1.0.0"))
 (check-equal? (hash-ref info 'version) "9.9.9" "manifest parsed")
 (check-equal? (hash-ref info 'url) "https://x/9.9.9")
-(define redirected-info
-  (check-update "http://127.0.0.1:18997/api/latest" #:current-version "1.0.0"))
+(define redirected-info (check-update "http://127.0.0.1:18997/api/latest" #:current-version "1.0.0"))
 (check-equal? (hash-ref redirected-info 'version) "9.9.9" "relative 302 manifest parsed")
 (define absolute-redirected-info
   (check-update "http://127.0.0.1:18997/api/latest-absolute" #:current-version "1.0.0"))
-(check-equal? (hash-ref absolute-redirected-info 'version)
-              "9.9.9"
-              "absolute 302 manifest parsed")
+(check-equal? (hash-ref absolute-redirected-info 'version) "9.9.9" "absolute 302 manifest parsed")
 (check-equal? (unbox redirect-count) 2 "each successful redirect was followed exactly once")
 (check-false (check-update "http://127.0.0.1:18997/api/loop")
              "redirect loops fail closed after the bounded chase")
