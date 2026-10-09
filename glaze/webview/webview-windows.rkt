@@ -73,8 +73,14 @@
 (define ole32 (ffi-lib "ole32"))
 (define gdi32 (ffi-lib "gdi32"))
 (define loader
-  (with-handlers ([exn:fail? (lambda (e) #f)])
-    (ffi-lib loader-path)))
+  (or (with-handlers ([exn:fail? (lambda (e) #f)])
+        (ffi-lib loader-path))
+      ;; Packaged apps: raco distribute extracts runtime-path files into a
+      ;; flat exts tree, so loader-path's ".." hop out of it never exists
+      ;; there. Fall back to the bare loader name, which LoadLibrary resolves
+      ;; against the executable's directory — build-app stages the DLL there.
+      (with-handlers ([exn:fail? (lambda (e) #f)])
+        (ffi-lib "WebView2Loader"))))
 
 (define S_OK 0)
 (define E_NOINTERFACE #x80004002)
