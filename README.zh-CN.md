@@ -169,7 +169,7 @@ raco glaze build --name myapp --version 1.2.0 \
 
 选项：`--name`、`--version`、`--publisher`、`--identifier`、`--icon <.ico/.icns>`、`--entry <path>`（默认 `main.rkt`）、`--out <dir>`（默认 `dist`）、`--embed-dlls`（Windows：单文件 exe）、`--installer`。不同版本必须保持 `--identifier` 不变；Glaze 会用它派生稳定的 WiX `UpgradeCode` 和 NSIS 卸载注册表标识。
 
-> installer 步骤缺少 WiX / NSIS / create-dmg / appimagetool 等打包工具时，可以降级为 `.zip` / `.tar.gz` 并响亮告警。这里降级的是**分发格式**，不是应用 UI；应用启动本身没有浏览器 fallback。
+> installer 步骤探测原生打包工具链（Windows：WiX / NSIS；macOS：`create-dmg` / `hdiutil`；Linux：`dpkg-deb` / `rpmbuild` / `appimagetool` / `linuxdeploy`），缺失时**优雅降级**为 `.zip` / `.tar.gz` 并响亮告警指明该装什么。Linux 上所有可用格式都从同一棵 FHS 暂存树产出——`/usr/lib/<app>` 载荷、`/usr/bin/<app>` 包装器、`.desktop` 入口与 hicolor 图标——因此 deb、rpm 与 AppImage 载荷完全一致；没有图标的项目也会得到一个有效的生成占位图标。这里降级的是**分发格式**，不是应用 UI；应用启动本身没有浏览器 fallback。
 
 ### 代码签名与公证
 
