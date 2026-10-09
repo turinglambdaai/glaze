@@ -723,6 +723,10 @@ SPECEOF
                    (define ok?
                      (case tool
                        [("appimagetool")
+                        ;; appimagetool ships AS an AppImage; hosts without
+                        ;; FUSE (CI runners, containers) must run it via
+                        ;; self-extraction instead of a runtime mount.
+                        (putenv "APPIMAGE_EXTRACT_AND_RUN" "1")
                         (run (find-executable-path "appimagetool" #f)
                              (path->string appdir)
                              (path->string appimage-path))]
