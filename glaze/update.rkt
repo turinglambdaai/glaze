@@ -79,23 +79,65 @@
 ;; --------------------------------------------------------------------------
 ;; Backward-compatible lightweight manifest check
 
+(define updater-user-agent '("User-Agent: Glaze-Updater/1"))
+(define updater-max-redirects 10)
+(define redirect-statuses '(301 302 303 307 308))
+
+(define (status-code status who)
+  (define text (bytes->string/latin-1 status))
+  (define match (regexp-match #px"(?:^|[ ])([0-9]{3})(?:[ ]|$)" text))
+  (unless match
+    (error who "invalid HTTP status line: ~a" text))
+  (string->number (second match)))
+
+(define (response-header headers wanted)
+  (for/or ([line (in-list headers)])
+    (define text (bytes->string/latin-1 line))
+    (define separator
+      (for/or ([character (in-string text)]
+               [index (in-naturals)]
+               #:when (char=? character #\:))
+        index))
+    (and separator
+         (string-ci=? (substring text 0 separator) wanted)
+         (string-trim (substring text (add1 separator))))))
+
+(define (http-url? value)
+  (and (string? value)
+       (with-handlers ([exn:fail? (lambda (_) #f)])
+         (define parsed (string->url value))
+         (and (member (string-downcase (or (url-scheme parsed) "")) '("http" "https"))
+              (non-empty-string? (url-host parsed))))))
+
+;; Return the response body after resolving redirects ourselves.  In
+;; particular, http-sendrecv/url does not follow the GitHub release aliases
+;; used by desktop updaters.  The caller owns the returned input port.
+(define (open-update-input url who #:https-only? [https-only? #f])
+  (let loop ([current-url url]
+             [remaining updater-max-redirects])
+    (unless (http-url? current-url)
+      (raise-arguments-error who "URL is not absolute HTTP(S)" "url" current-url))
+    (when (and https-only? (not (https-url? current-url)))
+      (raise-arguments-error who "redirect target must use HTTPS" "url" current-url))
+    (define-values (status headers input)
+      (http-sendrecv/url (string->url current-url) #:headers updater-user-agent))
+    (define code (status-code status who))
+    (define location (and (member code redirect-statuses) (response-header headers "Location")))
+    (cond
+      [location
+       (close-input-port input)
+       (when (zero? remaining)
+         (error who "too many redirects fetching ~a" url))
+       (define next-url (url->string (combine-url/relative (string->url current-url) location)))
+       (loop next-url (sub1 remaining))]
+      [(<= 200 code 299) input]
+      [else
+       (close-input-port input)
+       (error who "HTTP request failed with status ~a for ~a" code current-url)])))
+
 (define (fetch-legacy-manifest url)
   (with-handlers ([exn:fail? (lambda (_) #f)])
-    (define match (regexp-match #rx"^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/]+)(/.*)?$" url))
-    (unless match
-      (error 'check-update "bad manifest url"))
-    (define scheme (list-ref match 1))
-    (define authority (list-ref match 2))
-    (define request-path (or (list-ref match 3) "/"))
-    (define ssl? (string-ci=? scheme "https"))
-    (define host-port (string-split authority ":"))
-    (define host (first host-port))
-    (define port
-      (or (and (= (length host-port) 2) (string->number (second host-port))) (if ssl? 443 80)))
-    (when ssl?
-      (dynamic-require 'openssl 'ssl-connect #f))
-    (define-values (_status _headers input)
-      (http-sendrecv host request-path #:port port #:ssl? (if ssl? 'auto #f)))
+    (define input (open-update-input url 'check-update))
     (begin0 (port->bytes input)
       (close-input-port input))))
 
@@ -396,7 +438,7 @@
        (loop next)])))
 
 (define (https-url? value)
-  (and (string? value) (regexp-match? #px"^https://" value)))
+  (and (http-url? value) (string-ci=? (url-scheme (string->url value)) "https")))
 
 (define (fetch-update-manifest manifest-url
                                public-key
@@ -404,7 +446,7 @@
                                #:maximum-bytes [maximum-bytes (* 1024 1024)])
   (unless (https-url? manifest-url)
     (raise-argument-error 'fetch-update-manifest "HTTPS URL string" manifest-url))
-  (define input (get-pure-port (string->url manifest-url) '("User-Agent: Glaze-Updater/1")))
+  (define input (open-update-input manifest-url 'fetch-update-manifest #:https-only? #t))
   (dynamic-wind void
                 (lambda ()
                   (define output (open-output-bytes))
@@ -480,7 +522,7 @@
                                  (delete-file partial))
                                (raise error))])
     (define input
-      (get-pure-port (string->url (update-artifact-url artifact)) '("User-Agent: Glaze-Updater/1")))
+      (open-update-input (update-artifact-url artifact) 'download-update #:https-only? #t))
     (dynamic-wind void
                   (lambda ()
                     (call-with-output-file partial

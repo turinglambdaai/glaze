@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Follow absolute and relative HTTP redirects in legacy update checks, signed
+  manifest fetches, and artifact downloads, with a ten-hop limit and no HTTPS
+  downgrade for signed updates. This also removes a contract-violating OpenSSL
+  probe that made HTTPS legacy checks silently fail on Racket 9.3.
 - Drive the macOS AppKit event cycle with `nextEvent`, `sendEvent`, and
   `updateWindows` while continuing to service main-runloop sources. This fixes
   WKWebView pages that load and execute but remain visually white on macOS 26.
