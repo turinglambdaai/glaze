@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Harden Windows installers with configurable publisher and stable application
   identifiers, deterministic WiX upgrade codes, and complete NSIS silent
   install/uninstall metadata for Windows Apps & Features and winget.
+- Publish a validated, self-contained Windows MSI and SHA-256 checksum beside
+  the source archive for every tagged Glaze release.
 
 ### Added
 - Add a complete signed update pipeline alongside the legacy notification
