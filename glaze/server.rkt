@@ -370,7 +370,10 @@
          (define resource-proc (route-resource route))
          (define resource
            (and resource-proc
-                (parameterize ([current-capability-id (capability-id authority)])
+                (parameterize ([current-capability-id (capability-id authority)]
+                               [current-capability-authorizer
+                                (lambda (permission resource)
+                                  (capability-authorized? authority permission resource))])
                   (apply resource-proc req captured))))
          (capability-authorized? authority permission resource))))
 
@@ -382,7 +385,11 @@
                                ((current-glaze-error-reporter) e (url-path-string (request-uri req)))
                                (error-response 500 (exn-message e)))])
     (define result
-      (parameterize ([current-capability-id (and authority (capability-id authority))])
+      (parameterize ([current-capability-id (and authority (capability-id authority))]
+                     [current-capability-authorizer
+                      (and authority
+                           (lambda (permission resource)
+                             (capability-authorized? authority permission resource)))])
         (apply (route-handler route) req captured)))
     (cond
       [(response? result) result]

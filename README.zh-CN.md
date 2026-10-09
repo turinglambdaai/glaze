@@ -26,6 +26,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **持久化 Store 插件** —— 原子 JSON、自动保存防抖与变更事件
 - **系统插件** —— 受限剪贴板、通知、Opener 与操作系统信息
 - **路径解析器** —— 应用目录、资源、便携覆盖与路径工具
+- **受限 HTTP 客户端** —— 大小上限、超时与重定向逐跳鉴权
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -57,6 +58,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 持久化键值 Store 插件 | ✅ | ✅ | ✅ |
 | Capability 限制系统插件 | ✅ | ✅ | ✅ |
 | 应用/用户/资源路径解析 | ✅ | ✅ | ✅ |
+| Capability 限制 HTTP 客户端 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -392,6 +394,31 @@ save。Store 使用 JSON，写入采用原子替换，自动保存默认以 100 
 `$AUDIO`、`$CACHE`、`$CONFIG`、`$DATA`、`$LOCALDATA`、`$DESKTOP`、
 `$DOCUMENT`、`$DOWNLOAD`、`$HOME`、`$PICTURE`、`$PUBLIC`、`$TEMP`、
 `$VIDEO`。
+
+### 受限 HTTP 客户端
+
+`http-request` 为 Racket 代码提供有界的 HTTP/HTTPS 访问；
+`make-http-routes` 则向嵌入式前端加入 `glaze.api.httpRequest(body)`，并要求
+URL scope 的 `http:request` 权限：
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (url-permission
+          'http:request
+          #:allow (list #px"^https://api\\.example\\.com/v1/")))))
+
+(run-app ...
+         #:api (make-http-routes #:timeout 15
+                                 #:max-response-bytes (* 2 1024 1024))
+         #:capability authority)
+```
+
+请求正文可传文本或 base64，响应包含状态码、最终 URL、headers、`bodyText`
+和 `bodyBase64`。请求/响应大小、总超时和重定向次数都有上限；每次重定向都会
+在建立连接前重新鉴权，跨 origin 时会移除 `Authorization` 与 `Cookie`。
+前端不能覆盖 `Host`、`Content-Length` 等连接管理 header。
 
 ### 后端 → 前端推送（SSE）
 

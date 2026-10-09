@@ -262,6 +262,7 @@ SSE 事件流使用同一个 origin；这套 HTTP 机制服务的是**嵌入式 
 - 内置 store routes 必须在 handler 前检查 `store:read` / `store:write`，root 不可穿越，写盘保持原子性，缓存按 capability 隔离；
 - 内置 system routes 的 clipboard 读写、notification、opener 与 OS/hostname 必须分别授权；路径和 URL 都在 handler 前完成 scope 检查；
 - path resolver 的 app-id 不得形成路径穿越；resource 路径必须同时拒绝绝对路径、`..` 和已有 symlink 逃逸；
+- 内置 HTTP routes 必须限制请求/响应大小、总超时和重定向次数；每个重定向目标在连接前重新按 `http:request` 的 URL scope 鉴权，跨 origin 不转发凭据 header；
 - 同用户本地进程仍可能读进程内存，因此这不是强隔离边界。
 
 ## 系统托盘

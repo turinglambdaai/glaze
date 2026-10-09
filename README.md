@@ -26,6 +26,7 @@ You get:
 - **Persistent store plugin** — atomic JSON stores, debounced auto-save, change events
 - **System plugins** — scoped clipboard, notifications, opener, and OS information
 - **Path resolver** — app directories, resources, portable overrides, path utilities
+- **Scoped HTTP client** — bounded requests, timeouts, redirect re-authorization
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -57,6 +58,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Persistent key-value store plugin | ✅ | ✅ | ✅ |
 | Capability-gated system plugins | ✅ | ✅ | ✅ |
 | App/user/resource path resolver | ✅ | ✅ | ✅ |
+| Capability-gated HTTP client | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -462,6 +464,33 @@ rejects absolute paths, `..` traversal, and existing symlink escapes. Override
 variables include `$AUDIO`, `$CACHE`, `$CONFIG`, `$DATA`, `$LOCALDATA`,
 `$DESKTOP`, `$DOCUMENT`, `$DOWNLOAD`, `$HOME`, `$PICTURE`, `$PUBLIC`, `$TEMP`,
 and `$VIDEO`.
+
+### Scoped HTTP client
+
+`http-request` provides bounded HTTP/HTTPS access to Racket code. For the
+embedded frontend, `make-http-routes` adds `glaze.api.httpRequest(body)` and
+requires the URL-scoped `http:request` permission:
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (url-permission
+          'http:request
+          #:allow (list #px"^https://api\\.example\\.com/v1/")))))
+
+(run-app ...
+         #:api (make-http-routes #:timeout 15
+                                 #:max-response-bytes (* 2 1024 1024))
+         #:capability authority)
+```
+
+The client accepts text or base64 request bodies and returns status, final URL,
+headers, `bodyText`, and `bodyBase64`. Request and response sizes, total timeout,
+and redirect count are bounded. Every redirect target is authorized before the
+connection is made; cross-origin redirects drop `Authorization` and `Cookie`.
+Connection-managed headers such as `Host` and `Content-Length` cannot be
+overridden by the frontend.
 
 ### Typed routes, one declaration — `define-api-routes`
 

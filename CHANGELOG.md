@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Add a Tauri-style path resolver for application, user, temporary,
   executable, and resource directories; portable/per-directory overrides;
   resource-root confinement; and capability-gated frontend path utilities.
+- Add a capability-gated HTTP/HTTPS client with text/base64 bodies, bounded
+  request and response sizes, total timeouts, controlled redirects, and
+  generated frontend access. Every redirect is re-authorized; cross-origin
+  redirects strip credentials and connection-managed headers are rejected.
 
 ## [0.8.0] - 2026-09-30
 
