@@ -192,17 +192,17 @@ jobs:
           fi
           # Every native Linux format must actually be produced and valid;
           # a green build with a missing package format is the same silent
-          # hole the WebView loader assertion closes.
+          # hole the WebView loader assertion closes. (cwd is sampleapp/.)
           if [ "$RUNNER_OS" = "Linux" ]; then
-            test -f sampleapp/dist/sampleapp.deb
-            test -f sampleapp/dist/sampleapp.rpm
-            test -f sampleapp/dist/sampleapp.AppImage
-            dpkg-deb --info sampleapp/dist/sampleapp.deb | grep -q 'Package: sampleapp'
-            dpkg-deb --info sampleapp/dist/sampleapp.deb | grep -q 'Version: 0.0.1'
-            dpkg-deb --contents sampleapp/dist/sampleapp.deb | grep -q 'usr/bin/sampleapp'
-            dpkg-deb --contents sampleapp/dist/sampleapp.deb | grep -q 'usr/share/applications/sampleapp.desktop'
-            rpm -qpl sampleapp/dist/sampleapp.rpm | grep -q 'usr/bin/sampleapp'
-            rpm -qpl sampleapp/dist/sampleapp.rpm | grep -q 'usr/lib/sampleapp'
+            test -f dist/sampleapp.deb
+            test -f dist/sampleapp.rpm
+            test -f dist/sampleapp.AppImage
+            dpkg-deb --info dist/sampleapp.deb | grep -q 'Package: sampleapp'
+            dpkg-deb --info dist/sampleapp.deb | grep -q 'Version: 0.0.1'
+            dpkg-deb --contents dist/sampleapp.deb | grep -q 'usr/bin/sampleapp'
+            dpkg-deb --contents dist/sampleapp.deb | grep -q 'usr/share/applications/sampleapp.desktop'
+            rpm -qpl dist/sampleapp.rpm | grep -q 'usr/bin/sampleapp'
+            rpm -qpl dist/sampleapp.rpm | grep -q 'usr/lib/sampleapp'
           fi
 
       - name: Validate Windows installer upgrade identity
