@@ -29,6 +29,7 @@ You get:
 - **Scoped HTTP client** — bounded requests, timeouts, redirect re-authorization
 - **Scoped SQLite plugin** — parameterized select/execute and owned connections
 - **Global shortcuts** — system-wide hotkeys with scoped accelerators and SSE triggers
+- **Structured logging** — per-sink levels, rotating files, SSE push, bounded history
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -63,6 +64,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Capability-gated HTTP client | ✅ | ✅ | ✅ |
 | Capability-gated SQLite plugin | ✅ | ✅ | ✅ |
 | Capability-gated global shortcuts | ✅ | ✅ | ✅ X11/XWayland |
+| Capability-gated structured logging | ✅ | ✅ | ✅ |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -558,6 +560,29 @@ the page as `global-shortcut` SSE events carrying the canonical accelerator:
 `glaze.on('global-shortcut', ({accelerator}) => ...)`. On Linux the backend
 grabs through X11, so XWayland sessions work while a Wayland session without
 X reports registration failure instead of raising.
+
+### Structured logging
+
+One logger fans records out to sinks, each with its own minimum level:
+
+```racket
+(define logger
+  (make-glaze-logger #:min-level 'info
+                     #:file-root (app-log-dir paths)
+                     #:events bus))
+
+(log-info logger "server started" #:data (hasheq 'port 8080))
+(log-error logger "handler failed" #:data (hasheq 'message "..."))
+```
+
+The default stderr sink always runs; `#:file-root` adds a rotating file sink
+(rotation, not truncation, so a crash mid-write never destroys earlier logs),
+`#:events` pushes each record to the page as a `log` SSE event, and custom
+sinks (procedures or `log-sink` values) plug in through `#:sinks`. A bounded
+in-memory history backs `make-log-routes`, whose `logWrite` and `logHistory`
+generated functions are gated by `log:write` and `log:read`. Frontend records
+carry their source and capability ID — a page cannot forge backend log lines —
+and respect the logger's minimum level exactly like backend records.
 
 ### Typed routes, one declaration — `define-api-routes`
 

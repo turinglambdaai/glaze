@@ -447,6 +447,56 @@ generated client contains @litchar{glaze.api.globalShortcutRegister},
 @litchar{glaze.api.globalShortcutUnregisterAll}, and
 @litchar{glaze.api.globalShortcutIsRegistered}.}
 
+@section[#:tag "logging"]{Structured Logging}
+
+@defmodule[glaze/log]
+
+Tauri-plugin-log-style logging: one logger fans structured records out to
+sinks with per-sink minimum levels, keeps a bounded in-memory history, and
+pushes records to the page as @litchar{log} SSE events when an event bus is
+attached.
+
+@defproc[(make-glaze-logger [#:min-level min-level symbol? 'info]
+                            [#:sinks sinks list? '()]
+                            [#:file-root file-root (or/c #f path-string?) #f]
+                            [#:events event-bus (or/c event-bus? #f) #f]
+                            [#:history history-limit
+                             (or/c #f exact-positive-integer?) 1000])
+         glaze-logger?]{
+Creates a logger with a stderr sink plus the optional rotating file sink
+(@racket[#:file-root]), SSE push (@racket[#:events]), and custom sinks.
+Records below @racket[min-level] are dropped everywhere; each sink can
+additionally filter by its own minimum level. @racket[log-trace],
+@racket[log-debug], @racket[log-info], @racket[log-warn], and
+@racket[log-error] emit records with optional @racket[#:data] jsexprs.}
+
+@defproc[(glaze-logger-history [logger glaze-logger?]
+                               [limit exact-positive-integer? 100])
+         (listof log-record?)]{
+Returns the most recent records, oldest first.}
+
+@defproc[(make-file-log-sink [root path-string?]
+                             [#:name name string? "glaze.log"]
+                             [#:max-bytes max-bytes exact-positive-integer?
+                              (* 1024 1024)]
+                             [#:keep keep exact-nonnegative-integer? 3]
+                             [#:min-level min-level symbol? 'trace])
+         log-sink?]{
+A rotating file sink: when a line would push the current file past
+@racket[max-bytes], files shift (@litchar{name.k-1} becomes
+@litchar{name.k}, the oldest is dropped) instead of truncating, so a crash
+mid-write never destroys earlier logs.}
+
+@defproc[(make-log-routes [logger glaze-logger?]
+                          [#:prefix prefix string? "api/log"])
+         (listof route?)]{
+Creates a @racket['log:write]-gated write route and a
+@racket['log:read]-gated bounded history route. Frontend records are
+tagged @racket['frontend] with the active capability ID, so a page cannot
+forge backend log lines, and they respect the logger's minimum level
+exactly like backend records. The generated client contains
+@litchar{glaze.api.logWrite} and @litchar{glaze.api.logHistory}.}
+
 @section[#:tag "paths"]{Application and Resource Paths}
 
 @defmodule[glaze/path]

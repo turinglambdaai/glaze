@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `global-shortcut` SSE events on trigger. Native backends use Win32
   `RegisterHotKey` through a message-only window, Carbon
   `RegisterEventHotKey`, and X11 `XGrabKey`.
+- Add structured logging: one logger with per-sink minimum levels, a
+  rotating file sink (rotation instead of truncation), SSE `log` events,
+  bounded in-memory history, and capability-gated frontend write/history
+  routes. Frontend records are tagged with their source and capability so
+  pages cannot forge backend log lines.
+
+### Fixed
+- Stage `WebView2Loader.dll` into the packaged Windows distribution (and
+  therefore every MSI harvested from it): the loader is FFI-loaded through
+  an absolute package-tree path that `raco distribute` cannot trace, so
+  packaged apps previously exited with `WebView2 backend unavailable` at
+  startup. CI now asserts the staged copy on the Windows package job.
 
 ## [0.9.0] - 2026-10-09
 
