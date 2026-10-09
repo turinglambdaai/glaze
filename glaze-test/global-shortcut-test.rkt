@@ -74,7 +74,8 @@
   (accelerator-permission 'global-shortcut:register
                           #:allow '("CmdOrCtrl+Shift+D" "Ctrl+F5")
                           #:deny '("Ctrl+F5")))
-(check-true (scope-authorized? register-scope "ctrl+shift+d") "scope matches case variants")
+(check-true (scope-authorized? register-scope "COMMANDORCONTROL+shift+d")
+            "scope matches case variants")
 (check-true (scope-authorized? register-scope "CommandOrControl+Shift+KeyD"))
 (check-false (scope-authorized? register-scope "Ctrl+F5") "deny takes precedence")
 (check-false (scope-authorized? register-scope "Ctrl+F9") "out of scope is denied")
@@ -190,9 +191,10 @@
                                                  (form-urlencoded-encode "Ctrl+F9")))])
   (check-true (string-contains? status "403") "out-of-scope query is denied"))
 
-;; unregister
-(let-values ([(status body)
-              (call "POST" "/api/global-shortcut/unregister" (hasheq 'accelerator "Ctrl+Shift+D"))])
+;; unregister (CmdOrCtrl spelling: the registered hotkey is cmd on macOS)
+(let-values ([(status body) (call "POST"
+                                  "/api/global-shortcut/unregister"
+                                  (hasheq 'accelerator "CmdOrCtrl+Shift+D"))])
   (check-true (string-contains? status "200"))
   (check-true (hash-ref (bytes->jsexpr body) 'ok)))
 (let-values ([(_status body) (call "GET"
