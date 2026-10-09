@@ -27,6 +27,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **系统插件** —— 受限剪贴板、通知、Opener 与操作系统信息
 - **路径解析器** —— 应用目录、资源、便携覆盖与路径工具
 - **受限 HTTP 客户端** —— 大小上限、超时与重定向逐跳鉴权
+- **受限 SQLite 插件** —— 参数化 select/execute 与连接所有权隔离
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -59,6 +60,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | Capability 限制系统插件 | ✅ | ✅ | ✅ |
 | 应用/用户/资源路径解析 | ✅ | ✅ | ✅ |
 | Capability 限制 HTTP 客户端 | ✅ | ✅ | ✅ |
+| Capability 限制 SQLite 插件 | ✅ | ✅ | ✅ |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -419,6 +421,32 @@ URL scope 的 `http:request` 权限：
 和 `bodyBase64`。请求/响应大小、总超时和重定向次数都有上限；每次重定向都会
 在建立连接前重新鉴权，跨 origin 时会移除 `Authorization` 与 `Cookie`。
 前端不能覆盖 `Host`、`Content-Length` 等连接管理 header。
+
+### 受限 SQLite
+
+`open-sqlite-database`、`sql-select`、`sql-execute!`、`sql-close!` 是直接
+Racket API；`make-sql-routes` 则向生成的客户端加入 `sqlLoad`、`sqlSelect`、
+`sqlExecute` 与 `sqlClose`：
+
+```racket
+(define database-root (app-data-dir paths))
+(define authority
+  (make-capability
+   "main"
+   (list (path-permission 'sql:load #:allow (list database-root))
+         (path-permission 'sql:select #:allow (list database-root))
+         (path-permission 'sql:execute #:allow (list database-root))
+         (path-permission 'sql:close #:allow (list database-root)))))
+
+(run-app ...
+         #:api (make-sql-routes #:root database-root)
+         #:capability authority)
+```
+
+前端只能使用配置根目录下的相对路径，`..` 和已有符号链接都不能越界。连接按
+capability 与数据库路径隔离缓存，并限制总连接数。查询使用位置参数；
+`sqlSelect` 只接受 `SELECT`/`WITH`，且限制返回行数。二进制值用
+`{ "blobBase64": "..." }` 往返，SQL NULL 对应 JSON `null`。
 
 ### 后端 → 前端推送（SSE）
 

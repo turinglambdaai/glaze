@@ -468,6 +468,53 @@ checked against the active URL-scoped capability before connecting. Frontend
 callers may lower configured limits but cannot raise them. Connection-managed
 headers such as @litchar{Host} and @litchar{Content-Length} are rejected.}
 
+@section[#:tag "sqlite"]{Scoped SQLite}
+
+@defmodule[glaze/sql]
+
+@defproc[(open-sqlite-database [path path-string?]
+                               [#:busy-retry-limit busy-retry-limit
+                                exact-nonnegative-integer? 1000])
+         sql-database?]{Opens or creates a SQLite database. The parent
+directory must already exist.}
+
+@defproc[(sql-select [database sql-database?]
+                     [statement string?]
+                     [parameters list? '()]
+                     [#:max-rows max-rows exact-positive-integer? 10000]
+                     [#:max-cell-bytes max-cell-bytes exact-positive-integer?
+                      (* 10 1024 1024)])
+         (listof hash?)]{
+Runs a parameterized @litchar{SELECT} or @litchar{WITH} query. Results are
+bounded by row count. SQL NULL becomes JSON null and BLOB values become hashes
+containing @racket['blobBase64].}
+
+@defproc[(sql-execute! [database sql-database?]
+                       [statement string?]
+                       [parameters list? '()])
+         hash?]{Runs a parameterized statement and returns
+@racket['rowsAffected] and @racket['lastInsertId].}
+
+@defproc[(sql-close! [database sql-database?]) void?]{Closes the connection.
+Repeated close calls are harmless.}
+
+@defproc[(make-sql-routes [#:root root path-string?]
+                          [#:prefix prefix string? "api/sql"]
+                          [#:max-connections max-connections
+                           exact-positive-integer? 16]
+                          [#:max-rows max-rows exact-positive-integer? 10000]
+                          [#:max-cell-bytes max-cell-bytes exact-positive-integer?
+                           (* 10 1024 1024)]
+                          [#:busy-retry-limit busy-retry-limit
+                           exact-nonnegative-integer? 1000])
+         (listof route?)]{
+Creates @racket['sql:load], @racket['sql:select], @racket['sql:execute], and
+@racket['sql:close] protected routes. Database paths are relative to
+@racket[root], are checked through existing symbolic links, and connections
+are cached separately for each active capability. The generated client
+contains @litchar{sqlLoad}, @litchar{sqlSelect}, @litchar{sqlExecute}, and
+@litchar{sqlClose}.}
+
 A route handler receives the web-server request followed by any captured
 @litchar{:param} path values. Returning a jsexpr produces a JSON 200 response;
 a full response value may also be returned, including a streaming response
