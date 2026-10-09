@@ -434,21 +434,47 @@ NSI
 ;; as a plain library — its main submodule would never run and the packaged
 ;; app would exit 0 without executing anything (the entry wrapper itself has
 ;; no main submodule either).
+(define (entry-declares-main-submodule? entry-path)
+  ;; Read the module form instead of searching its text: a comment or string
+  ;; containing `(module+ main ...)` must not make the generated wrapper
+  ;; require a submodule that does not exist.
+  (define module-datum
+    (call-with-input-file entry-path
+                          (lambda (input)
+                            (parameterize ([read-accept-reader #t]
+                                           [current-load-relative-directory (path-only entry-path)])
+                              (syntax->datum (read-syntax entry-path input))))))
+  (define (main-form? form)
+    (cond
+      [(and (pair? form)
+            (memq (car form)
+                  '(module module* module+
+                     ))
+            (pair? (cdr form))
+            (eq? (cadr form) 'main))
+       #t]
+      [(and (pair? form)
+            (memq (car form)
+                  '(begin
+                     #%module-begin)))
+       (for/or ([nested (in-list (cdr form))])
+         (main-form? nested))]
+      [else #f]))
+  (and (pair? module-datum)
+       (eq? (car module-datum) 'module)
+       (for/or ([form (in-list (cdddr module-datum))])
+         (main-form? form))))
+
 (define (entry-module-source user-entry)
   (define entry-path
     (if (complete-path? user-entry)
         user-entry
         (path->complete-path user-entry)))
   (define entry-filename (path->string (file-name-from-path entry-path)))
-  ;; Does the entry declare (module+ main)? Detected textually at build time:
-  ;; in raco-exe builds `module-declared?` reports #f and `dynamic-require`
-  ;; cannot resolve the submod (it falls back to source resolution and dies
-  ;; on a missing reader collection), so a runtime probe silently skips the
-  ;; program body (glaze#1). A static submodule require is embedded-safe and
-  ;; instantiates the submodule exactly like `racket main.rkt` does;
-  ;; top-level-style entries need no extra form.
-  (define has-main-submod?
-    (and (regexp-match #px"\\(module\\+\\s+main\\b" (file->string entry-path)) #t))
+  ;; In raco-exe builds `module-declared?` reports #f and `dynamic-require`
+  ;; cannot resolve the submodule. Detect an explicit main submodule from the
+  ;; parsed source at build time and emit the embedded-safe static require.
+  (define has-main-submod? (entry-declares-main-submodule? entry-path))
   (string-append
    "#lang racket/base\n"
    "(require racket/path)\n"
