@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Drive the macOS AppKit event cycle with `nextEvent`, `sendEvent`, and
+  `updateWindows` while continuing to service main-runloop sources. This fixes
+  WKWebView pages that load and execute but remain visually white on macOS 26.
+- Strengthen real-window CI with a high-entropy canvas capture so a committed
+  page title cannot hide a missing first paint.
+
 ### Added
 - Add a complete signed update pipeline alongside the legacy notification
   helper: SemVer/channel selection, application and key-id pinning, staged

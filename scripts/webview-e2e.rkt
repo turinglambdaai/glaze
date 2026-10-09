@@ -38,15 +38,27 @@
 
 (define dir (make-temporary-file "glaze-e2e-~a" 'directory))
 (for ([page '("index.html" "p2.html")]
-      [doc '(("<title>E2E One</title>" "ONE") ("<title>E2E Two</title>" "TWO"))])
+      [doc '(("<title>E2E loading</title>" "ONE") ("<title>E2E Two</title>" "TWO"))])
   (call-with-output-file
    (build-path dir page)
    (lambda (o)
-     (fprintf
-      o
-      "<html><head>~a</head><body style=\"background:#C15F3C;color:#fff\"><h1>~a</h1></body></html>"
-      (first doc)
-      (second doc)))
+     (if (string=? page "index.html")
+         (fprintf
+          o
+          (string-append
+           "<html><head>~a</head><body style=\"margin:0;background:#C15F3C\">"
+           "<canvas id=\"paint\" width=\"600\" height=\"400\"></canvas><script>"
+           "const c=document.getElementById('paint'),x=c.getContext('2d'),"
+           "d=x.createImageData(c.width,c.height);let s=305419896;"
+           "for(let i=0;i<d.data.length;i+=4){s^=s<<13;s^=s>>>17;s^=s<<5;"
+           "d.data[i]=s&255;d.data[i+1]=(s>>>8)&255;d.data[i+2]=(s>>>16)&255;d.data[i+3]=255;}"
+           "x.putImageData(d,0,0);document.title='E2E One';</script></body></html>")
+          (first doc))
+         (fprintf
+          o
+          "<html><head>~a</head><body style=\"background:#C15F3C;color:#fff\"><h1>~a</h1></body></html>"
+          (first doc)
+          (second doc))))
    #:exists 'replace))
 
 (define-values (port stop) (start-server #:port 18970 #:public-dir dir))
@@ -88,17 +100,19 @@
                              (>= (window-state-height changed) 440)))
                       10)))
 
-;; capture: may need the window to composite first.
+;; The first page paints deterministic high-entropy pixels into a canvas. A
+;; title can commit while macOS still shows a white, uncomposited remote layer;
+;; requiring a large PNG makes that failure visible to CI.
 (define shot
   (let retry ([deadline (+ (current-inexact-milliseconds) 10000)])
     (define s (and (webview? wv) (webview-capture! wv)))
     (cond
-      [(and s (file-exists? s) (>= (file-size s) 2000)) s]
+      [(and s (file-exists? s) (>= (file-size s) 50000)) s]
       [(> (current-inexact-milliseconds) deadline) #f]
       [else
        (sleep 0.3)
        (retry deadline)])))
-(check! "capture produces a non-trivial PNG" (and shot #t))
+(check! "capture contains composited page pixels" (and shot #t))
 (when shot
   (log (format "capture: ~a (~a bytes)" shot (file-size shot))))
 
