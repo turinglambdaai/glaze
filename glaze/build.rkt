@@ -9,7 +9,8 @@
 ;; runtime the app resolves the directory without depending on the working
 ;; directory.
 
-(require racket/file
+(require file/sha1
+         racket/file
          racket/list
          racket/path
          racket/port
@@ -53,6 +54,9 @@
 ;;   #:version  — app version string; goes into the macOS Info.plist
 ;;                (CFBundleShortVersionString / CFBundleVersion) and the
 ;;                Windows MSI ProductVersion (default "0.0.0")
+;;   #:publisher — human-readable publisher used by native installers
+;;   #:identifier — stable application/package identifier used to derive
+;;                  Windows upgrade and uninstall identities
 ;;   #:icon     — optional .ico (Windows) / .icns (macOS)
 ;;   #:out-dir  — output directory for the distribution (default "dist")
 ;;   #:embed-dlls? — Windows only: embed DLLs into a single .exe (default #f)
@@ -81,6 +85,8 @@
 (define (build-app #:entry [entry "main.rkt"]
                    #:name [name #f]
                    #:version [version #f]
+                   #:publisher [publisher #f]
+                   #:identifier [identifier #f]
                    #:icon [icon #f]
                    #:out-dir [out-dir "dist"]
                    #:embed-dlls? [embed-dlls? #f]
@@ -109,6 +115,16 @@
   (define entry-abs (path->complete-path entry-path))
   (define project-dir (path-only entry-abs))
   (define app-name (or name (path->string (file-name-from-path project-dir))))
+  (define app-publisher (or publisher app-name))
+  (define app-identifier (or identifier app-name))
+  (unless (and (string? app-publisher) (not (string=? (string-trim app-publisher) "")))
+    (raise-argument-error 'build-app "non-empty string" app-publisher))
+  (unless (and (string? app-identifier)
+               (regexp-match? #px"^[A-Za-z0-9][A-Za-z0-9._-]*$" app-identifier))
+    (raise-argument-error
+     'build-app
+     "application identifier containing letters, digits, dot, underscore, or hyphen"
+     app-identifier))
 
   ;; Generate an entry wrapper in a temp location that requires the user's
   ;; main plus glaze, and re-exports nothing. We write it next to the entry so
@@ -206,7 +222,7 @@
   ;; the CI matrix installs them. Returns the produced artifact path (or #f).
   (define installer-artifact
     (if installer?
-        (make-installer os out-dir-path app-name (or version "0.0.0"))
+        (make-installer os out-dir-path app-name (or version "0.0.0") app-publisher app-identifier)
         #f))
 
   ;; Sign the installer artifact too (Windows msi / NSIS setup exe) — it
@@ -226,9 +242,9 @@
 ;; archive (.zip / .tar.gz) when the tool is missing, printing a warning so the
 ;; caller knows an installer wasn't produced. Returns the produced artifact
 ;; path, or #f when nothing could be produced.
-(define (make-installer os out-dir app-name [version "0.0.0"])
+(define (make-installer os out-dir app-name version publisher identifier)
   (case os
-    [(windows) (make-windows-installer out-dir app-name version)]
+    [(windows) (make-windows-installer out-dir app-name version publisher identifier)]
     [(macosx) (make-macos-installer out-dir app-name)]
     [else (make-linux-installer out-dir app-name)]))
 
@@ -242,32 +258,65 @@
   (apply system* args))
 
 ;; Windows: prefer WiX v4 (`wix`), then NSIS (`makensis`); else zip the dist.
-(define (make-windows-installer out-dir app-name [version "0.0.0"])
+(define (make-windows-installer out-dir app-name version publisher identifier)
   (define dist (path->complete-path out-dir))
   (cond
     [(find-tool "wix.exe" "wix")
      (define msi-path (build-path dist (string-append app-name ".msi")))
-     ;; WiX v4: `wix build -o out.msi <wxs>`; we generate a minimal wxs.
-     (define wxs-path (build-path dist (string-append app-name ".wxs")))
-     (call-with-output-file wxs-path
-                            (lambda (out) (display (windows-wxs app-name dist version) out))
-                            #:exists 'replace)
-     (if (run (find-executable-path "wix.exe" #f)
-              "build"
-              "-o"
-              (path->string msi-path)
-              (path->string wxs-path))
-         msi-path
-         (fprintf (current-error-port) "[glaze] WiX build failed; see output above.\n"))]
+     (when (file-exists? msi-path)
+       (delete-file msi-path))
+     ;; WiX v4: `wix build -o out.msi <wxs>`; keep compiler side-products
+     ;; outside the application directory being harvested.
+     (define wix-temp (make-temporary-file "glaze-installer-~a" 'directory))
+     (define wxs-path (build-path wix-temp (string-append app-name ".wxs")))
+     (define temp-msi (build-path wix-temp (string-append app-name ".msi")))
+     (define wix-arch
+       (case (system-type 'arch)
+         [(x86_64 amd64) "x64"]
+         [(aarch64 arm64) "arm64"]
+         [else "x86"]))
+     (dynamic-wind (lambda ()
+                     (call-with-output-file
+                      wxs-path
+                      (lambda (out)
+                        (display (windows-wxs app-name dist version publisher identifier) out))
+                      #:exists 'replace))
+                   (lambda ()
+                     (if (run (or (find-executable-path "wix.exe" #f) (find-executable-path "wix" #f))
+                              "build"
+                              "-arch"
+                              wix-arch
+                              "-o"
+                              (path->string temp-msi)
+                              (path->string wxs-path))
+                         (begin
+                           ;; The system temp directory and the project can be
+                           ;; on different Windows volumes (for example C: and
+                           ;; D: on GitHub runners), where rename cannot work.
+                           (copy-file temp-msi msi-path #t)
+                           msi-path)
+                         (error 'build-app "WiX build failed; see output above")))
+                   (lambda ()
+                     (when (directory-exists? wix-temp)
+                       (delete-directory/files wix-temp))))]
     [(find-tool "makensis")
-     (define nsis-path (build-path dist (string-append app-name ".nsi")))
-     (call-with-output-file nsis-path
-                            (lambda (out) (display (windows-nsis app-name dist) out))
-                            #:exists 'replace)
+     (define nsis-path (make-temporary-file "glaze-installer-~a.nsi"))
      (define setup-exe (build-path dist (string-append app-name "-setup.exe")))
-     (if (run (find-executable-path "makensis" #f) (path->string nsis-path))
-         setup-exe
-         (fprintf (current-error-port) "[glaze] NSIS build failed; see output above.\n"))]
+     (when (file-exists? setup-exe)
+       (delete-file setup-exe))
+     (dynamic-wind (lambda ()
+                     (call-with-output-file
+                      nsis-path
+                      (lambda (out)
+                        (display (windows-nsis app-name dist version publisher identifier) out))
+                      #:exists 'replace))
+                   (lambda ()
+                     (if (run (find-executable-path "makensis" #f) (path->string nsis-path))
+                         setup-exe
+                         (error 'build-app "NSIS build failed; see output above")))
+                   (lambda ()
+                     (when (file-exists? nsis-path)
+                       (delete-file nsis-path))))]
     [else
      (display "[glaze] No Windows installer toolchain found (wix / makensis); " (current-error-port))
      (displayln "producing a .zip instead. Install WiX Toolset or NSIS for a real installer."
@@ -329,55 +378,129 @@
      (displayln "producing a .tar.gz instead." (current-error-port))
      (archive-directory dist app-name "tar.gz")]))
 
+;; Derive a stable UUIDv5-shaped UpgradeCode from the application identifier.
+;; The ProductCode remains WiX-generated per version, while this value is
+;; deliberately identical across releases so MajorUpgrade can find old MSIs.
+(define (stable-upgrade-code identifier)
+  (define digest (subbytes (sha1-bytes (open-input-string identifier)) 0 16))
+  (bytes-set! digest 6 (bitwise-ior #x50 (bitwise-and #x0f (bytes-ref digest 6))))
+  (bytes-set! digest 8 (bitwise-ior #x80 (bitwise-and #x3f (bytes-ref digest 8))))
+  (define hex (string-upcase (bytes->hex-string digest)))
+  (format "{~a-~a-~a-~a-~a}"
+          (substring hex 0 8)
+          (substring hex 8 12)
+          (substring hex 12 16)
+          (substring hex 16 20)
+          (substring hex 20 32)))
+
+(define (xml-escape value)
+  (for/fold ([result value])
+            ([replacement
+              (in-list
+               '(("&" . "&amp;") ("<" . "&lt;") (">" . "&gt;") ("'" . "&apos;") ("\"" . "&quot;")))])
+    (string-replace result (car replacement) (cdr replacement))))
+
 ;; Minimal WiX v4 source referencing the dist directory contents.
-(define (windows-wxs app-name dist-dir [version "0.0.0"])
+(define (windows-wxs app-name dist-dir version publisher identifier)
+  (define dist (xml-escape (path->string dist-dir)))
   (format #<<WXEOF
-<?xml version='1.0' encoding='windows-1252'?>
+<?xml version='1.0' encoding='utf-8'?>
 <Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
-  <Package Name='~a' Manufacturer='glaze' Version='~a'>
+  <Package Name='~a' Manufacturer='~a' Version='~a' UpgradeCode='~a' Scope='perMachine'>
     <MajorUpgrade DowngradeErrorMessage='A newer version is already installed.' />
-    <Directory Id='TARGETDIR' Name='SourceDir'>
-      <Directory Id='ProgramFilesFolder'>
-        <Directory Id='INSTALLDIR' Name='~a'>
-          <Component Id='App' Guid='*'>
-            <Files Include='~a\\**' />
-          </Component>
-        </Directory>
-      </Directory>
-    </Directory>
-    <Feature Id='Complete' Title='~a' Level='1'>
-      <ComponentRef Id='App' />
-    </Feature>
+    <MediaTemplate EmbedCab='yes' />
+    <StandardDirectory Id='ProgramFiles64Folder'>
+      <Directory Id='INSTALLDIR' Name='~a' />
+    </StandardDirectory>
+    <Files Directory='INSTALLDIR' Include='~a\**' />
   </Package>
 </Wix>
 WXEOF
-          app-name
-          version
-          app-name
-          (path->string dist-dir)
-          app-name))
+          (xml-escape app-name)
+          (xml-escape publisher)
+          (xml-escape version)
+          (stable-upgrade-code identifier)
+          (xml-escape app-name)
+          dist))
 
-;; Minimal NSIS script.
-(define (windows-nsis app-name dist-dir)
-  (format #<<NSI
+;; NSIS supports silent installation via /S. The ARP keys below make install,
+;; upgrade, and uninstall detection work for winget and Windows Settings.
+(define (nsis-escape value)
+  (string-replace (string-replace value "$" "$$") "\"" "$\\\""))
+
+(define (windows-nsis app-name dist-dir version publisher identifier)
+  (format
+   #<<NSI
+Unicode True
 Name "~a"
-OutFile "~a\\~a-setup.exe"
-InstallDir "$PROGRAMFILES\\~a"
+OutFile "~a\~a-setup.exe"
+RequestExecutionLevel admin
+SetRegView 64
+InstallDir "$PROGRAMFILES64\~a"
+InstallDirRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "InstallLocation"
 Page directory
 Page instfiles
-Section ""
+UninstPage instfiles
+Section "Install"
   SetOutPath "$INSTDIR"
-  File /r "~a\\*.*"
-  CreateShortcut "$DESKTOP\\~a.lnk" "$INSTDIR\\~a.exe"
+  File /r /x "*.msi" /x "*-setup.exe" /x "*.wxs" /x "*.nsi" "~a\*.*"
+  CreateShortcut "$DESKTOP\~a.lnk" "$INSTDIR\~a.exe"
+  WriteUninstaller "$INSTDIR\Uninstall.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "DisplayName" "~a"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "DisplayVersion" "~a"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "Publisher" "~a"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "DisplayIcon" "$INSTDIR\~a.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "QuietUninstallString" '$\"$INSTDIR\Uninstall.exe$\" /S'
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "NoModify" 1
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "NoRepair" 1
+SectionEnd
+Section "Uninstall"
+  Delete "$DESKTOP\~a.lnk"
+  RMDir /r "$INSTDIR"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a"
 SectionEnd
 NSI
-          app-name
-          (path->string dist-dir)
-          app-name
-          app-name
-          (path->string dist-dir)
-          app-name
-          app-name))
+   (nsis-escape app-name)
+   (path->string dist-dir)
+   (nsis-escape app-name)
+   (nsis-escape app-name)
+   (nsis-escape identifier)
+   (path->string dist-dir)
+   (nsis-escape app-name)
+   (nsis-escape app-name)
+   (nsis-escape identifier)
+   (nsis-escape app-name)
+   (nsis-escape identifier)
+   (nsis-escape version)
+   (nsis-escape identifier)
+   (nsis-escape publisher)
+   (nsis-escape identifier)
+   (nsis-escape identifier)
+   (nsis-escape app-name)
+   (nsis-escape identifier)
+   (nsis-escape identifier)
+   (nsis-escape identifier)
+   (nsis-escape identifier)
+   (nsis-escape app-name)
+   (nsis-escape identifier)))
+
+(module+ test
+  (require rackunit)
+  (define identifier "TuringLambda.Glaze")
+  (define upgrade-code (stable-upgrade-code identifier))
+  (check-equal? upgrade-code (stable-upgrade-code identifier))
+  (check-not-equal? upgrade-code (stable-upgrade-code "TuringLambda.Other"))
+  (check-regexp-match #px"^\\{[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}\\}$" upgrade-code)
+  (define wxs (windows-wxs "Glaze" (string->path "C:/dist") "1.2.3" "Turing Lambda" identifier))
+  (check-true (string-contains? wxs "Manufacturer='Turing Lambda'"))
+  (check-true (string-contains? wxs (format "UpgradeCode='~a'" upgrade-code)))
+  (check-true (string-contains? wxs "Scope='perMachine'"))
+  (define nsi (windows-nsis "Glaze" (string->path "C:/dist") "1.2.3" "Turing Lambda" identifier))
+  (check-true (string-contains? nsi "QuietUninstallString"))
+  (check-true (string-contains? nsi "Uninstall.exe$\\\" /S"))
+  (check-true (string-contains? nsi "DeleteRegKey HKLM")))
 
 ;; Produce a zip or tar.gz of dist contents as a portable fallback. Uses the
 ;; host `tar` if present (handles both formats), else warns. Returns the

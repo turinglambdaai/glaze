@@ -158,8 +158,8 @@ jobs:
       - name: Install installer toolchain (Windows)
         if: runner.os == 'Windows'
         run: |
-          # WiX Toolset v4 (build falls back to zip if missing)
-          dotnet tool install --global wix
+          # Pin the same WiX release used by the tag-release workflow.
+          dotnet tool install --global wix --version 5.0.2
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
       - name: Scaffold and build a sample app
@@ -180,7 +180,45 @@ jobs:
           # --sign - exercises the signing pipeline everywhere: macOS signs
           # the bundle ad-hoc (verifiable without a cert); Windows/Linux
           # degrade with a loud warning when no signing toolchain exists.
-          raco glaze build --name sampleapp --version 0.0.1 --out dist --installer --sign -
+          raco glaze build --name sampleapp --version 0.0.1 \
+            --publisher "Turing Lambda" --identifier TuringLambda.Glaze.CISample \
+            --out dist --installer --sign -
+
+      - name: Validate Windows installer upgrade identity
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $first = (Resolve-Path 'sampleapp/dist/sampleapp.msi').Path
+          wix msi validate $first
+          Push-Location sampleapp
+          raco glaze build `
+            --name sampleapp `
+            --version 0.0.2 `
+            --publisher 'Turing Lambda' `
+            --identifier TuringLambda.Glaze.CISample `
+            --out dist-next `
+            --installer
+          Pop-Location
+          $second = (Resolve-Path 'sampleapp/dist-next/sampleapp.msi').Path
+          wix msi validate $second
+          $firstWxs = Join-Path $env:RUNNER_TEMP 'sampleapp-0.0.1.wxs'
+          $secondWxs = Join-Path $env:RUNNER_TEMP 'sampleapp-0.0.2.wxs'
+          wix msi decompile $first -o $firstWxs
+          wix msi decompile $second -o $secondWxs
+          [xml] $firstXml = Get-Content -Raw $firstWxs
+          [xml] $secondXml = Get-Content -Raw $secondWxs
+          $firstPackage = $firstXml.Wix.Package
+          $secondPackage = $secondXml.Wix.Package
+          if ($firstPackage.UpgradeCode -ne $secondPackage.UpgradeCode) {
+            throw 'UpgradeCode changed between consecutive versions'
+          }
+          if ($firstPackage.ProductCode -eq $secondPackage.ProductCode) {
+            throw 'ProductCode did not change between consecutive versions'
+          }
+          if ($secondPackage.Version -ne '0.0.2') {
+            throw "unexpected MSI version: $($secondPackage.Version)"
+          }
       - name: Verify macOS bundle signature
         if: runner.os == 'macOS'
         run: |
