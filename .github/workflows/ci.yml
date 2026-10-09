@@ -193,16 +193,23 @@ jobs:
           # Every native Linux format must actually be produced and valid;
           # a green build with a missing package format is the same silent
           # hole the WebView loader assertion closes. (cwd is sampleapp/.)
+          # Outputs are captured to files first: `grep -q` exits on the
+          # first match, and under the runner's default pipefail the
+          # EPIPE-killed producer would fail the step even on a good
+          # package.
           if [ "$RUNNER_OS" = "Linux" ]; then
             test -f dist/sampleapp.deb
             test -f dist/sampleapp.rpm
             test -f dist/sampleapp.AppImage
-            dpkg-deb --info dist/sampleapp.deb | grep -q 'Package: sampleapp'
-            dpkg-deb --info dist/sampleapp.deb | grep -q 'Version: 0.0.1'
-            dpkg-deb --contents dist/sampleapp.deb | grep -q 'usr/bin/sampleapp'
-            dpkg-deb --contents dist/sampleapp.deb | grep -q 'usr/share/applications/sampleapp.desktop'
-            rpm -qpl dist/sampleapp.rpm | grep -q 'usr/bin/sampleapp'
-            rpm -qpl dist/sampleapp.rpm | grep -q 'usr/lib/sampleapp'
+            dpkg-deb --info dist/sampleapp.deb > "$RUNNER_TEMP/deb-info.txt"
+            grep -q 'Package: sampleapp' "$RUNNER_TEMP/deb-info.txt"
+            grep -q 'Version: 0.0.1' "$RUNNER_TEMP/deb-info.txt"
+            dpkg-deb --contents dist/sampleapp.deb > "$RUNNER_TEMP/deb-contents.txt"
+            grep -q 'usr/bin/sampleapp' "$RUNNER_TEMP/deb-contents.txt"
+            grep -q 'usr/share/applications/sampleapp.desktop' "$RUNNER_TEMP/deb-contents.txt"
+            rpm -qpl dist/sampleapp.rpm > "$RUNNER_TEMP/rpm-files.txt"
+            grep -q 'usr/bin/sampleapp' "$RUNNER_TEMP/rpm-files.txt"
+            grep -q 'usr/lib/sampleapp' "$RUNNER_TEMP/rpm-files.txt"
           fi
 
       - name: Validate Windows installer upgrade identity
