@@ -1019,6 +1019,37 @@ system @exec{openssl} command.
                            [#:filters filters list? '()])
          (or/c #f path?)]{}
 
+@defproc[(dialog-message! [title string?]
+                          [body string? ""]
+                          [#:kind kind symbol? 'info])
+         boolean?]{Shows a native message box; the kind is
+@racket['info], @racket['warning], or @racket['error].}
+
+@defproc[(dialog-ask! [title string?]
+                      [body string? ""]
+                      [#:kind kind symbol? 'info])
+         boolean?]{Shows a native yes/no box and returns the answer.}
+
+Dialogs are @bold{modal on the calling thread}: while one is open, other
+Racket-side request handling waits (the WebView itself stays responsive
+in its own native loop).
+
+@defproc[(make-dialog-routes [#:prefix prefix string? "api/dialog"]
+                             [#:backend backend dialog-backend?
+                              default-dialog-backend])
+         (listof route?)]{
+Capability-gated frontend access: @racket['dialog:open] and
+@racket['dialog:save] — scope them with @racket[path-permission] over the
+starting directory; a request without a start directory has nothing to
+authorize and is denied under a scoped grant — plus @racket['dialog:message]
+and @racket['dialog:ask]. JSON filters take the shape
+@litchar{{"name": "Text", "extensions": ["txt", "*.md"]}}; bare extensions
+gain the @litchar{*.} prefix and cancels map to JSON null. The generated
+client contains @litchar{glaze.api.dialogOpen},
+@litchar{glaze.api.dialogSave}, @litchar{glaze.api.dialogMessage}, and
+@litchar{glaze.api.dialogAsk}. The backend is an injectable value so tests
+and headless CI never open real dialogs.}
+
 @section{Deep Links and Launch at Login}
 
 @defmodule*[(glaze/deeplink glaze/autolaunch)]

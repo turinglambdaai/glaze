@@ -20,15 +20,23 @@
          racket/file
          racket/format
          racket/list
+         racket/match
          racket/path
          racket/string
-         racket/system)
+         racket/system
+         "api.rkt")
 
 (provide dialog-supported?
          pick-file
          pick-files
          pick-folder
          save-file-dialog
+         dialog-message!
+         dialog-ask!
+         make-dialog-backend
+         dialog-backend?
+         default-dialog-backend
+         make-dialog-routes
          ;; pure helpers, exported for the test suite
          win-filter-string
          wstr
@@ -79,7 +87,7 @@
   (with-handlers ([exn:fail? (lambda (e) #f)])
     (ffi-lib "/System/Library/Frameworks/AppKit.framework/AppKit")))
 
-(import-class NSOpenPanel NSSavePanel NSURL NSArray NSString NSMutableArray)
+(import-class NSOpenPanel NSSavePanel NSURL NSArray NSString NSMutableArray NSAlert)
 
 (define (->nsstring s)
   (tell (tell NSString alloc) initWithUTF8String: #:type _string s))
@@ -364,3 +372,264 @@
     [(macosx) (mac-save title default-name directory filters)]
     [(windows) (win-open-dialog! title directory filters #f #f #t default-name)]
     [else (unwrap-single (lin-dialog title directory filters #f #f #t default-name))]))
+
+;; ---- message boxes ----
+
+;; kind: 'info, 'warning, or 'error. dialog-message! shows a box with a
+;; single dismissal; dialog-ask! shows a yes/no box and returns the answer.
+;; Both are modal on the calling thread, like the file panels above.
+
+(define user32-for-dialogs
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (ffi-lib "user32")))
+
+(define MessageBoxW
+  (and user32-for-dialogs
+       (get-ffi-obj "MessageBoxW"
+                    user32-for-dialogs
+                    (_fun _pointer _pointer _pointer _uint -> _int)
+                    (lambda () #f))))
+
+(define MB-OK #x00000000)
+(define MB-YESNO #x00000004)
+(define MB-ICONERROR #x00000010)
+(define MB-ICONWARNING #x00000030)
+(define MB-ICONINFORMATION #x00000040)
+(define IDYES 6)
+
+(define (message-box-flags kind ask?)
+  (bitwise-ior (if ask? MB-YESNO MB-OK)
+               (case kind
+                 [(error) MB-ICONERROR]
+                 [(warning) MB-ICONWARNING]
+                 [else MB-ICONINFORMATION])))
+
+;; NSAlertStyle: warning 0, informational 1, critical 2.
+(define (ns-alert-style kind)
+  (case kind
+    [(error) 2]
+    [(warning) 0]
+    [else 1]))
+
+(define (run-dialog-exit exe args)
+  (apply system*/exit-code exe args))
+
+(define (message-box-supported?)
+  (case (system-type 'os)
+    [(macosx) (and appkit #t)]
+    [(windows) (and MessageBoxW #t)]
+    [else (and (or (find-executable-path "zenity" #f) (find-executable-path "kdialog" #f)) #t)]))
+
+(define (check-message-box-support!)
+  (unless (message-box-supported?)
+    (error 'dialog-message! "no message box backend on this platform")))
+
+(define (dialog-message! title [body ""] #:kind [kind 'info])
+  (check-message-box-support!)
+  (case (system-type 'os)
+    [(windows) (= 1 (MessageBoxW #f (wstr body) (wstr title) (message-box-flags kind #f)))]
+    [(macosx)
+     (define alert (tell (tell NSAlert alloc) init))
+     (tellv alert setMessageText: #:type _id (->nsstring title))
+     (tellv alert setInformativeText: #:type _id (->nsstring body))
+     (tellv alert setAlertStyle: #:type _int (ns-alert-style kind))
+     (tellv alert addButtonWithTitle: #:type _id (->nsstring "OK"))
+     (tell #:type _int alert runModal)
+     #t]
+    [else
+     (define zenity (find-executable-path "zenity" #f))
+     (define kdialog (find-executable-path "kdialog" #f))
+     (cond
+       [zenity
+        (zero? (run-dialog-exit zenity
+                                (list (case kind
+                                        [(error) "--error"]
+                                        [(warning) "--warning"]
+                                        [else "--info"])
+                                      (format "--text=~a"
+                                              (if (non-empty-string? body)
+                                                  (format "~a — ~a" title body)
+                                                  title)))))]
+       [kdialog (zero? (run-dialog-exit kdialog (list "--msgbox" title "--title" title)))]
+       [else (error 'dialog-message! "no dialog tool on this Linux session")])]))
+
+(define (dialog-ask! title [body ""] #:kind [kind 'info])
+  (check-message-box-support!)
+  (case (system-type 'os)
+    [(windows) (= IDYES (MessageBoxW #f (wstr body) (wstr title) (message-box-flags kind #t)))]
+    [(macosx)
+     (define alert (tell (tell NSAlert alloc) init))
+     (tellv alert setMessageText: #:type _id (->nsstring title))
+     (tellv alert setInformativeText: #:type _id (->nsstring body))
+     (tellv alert setAlertStyle: #:type _int (ns-alert-style kind))
+     (tellv alert addButtonWithTitle: #:type _id (->nsstring "Yes"))
+     (tellv alert addButtonWithTitle: #:type _id (->nsstring "No"))
+     (= 1000 (tell #:type _int alert runModal))]
+    [else
+     (define zenity (find-executable-path "zenity" #f))
+     (define kdialog (find-executable-path "kdialog" #f))
+     (cond
+       [zenity
+        (zero? (run-dialog-exit zenity
+                                (list "--question"
+                                      (format "--text=~a"
+                                              (if (non-empty-string? body)
+                                                  (format "~a — ~a" title body)
+                                                  title)))))]
+       [kdialog (zero? (run-dialog-exit kdialog (list "--yesno" title "--title" title)))]
+       [else (error 'dialog-ask! "no dialog tool on this Linux session")])]))
+
+;; ---- capability-gated frontend routes ----
+
+;; Backends are values so tests (and headless CI) can substitute a fake;
+;; default-dialog-backend wraps the native functions above. Dialogs are
+;; modal: while one is open, other Racket-side API/SSE traffic waits —
+;; the native panels already had this contract for direct callers.
+(struct dialog-backend (pick-file pick-files pick-folder save message! ask!))
+
+;; Explicit constructor: `provide` cannot forward-reference the implicit
+;; struct constructor (same shape as make-capability / make-hotkey-backend).
+(define (make-dialog-backend pick-file pick-files pick-folder save message! ask!)
+  (unless (andmap procedure? (list pick-file pick-files pick-folder save message! ask!))
+    (raise-argument-error 'make-dialog-backend
+                          "list of procedures"
+                          (list pick-file pick-files pick-folder save message! ask!)))
+  (dialog-backend pick-file pick-files pick-folder save message! ask!))
+
+(define default-dialog-backend
+  (dialog-backend
+   pick-file
+   pick-files
+   pick-folder
+   (lambda (title start filters default-name)
+     (save-file-dialog #:title title #:directory start #:filters filters #:default-name default-name))
+   dialog-message!
+   dialog-ask!))
+
+(define missing (gensym 'missing))
+
+(define (bad-parameter message)
+  (raise (exn:fail:glaze:bad-param message (current-continuation-marks))))
+
+(define (body-hash req)
+  (define body (request-json-body req))
+  (unless (hash? body)
+    (bad-parameter "body: expected a JSON object"))
+  body)
+
+(define (bounded-string? value)
+  (and (string? value) (<= (string-length value) 1024)))
+
+(define (body-title body)
+  (hash-ref body 'title ""))
+
+(define (body-start body)
+  (define start (hash-ref body 'start #f))
+  (cond
+    [(not start) #f]
+    [(and (string? start) (<= (string-length start) 32768)) start]
+    [else (bad-parameter "start: expected a path string")]))
+
+;; JSON [{"name": "Text", "extensions": ["txt", "*.md"]}] ->
+;; (("Text" "*.txt" "*.md") ...). Bare extensions gain the "*." prefix;
+;; already-globbed patterns pass through.
+(define (body-filters body)
+  (define raw (hash-ref body 'filters '()))
+  (unless (and (list? raw) (<= (length raw) 32))
+    (bad-parameter "filters: expected a list of {name, extensions}"))
+  (for/list ([f (in-list raw)])
+    (cond
+      [(and (hash? f)
+            (hash-ref f 'name #f)
+            (list? (hash-ref f 'extensions #f))
+            (andmap string? (hash-ref f 'extensions '())))
+       (define name (hash-ref f 'name))
+       (unless (bounded-string? name)
+         (bad-parameter "filters: name too long"))
+       (define exts
+         (for/list ([e (in-list (hash-ref f 'extensions))])
+           (unless (<= (string-length e) 64)
+             (bad-parameter "filters: extension too long"))
+           (if (string-prefix? e "*.")
+               e
+               (string-append "*." e))))
+       (cons name exts)]
+      [else (bad-parameter "filters: expected {name, extensions} entries")])))
+
+(define (path->json p)
+  (and p (path->string p)))
+
+(define (make-dialog-routes #:prefix [prefix "api/dialog"] #:backend [backend default-dialog-backend])
+  (unless (and (string? prefix) (not (string=? prefix "")))
+    (raise-argument-error 'make-dialog-routes "non-empty-string?" prefix))
+  (unless (dialog-backend? backend)
+    (raise-argument-error 'make-dialog-routes "dialog-backend?" backend))
+  (define (endpoint name)
+    (string-append (string-trim prefix "/") "/" name))
+  (define (open-resource req)
+    (body-start (body-hash req)))
+  (list (POST (endpoint "open")
+              (lambda (req)
+                (define body (body-hash req))
+                (define multiple? (hash-ref body 'multiple #f))
+                (define folder? (hash-ref body 'folder #f))
+                (unless (boolean? multiple?)
+                  (bad-parameter "multiple: expected a boolean"))
+                (unless (boolean? folder?)
+                  (bad-parameter "folder: expected a boolean"))
+                (cond
+                  [folder?
+                   (define picked
+                     ((dialog-backend-pick-folder backend) (body-title body) (body-start body)))
+                   (hasheq 'path (path->json picked))]
+                  [multiple?
+                   (define picked
+                     ((dialog-backend-pick-files backend) (body-title body)
+                                                          (body-start body)
+                                                          (body-filters body)))
+                   (hasheq 'paths (map path->json (or picked '())))]
+                  [else
+                   (define picked
+                     ((dialog-backend-pick-file backend) (body-title body)
+                                                         (body-start body)
+                                                         (body-filters body)))
+                   (hasheq 'path (path->json picked))]))
+              #:permission 'dialog:open
+              #:resource open-resource)
+        (POST (endpoint "save")
+              (lambda (req)
+                (define body (body-hash req))
+                (define default-name (hash-ref body 'defaultName #f))
+                (when default-name
+                  (unless (and (string? default-name) (<= (string-length default-name) 255))
+                    (bad-parameter "defaultName: expected a short file name")))
+                (define picked
+                  ((dialog-backend-save backend) (body-title body)
+                                                 (body-start body)
+                                                 (body-filters body)
+                                                 default-name))
+                (hasheq 'path (path->json picked)))
+              #:permission 'dialog:save
+              #:resource (lambda (req) (body-start (body-hash req))))
+        (POST (endpoint "message")
+              (lambda (req)
+                (define body (body-hash req))
+                (define title (hash-ref body 'title missing))
+                (unless (and (string? title) (not (string=? title "")))
+                  (bad-parameter "title: expected a non-empty string"))
+                (define text (hash-ref body 'body ""))
+                (unless (bounded-string? text)
+                  (bad-parameter "body: too long"))
+                (hasheq 'ok ((dialog-backend-message! backend) title text)))
+              #:permission 'dialog:message)
+        (POST (endpoint "ask")
+              (lambda (req)
+                (define body (body-hash req))
+                (define title (hash-ref body 'title missing))
+                (unless (and (string? title) (not (string=? title "")))
+                  (bad-parameter "title: expected a non-empty string"))
+                (define text (hash-ref body 'body ""))
+                (unless (bounded-string? text)
+                  (bad-parameter "body: too long"))
+                (hasheq 'answer ((dialog-backend-ask! backend) title text)))
+              #:permission 'dialog:ask)))

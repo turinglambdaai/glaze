@@ -30,6 +30,7 @@ You get:
 - **Scoped SQLite plugin** — parameterized select/execute and owned connections
 - **Global shortcuts** — system-wide hotkeys with scoped accelerators and SSE triggers
 - **Structured logging** — per-sink levels, rotating files, SSE push, bounded history
+- **Native dialogs** — capability-gated file/folder pickers, save dialogs, and message boxes
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -65,6 +66,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | Capability-gated SQLite plugin | ✅ | ✅ | ✅ |
 | Capability-gated global shortcuts | ✅ | ✅ | ✅ X11/XWayland |
 | Capability-gated structured logging | ✅ | ✅ | ✅ |
+| Capability-gated native dialogs | ✅ | ✅ | ✅ zenity/kdialog |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
