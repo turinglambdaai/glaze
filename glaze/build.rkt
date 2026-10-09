@@ -206,6 +206,15 @@
   ;; relative #:public-dir "public" resolves to this copy.
   (copy-public-into-dist project-dir out-dir-path app-name os)
 
+  ;; Windows: WebView2Loader.dll is loaded through an absolute runtime path
+  ;; inside the package tree, which raco distribute cannot trace, so a
+  ;; packaged app would otherwise ship without its WebView loader (and the
+  ;; MSI would harvest the same hole). Stage it beside the executable —
+  ;; LoadLibrary probes the exe directory — before any installer is built.
+  (when (eq? os 'windows)
+    (define loader-src (collection-file-path "WebView2Loader.dll" "glaze" "native" "win-x64"))
+    (copy-file loader-src (build-path out-dir-path "WebView2Loader.dll") #t))
+
   ;; macOS post-processing: customize the bundle's Info.plist if produced.
   (when (eq? os 'macosx)
     (post-process-macos-bundle out-dir-path app-name icon-path version))
