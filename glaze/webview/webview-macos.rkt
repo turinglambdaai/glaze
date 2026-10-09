@@ -16,9 +16,10 @@
 ;;     the plain racket process, WKWebView is not.
 ;;   - The NSApplication event loop cannot run via [NSApp run] (the blocking
 ;;     FFI call would stall every Racket thread), so a dedicated pump thread
-;;     runs the main run loop with runMode:beforeDate: (the modal-loop idiom):
-;;     it services AppKit's event source AND every other main-runloop source —
-;;     WKWebView's XPC/IPC replies, NSTimers, GCD main-queue callbacks.
+;;     reproduces its nextEvent/sendEvent/updateWindows cycle and then services
+;;     the remaining main-runloop sources with runMode:beforeDate:. The explicit
+;;     AppKit dispatch is required for WKWebView remote-layer composition on
+;;     macOS 26; runMode alone loads the page but leaves the window white.
 ;;   - ONE pump thread is shared by every open window (each window owning a
 ;;     pump thread made N threads contend for the same run loop). The pump
 ;;     starts on the first window, exits when the last one closes, and a
@@ -47,9 +48,9 @@
 ;;   - Struct-by-value arguments (NSRect/NSSize) must be passed with an
 ;;     explicit #:type annotation; untyped tell arguments are marshalled as
 ;;     _id and a struct cpointer fails id->C.
-;;   - nextEventMatchingMask:untilDate:inMode:dequeue: does NOT service the
-;;     runloop's other sources (verified: NSTimers never fire, WKWebView
-;;     loads stall at estimatedProgress 0.1); runMode:beforeDate: does.
+;;   - nextEventMatchingMask alone did not service all runloop sources on older
+;;     systems, while runMode alone no longer composites WKWebView on macOS 26.
+;;     The hybrid pump is therefore intentional, not redundant.
 
 (require ffi/unsafe
          ffi/unsafe/objc
@@ -84,6 +85,10 @@
 (define webkit
   (with-handlers ([exn:fail? (lambda (e) #f)])
     (ffi-lib "/System/Library/Frameworks/WebKit.framework/WebKit")))
+
+(define appkit
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (ffi-lib "/System/Library/Frameworks/AppKit.framework/AppKit")))
 
 ;; Window capture lives in CoreGraphics.
 (define coregraphics
@@ -137,6 +142,7 @@
 (define NSViewWidthSizable 2)
 (define NSViewHeightSizable 16)
 (define NSApplicationActivationPolicyRegular 0)
+(define NSAnyEventMask #xffffffffffffffff)
 
 (struct mac:webview (window webview delegate closed?-box fullscreen?-box [thread #:mutable])
   #:transparent)
@@ -386,26 +392,43 @@
   (tellv main-menu addItem: #:type _id window-item)
   (tellv app setMainMenu: #:type _id main-menu))
 
-;; Run the main run loop in NSDefaultRunLoopMode for dwell-secs. This is the
-;; modal-loop idiom ([runMode:beforeDate:]): it services AppKit's event source
-;; (mouse/key events reach the window) AND every other main-runloop source —
-;; WKWebView's XPC/IPC replies, NSTimers, GCD main-queue callbacks. Fetching
-;; events with nextEventMatchingMask: instead waits for AppKit events only,
-;; which starves WebKit: page loads stall at estimatedProgress 0.1 forever.
+;; Reproduce the essential NSApplication run-loop shape without calling the
+;; permanently blocking [NSApp run]. macOS 26 only composites WKWebView's
+;; remote layer when AppKit performs nextEvent/sendEvent/updateWindows; older
+;; systems still need runMode:beforeDate: for WebKit XPC replies and timers.
 ;; Each call runs in a fresh autorelease pool.
 (define dwell-secs 0.05)
-;; Allocated once (init-convention objects are not autoreleased); passing a
-;; fresh NSString per iteration would churn the allocator for no benefit.
 (define default-runloop-mode
-  (tell (tell NSString alloc) initWithUTF8String: #:type _string "NSDefaultRunLoopMode"))
+  (or (and appkit (get-ffi-obj "NSDefaultRunLoopMode" appkit _id (lambda () #f)))
+      ;; Fallback for unusual AppKit builds that do not export the global.
+      (tell (tell NSString alloc) initWithUTF8String: #:type _string "NSDefaultRunLoopMode")))
 (define (pump-once)
   (define pool (tell (tell NSAutoreleasePool alloc) init))
+  (define app (tell NSApplication sharedApplication))
+  (define event
+    (tell #:type _id
+          app
+          nextEventMatchingMask:
+          #:type _uintptr
+          NSAnyEventMask
+          untilDate:
+          #:type _id
+          (tell NSDate dateWithTimeIntervalSinceNow: #:type _double 0.01)
+          inMode:
+          #:type _id
+          default-runloop-mode
+          dequeue:
+          #:type _bool
+          #t))
+  (when event
+    (tellv app sendEvent: #:type _id event))
+  (tellv app updateWindows)
   (tell (tell NSRunLoop mainRunLoop)
         runMode:
         default-runloop-mode
         beforeDate:
         #:type _id
-        (tell NSDate dateWithTimeIntervalSinceNow: #:type _double dwell-secs))
+        (tell NSDate dateWithTimeIntervalSinceNow: #:type _double (- dwell-secs 0.01)))
   (tellv pool drain))
 
 ;; ---- shared pump lifecycle ----
@@ -433,8 +456,8 @@
     (define keep-going? (call-with-semaphore pump-lock (lambda () (> open-windows 0))))
     (when keep-going?
       (pump-once)
-      ;; Mandatory scheduler yield: when a runloop source is always ready,
-      ;; runMode:beforeDate: returns immediately and a yield-less loop would
+      ;; Mandatory scheduler yield: when an event or runloop source is always
+      ;; ready, the native calls return immediately and a yield-less loop would
       ;; monopolize the OS thread, starving every other Racket thread.
       (sleep 0.005)
       (loop))))
