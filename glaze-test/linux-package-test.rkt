@@ -35,6 +35,9 @@
 (check-true (string-contains? (desktop-entry "Notes") "Name=Notes"))
 (check-true (string-contains? (desktop-entry "Notes") "Exec=Notes"))
 (check-true (string-contains? (desktop-entry "Notes") "Type=Application"))
+(check-false (string-contains? (desktop-entry "Notes") "Icon=") "no icon line without an icon name")
+(check-true (string-contains? (desktop-entry "Test App" "test-app") "Icon=test-app")
+            "the icon line names the hicolor/AppDir icon stem")
 
 (define spec (rpm-spec "Test App" "1.0.0" "Turing Lambda" (string->path "/tmp/stage")))
 (check-true (string-contains? spec "Name: test-app"))

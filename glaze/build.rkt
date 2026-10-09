@@ -437,10 +437,16 @@
                  "."))))
   (if (non-empty-string? cleaned) cleaned "0.0.0"))
 
-(define (desktop-entry app-name)
-  (format "[Desktop Entry]\nType=Application\nName=~a\nExec=~a\nTerminal=false\nCategories=Utility;\n"
-          app-name
-          app-name))
+;; The icon name is the hicolor/AppDir icon stem; appimagetool refuses a
+;; desktop file without a resolvable Icon entry.
+(define (desktop-entry app-name [icon-name #f])
+  (format
+   "[Desktop Entry]\nType=Application\nName=~a\nExec=~a~a\nTerminal=false\nCategories=Utility;\n"
+   app-name
+   app-name
+   (if icon-name
+       (format "\nIcon=~a" icon-name)
+       "")))
 
 (define (deb-control app-name version publisher arch)
   (format
@@ -590,9 +596,10 @@ SPECEOF
          (file-or-directory-permissions wrapper #o755)
          (define apps-dir (build-path root "usr" "share" "applications"))
          (make-directory* apps-dir)
-         (call-with-output-file (build-path apps-dir (string-append app-name ".desktop"))
-                                (lambda (out) (display (desktop-entry app-name) out))
-                                #:exists 'replace)
+         (call-with-output-file
+          (build-path apps-dir (string-append app-name ".desktop"))
+          (lambda (out) (display (desktop-entry app-name (sanitize-package-name app-name)) out))
+          #:exists 'replace)
          (define icon-dir (build-path root "usr" "share" "icons" "hicolor" "64x64" "apps"))
          (make-directory* icon-dir)
          (call-with-output-file (build-path icon-dir
@@ -684,61 +691,62 @@ SPECEOF
                                         (exn-message e))
                                #f)])
     (define tool (find-tool "appimagetool" "linuxdeploy"))
-    (and tool
-         (let ()
-           (define root (linux-staging-tree dist app-name))
-           (and root
-                (dynamic-wind
-                 (lambda () (void))
-                 (lambda ()
-                   ;; AppDir: the /usr tree plus the desktop entry, icon,
-                   ;; and AppRun at the root, which is what appimagetool
-                   ;; and desktop launchers expect.
-                   (define appdir (build-path dist "AppDir"))
-                   (when (directory-exists? appdir)
-                     (delete-tree-quietly! appdir))
-                   (make-directory* appdir)
-                   (copy-directory/files (build-path root "usr") (build-path appdir "usr"))
-                   (call-with-output-file (build-path appdir (string-append app-name ".desktop"))
-                                          (lambda (out) (display (desktop-entry app-name) out))
-                                          #:exists 'replace)
-                   (copy-file (build-path root
-                                          "usr"
-                                          "share"
-                                          "icons"
-                                          "hicolor"
-                                          "64x64"
-                                          "apps"
-                                          (string-append (sanitize-package-name app-name) ".png"))
-                              (build-path appdir
-                                          (string-append (sanitize-package-name app-name) ".png"))
-                              #t)
-                   (call-with-output-file
-                    (build-path appdir "AppRun")
-                    (lambda (out)
-                      (fprintf out "#!/bin/sh\nexec /usr/lib/~a/bin/~a \"$@\"\n" app-name app-name))
-                    #:exists 'replace)
-                   (file-or-directory-permissions (build-path appdir "AppRun") #o755)
-                   (define appimage-path (build-path dist (string-append app-name ".AppImage")))
-                   (define ok?
-                     (case tool
-                       [("appimagetool")
-                        ;; appimagetool ships AS an AppImage; hosts without
-                        ;; FUSE (CI runners, containers) must run it via
-                        ;; self-extraction instead of a runtime mount.
-                        (putenv "APPIMAGE_EXTRACT_AND_RUN" "1")
-                        (run (find-executable-path "appimagetool" #f)
-                             (path->string appdir)
-                             (path->string appimage-path))]
-                       [else
-                        (putenv "OUTPUT" (path->string appimage-path))
-                        (run (find-executable-path "linuxdeploy" #f)
-                             "--appdir"
-                             (path->string appdir)
-                             "--output"
-                             "appimage")]))
-                   (and ok? (file-exists? appimage-path) appimage-path))
-                 (lambda () (delete-tree-quietly! root))))))))
+    (and
+     tool
+     (let ()
+       (define root (linux-staging-tree dist app-name))
+       (and root
+            (dynamic-wind
+             (lambda () (void))
+             (lambda ()
+               ;; AppDir: the /usr tree plus the desktop entry, icon,
+               ;; and AppRun at the root, which is what appimagetool
+               ;; and desktop launchers expect.
+               (define appdir (build-path dist "AppDir"))
+               (when (directory-exists? appdir)
+                 (delete-tree-quietly! appdir))
+               (make-directory* appdir)
+               (copy-directory/files (build-path root "usr") (build-path appdir "usr"))
+               (call-with-output-file
+                (build-path appdir (string-append app-name ".desktop"))
+                (lambda (out) (display (desktop-entry app-name (sanitize-package-name app-name)) out))
+                #:exists 'replace)
+               (copy-file (build-path root
+                                      "usr"
+                                      "share"
+                                      "icons"
+                                      "hicolor"
+                                      "64x64"
+                                      "apps"
+                                      (string-append (sanitize-package-name app-name) ".png"))
+                          (build-path appdir (string-append (sanitize-package-name app-name) ".png"))
+                          #t)
+               (call-with-output-file
+                (build-path appdir "AppRun")
+                (lambda (out)
+                  (fprintf out "#!/bin/sh\nexec /usr/lib/~a/bin/~a \"$@\"\n" app-name app-name))
+                #:exists 'replace)
+               (file-or-directory-permissions (build-path appdir "AppRun") #o755)
+               (define appimage-path (build-path dist (string-append app-name ".AppImage")))
+               (define ok?
+                 (case tool
+                   [("appimagetool")
+                    ;; appimagetool ships AS an AppImage; hosts without
+                    ;; FUSE (CI runners, containers) must run it via
+                    ;; self-extraction instead of a runtime mount.
+                    (putenv "APPIMAGE_EXTRACT_AND_RUN" "1")
+                    (run (find-executable-path "appimagetool" #f)
+                         (path->string appdir)
+                         (path->string appimage-path))]
+                   [else
+                    (putenv "OUTPUT" (path->string appimage-path))
+                    (run (find-executable-path "linuxdeploy" #f)
+                         "--appdir"
+                         (path->string appdir)
+                         "--output"
+                         "appimage")]))
+               (and ok? (file-exists? appimage-path) appimage-path))
+             (lambda () (delete-tree-quietly! root))))))))
 
 ;; Derive a stable UUIDv5-shaped UpgradeCode from the application identifier.
 ;; The ProductCode remains WiX-generated per version, while this value is
