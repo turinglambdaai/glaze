@@ -183,6 +183,13 @@ jobs:
           raco glaze build --name sampleapp --version 0.0.1 \
             --publisher "Turing Lambda" --identifier TuringLambda.Glaze.CISample \
             --out dist --installer --sign -
+          # The WebView loader is loaded via an absolute package-tree path,
+          # so raco distribute cannot trace it; assert the staged copy so a
+          # regression cannot ship an app whose WebView fails at startup
+          # while CI stays green.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            test -f dist/WebView2Loader.dll
+          fi
 
       - name: Validate Windows installer upgrade identity
         if: runner.os == 'Windows'
