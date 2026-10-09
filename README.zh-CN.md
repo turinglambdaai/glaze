@@ -30,6 +30,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **受限 SQLite 插件** —— 参数化 select/execute 与连接所有权隔离
 - **全局快捷键** —— 系统级热键、加速键 scope 约束与 SSE 触发事件
 - **结构化日志** —— 按 sink 分级、文件轮转、SSE 推送与有界历史
+- **原生对话框** —— 受 capability 门禁的文件/目录选择、保存与消息框
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -65,6 +66,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | Capability 限制 SQLite 插件 | ✅ | ✅ | ✅ |
 | Capability 限制全局快捷键 | ✅ | ✅ | ✅ X11/XWayland |
 | Capability 限制结构化日志 | ✅ | ✅ | ✅ |
+| Capability 限制原生对话框 | ✅ | ✅ | ✅ zenity/kdialog |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |

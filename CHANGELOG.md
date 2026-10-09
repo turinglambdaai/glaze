@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   bounded in-memory history, and capability-gated frontend write/history
   routes. Frontend records are tagged with their source and capability so
   pages cannot forge backend log lines.
+- Add capability-gated native dialog routes over the existing pickers:
+  open (single/multiple/folder), save, message, and ask, with native
+  message boxes on every platform and JSON filter specs. Open and save
+  scopes pin the starting directory; the backend is injectable so tests
+  and headless CI never open real dialogs.
 
 ### Fixed
 - Stage `WebView2Loader.dll` into the packaged Windows distribution (and
