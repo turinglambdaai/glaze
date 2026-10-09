@@ -28,6 +28,7 @@ You get:
 - **Path resolver** — app directories, resources, portable overrides, path utilities
 - **Scoped HTTP client** — bounded requests, timeouts, redirect re-authorization
 - **Scoped SQLite plugin** — parameterized select/execute and owned connections
+- **Global shortcuts** — system-wide hotkeys with scoped accelerators and SSE triggers
 
 Glaze is deliberately **GUI-first**. If the required native WebView runtime is missing or broken, startup fails with platform-specific installation/repair instructions. It does **not** silently turn the desktop app into a browser tab.
 
@@ -61,6 +62,7 @@ All three WebView backends pass the real-window CI e2e (open, load, capture, nav
 | App/user/resource path resolver | ✅ | ✅ | ✅ |
 | Capability-gated HTTP client | ✅ | ✅ | ✅ |
 | Capability-gated SQLite plugin | ✅ | ✅ | ✅ |
+| Capability-gated global shortcuts | ✅ | ✅ | ✅ X11/XWayland |
 | Native WebView window | ✅ verified end-to-end | ✅ CI e2e (WebView2) | ✅ CI e2e (Xvfb + WebKitGTK) |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!` (screenshot) | ✅ | ✅ (PrintWindow + PowerShell PNG) | ✅ (gdk_pixbuf) |
@@ -526,6 +528,36 @@ the bounded registry prevents one frontend from consuming unlimited handles.
 Queries use positional parameters; `sqlSelect` only accepts `SELECT`/`WITH`
 queries and enforces a row limit. Binary values use `{ "blobBase64": "..." }`
 and SQL NULL maps to JSON `null`.
+
+### Global shortcuts
+
+`hotkey-register!`/`hotkey-unregister!`/`hotkey-registered?` drive the native
+backends directly (Win32 `RegisterHotKey`, Carbon `RegisterEventHotKey`, X11
+`XGrabKey`). `make-global-shortcut-routes` adds the Tauri-style frontend API,
+and `accelerator-permission` scopes which combinations a page may grab:
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (accelerator-permission 'global-shortcut:register
+                                  #:allow '("CmdOrCtrl+Shift+D"))
+         (accelerator-permission 'global-shortcut:unregister
+                                  #:allow '("CmdOrCtrl+Shift+D")))))
+
+(run-app ...
+         #:api (make-global-shortcut-routes #:events bus)
+         #:events bus
+         #:capability authority)
+```
+
+Accelerators use Tauri spellings (`CmdOrCtrl+Shift+D`, `KeyD`, `Digit7`, F1–F24,
+numpad keys); scopes match the canonical form on both the declared and the
+requested side, so case and alias variants cannot widen a grant. Triggers reach
+the page as `global-shortcut` SSE events carrying the canonical accelerator:
+`glaze.on('global-shortcut', ({accelerator}) => ...)`. On Linux the backend
+grabs through X11, so XWayland sessions work while a Wayland session without
+X reports registration failure instead of raising.
 
 ### Typed routes, one declaration — `define-api-routes`
 

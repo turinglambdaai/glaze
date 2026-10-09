@@ -28,6 +28,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **路径解析器** —— 应用目录、资源、便携覆盖与路径工具
 - **受限 HTTP 客户端** —— 大小上限、超时与重定向逐跳鉴权
 - **受限 SQLite 插件** —— 参数化 select/execute 与连接所有权隔离
+- **全局快捷键** —— 系统级热键、加速键 scope 约束与 SSE 触发事件
 
 Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初始化失败时，应用会直接启动失败，并给出当前平台的安装/修复指引；**不会再偷偷退化成 Chrome、Edge 或 Safari 里的一个网页。**
 
@@ -61,6 +62,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 应用/用户/资源路径解析 | ✅ | ✅ | ✅ |
 | Capability 限制 HTTP 客户端 | ✅ | ✅ | ✅ |
 | Capability 限制 SQLite 插件 | ✅ | ✅ | ✅ |
+| Capability 限制全局快捷键 | ✅ | ✅ | ✅ X11/XWayland |
 | 原生 WebView 窗口 | ✅ 端到端验证 | ✅ CI e2e（WebView2） | ✅ CI e2e（Xvfb + WebKitGTK） |
 | `webview-title` / `webview-url` | ✅ | ✅ | ✅ |
 | `webview-capture!`（截图） | ✅ | ✅（PrintWindow + PowerShell 转 PNG） | ✅（gdk_pixbuf） |
@@ -448,6 +450,34 @@ Racket API；`make-sql-routes` 则向生成的客户端加入 `sqlLoad`、`sqlSe
 capability 与数据库路径隔离缓存，并限制总连接数。查询使用位置参数；
 `sqlSelect` 只接受 `SELECT`/`WITH`，且限制返回行数。二进制值用
 `{ "blobBase64": "..." }` 往返，SQL NULL 对应 JSON `null`。
+
+### 全局快捷键
+
+`hotkey-register!`/`hotkey-unregister!`/`hotkey-registered?` 直接驱动原生
+后端（Win32 `RegisterHotKey`、Carbon `RegisterEventHotKey`、X11
+`XGrabKey`）；`make-global-shortcut-routes` 提供 Tauri 风格的前端 API，
+`accelerator-permission` 约束页面可以抢注哪些组合键：
+
+```racket
+(define authority
+  (make-capability
+   "main"
+   (list (accelerator-permission 'global-shortcut:register
+                                  #:allow '("CmdOrCtrl+Shift+D"))
+         (accelerator-permission 'global-shortcut:unregister
+                                  #:allow '("CmdOrCtrl+Shift+D")))))
+
+(run-app ...
+         #:api (make-global-shortcut-routes #:events bus)
+         #:events bus
+         #:capability authority)
+```
+
+加速键采用 Tauri 拼写（`CmdOrCtrl+Shift+D`、`KeyD`、`Digit7`、F1–F24、
+小键盘）；scope 在声明与请求两侧都按规范化形式匹配，大小写与别名的变体
+不会扩大授权。触发以 `global-shortcut` SSE 事件送达页面，携带规范化加速键：
+`glaze.on('global-shortcut', ({accelerator}) => ...)`。Linux 后端经 X11 抓键，
+XWayland 会话可用；没有 X 的 Wayland 会话注册会返回失败而不是抛异常。
 
 ### 后端 → 前端推送（SSE）
 
