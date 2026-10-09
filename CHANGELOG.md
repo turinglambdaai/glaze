@@ -5,6 +5,17 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Add Tauri-style global shortcuts: system-wide hotkeys with
+  `CmdOrCtrl+Shift+D` accelerators, capability-gated register, unregister,
+  unregister-all, and is-registered routes with accelerator scopes
+  (exact strings or explicit regexps, canonicalized on both sides), and
+  `global-shortcut` SSE events on trigger. Native backends use Win32
+  `RegisterHotKey` through a message-only window, Carbon
+  `RegisterEventHotKey`, and X11 `XGrabKey`.
+
 ## [0.9.0] - 2026-10-09
 
 ### Fixed
