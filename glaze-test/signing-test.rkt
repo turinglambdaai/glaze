@@ -8,7 +8,12 @@
 
 (define directory (make-temporary-file "glaze-signing-test~a" 'directory))
 
-(dynamic-wind
+;; The whole suite exercises real Ed25519 operations, which LibreSSL (the
+;; macOS default /usr/bin/openssl) cannot perform. Without a usable OpenSSL
+;; the suite reports a skip instead of failing on the platform's CLI dialect.
+;; GLAZE_OPENSSL points the suite (and the library) at a specific CLI.
+(if (openssl-available?)
+    (dynamic-wind
  void
  (lambda ()
    (define-values (private-key public-key)
@@ -94,3 +99,6 @@
                                     (sha256-file artifact))
                  0))
  (lambda () (delete-directory/files directory)))
+    (begin
+      (printf "glaze-test/signing: skipped — no OpenSSL >= 1.1.1 found (set GLAZE_OPENSSL)\n")
+      (delete-directory/files directory)))

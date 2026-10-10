@@ -20,13 +20,87 @@
          verify-signature
          sha256-file
          sha256-string
-         public-key-fingerprint)
+         public-key-fingerprint
+         openssl-path
+         openssl-available?)
 
-(define (find-openssl)
-  (define executable (find-executable-path "openssl" #f))
-  (unless executable
-    (error 'signing "openssl not found on PATH"))
-  executable)
+;; Ed25519 needs OpenSSL >= 1.1.1 (`pkeyutl -rawin` learned Ed25519 there).
+;; macOS ships /usr/bin/openssl as LibreSSL, which lacks it entirely and
+;; fails with an opaque exit code, so the CLI is chosen by capability rather
+;; than by PATH accident:
+;;   1. the GLAZE_OPENSSL environment variable (explicit override);
+;;   2. `openssl` on PATH, accepted only when `openssl version` reports
+;;      OpenSSL >= 1.1.1 (LibreSSL and older OpenSSL are skipped);
+;;   3. well-known Homebrew locations on macOS.
+;; When nothing usable exists, every operation raises one actionable error
+;; naming the remedy instead of a cryptic pkeyutl failure.
+
+(define min-openssl-version '(1 1 1))
+
+(define openssl-version-regexp #rx"^OpenSSL ([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+
+(define (version-at-least? v minimum)
+  (cond
+    [(null? minimum) #t]
+    [(null? v) #f]
+    [(= (car v) (car minimum)) (version-at-least? (cdr v) (cdr minimum))]
+    [else (> (car v) (car minimum))]))
+
+(define (openssl-usable? executable)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (define out
+      (with-output-to-string
+        (lambda ()
+          (unless (zero? (system*/exit-code executable "version"))
+            (error 'signing "version probe exited non-zero")))))
+    (define match (regexp-match openssl-version-regexp out))
+    (and match
+         (version-at-least? (map string->number (cdr match)) min-openssl-version))))
+
+(define openssl-cache (box #f))
+
+(define (candidate-executable candidate)
+  (cond
+    [(equal? candidate "openssl") (find-executable-path "openssl" #f)]
+    [(file-exists? candidate) candidate]
+    [else #f]))
+
+(define (discover-openssl)
+  (define candidates
+    (append
+     (list (getenv "GLAZE_OPENSSL") "openssl")
+     (if (eq? (system-type 'os) 'macosx)
+         (list "/opt/homebrew/opt/openssl@3/bin/openssl"
+               "/opt/homebrew/opt/openssl/bin/openssl"
+               "/usr/local/opt/openssl@3/bin/openssl"
+               "/usr/local/opt/openssl/bin/openssl")
+         '())))
+  (for/or ([candidate (in-list candidates)]
+           #:when candidate)
+    (define exe (candidate-executable candidate))
+    (and exe (openssl-usable? exe) (path->complete-path exe))))
+
+(define (no-openssl-error)
+  (error 'signing
+         (string-append
+          "no usable OpenSSL found: Ed25519 signing requires OpenSSL >= 1.1.1\n"
+          "  (macOS ships /usr/bin/openssl as LibreSSL, which cannot sign Ed25519)\n"
+          "  install OpenSSL 3, e.g. `brew install openssl@3`,\n"
+          "  or point GLAZE_OPENSSL at a full OpenSSL CLI")))
+
+;; Resolved CLI path, or #f when no usable OpenSSL exists (never raises —
+;; for diagnostics and test gating).
+(define (openssl-path)
+  (or (unbox openssl-cache)
+      (let ([found (discover-openssl)])
+        (when found (set-box! openssl-cache found))
+        found)))
+
+(define (openssl-available?)
+  (and (openssl-path) #t))
+
+(define (require-openssl)
+  (or (openssl-path) (no-openssl-error)))
 
 (define (->path value)
   (if (path? value)
@@ -38,7 +112,7 @@
     (delete-file path)))
 
 (define (openssl-run operation arguments)
-  (define exit-code (apply system*/exit-code (find-openssl) arguments))
+  (define exit-code (apply system*/exit-code (require-openssl) arguments))
   (unless (zero? exit-code)
     (error 'signing "~a failed (openssl exit ~a)" operation exit-code)))
 
@@ -198,7 +272,7 @@
      (write-content-file signature-file
                          (with-handlers ([exn:fail? (lambda (_) #"")])
                            (base64-decode (string->bytes/utf-8 (string-trim signature-base64)))))
-     (zero? (system*/exit-code (find-openssl)
+     (zero? (system*/exit-code (require-openssl)
                                "pkeyutl"
                                "-verify"
                                "-rawin"

@@ -60,7 +60,8 @@
                       #:events [event-bus #f]
                       #:api-token [api-token #f]
                       #:capability [authority #f]
-                      #:serve-api-client? [serve-client? #t])
+                      #:serve-api-client? [serve-client? #t]
+                      #:max-body-size [max-body-size default-max-body-size])
   (when (and event-bus (not (event-bus? event-bus)))
     (raise-argument-error 'start-server "event-bus?" event-bus))
   (when (and api-token (not (string? api-token)))
@@ -73,8 +74,13 @@
      "a capability requires a non-empty #:api-token so authority stays bound to the WebView"
      "capability"
      (capability-id authority)))
+  (unless (exact-nonnegative-integer? max-body-size)
+    (raise-argument-error 'start-server "exact-nonnegative-integer?" max-body-size))
+  ;; Fail at startup, not at first request: a route that cannot be expressed
+  ;; in the generated client is a configuration bug.
+  (when serve-client? (validate-js-client-names api-routes))
   (define dispatcher
-    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token authority))
+    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token authority max-body-size))
   (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
@@ -138,13 +144,62 @@
 
 ;; ---- dispatcher ----
 
-(define (make-dispatcher public-dir api-routes port event-bus serve-client? api-token authority)
+;; Local apps are reachable by every website in every browser. The Host check
+;; above stops DNS rebinding; this limit caps how much a single request can
+;; make the server buffer. 8 MiB covers JSON API payloads with headroom.
+(define default-max-body-size (* 8 1024 1024))
+
+(define (body-too-large? req limit)
+  (define h (headers-assq #"Content-Length" (request-headers/raw req)))
+  (cond
+    [(not h) #f]
+    [else
+     (define v (string->number (string-trim (bytes->string/latin-1 (header-value h)))))
+     (and v (exact-positive-integer? v) (> v limit))]))
+
+;; Fetch-Metadata + Origin guard for the bridge surface (API routes + SSE).
+;; A cross-site page posting to a loopback API (`content-type: text/plain`
+;; simple request, no preflight) cannot be stopped by the browser's read
+;; rules — the request itself is the side effect. Browsers tag such requests
+;; with a foreign Origin and/or Sec-Fetch-Site: cross-site; curl and plain
+;; programmatic clients send neither header and are unaffected. Same-origin
+;; is decided against every loopback spelling of this server's port, because
+;; an app may be opened at localhost instead of 127.0.0.1.
+(define (bridge-request? matched-api events-request?)
+  (or matched-api events-request?))
+
+(define (cross-site-request? req port)
+  (define origin-h (headers-assq #"Origin" (request-headers/raw req)))
+  (define fetch-site-h (headers-assq #"Sec-Fetch-Site" (request-headers/raw req)))
+  (cond
+    [origin-h
+     (with-handlers ([exn:fail? (lambda (_) #t)])
+       (define u (string->url (bytes->string/latin-1 (header-value origin-h))))
+       (not (and (equal? (url-scheme u) "http")
+                 (member (url-host u) '("127.0.0.1" "localhost" "::1"))
+                 (let ([p (url-port u)])
+                   (if p (= p port) (= port 80))))))]
+    [fetch-site-h
+     (not (member (bytes->string/latin-1 (header-value fetch-site-h)) '("same-origin" "none")))]
+    [else #f]))
+
+(define (make-dispatcher public-dir
+                         api-routes
+                         port
+                         event-bus
+                         serve-client?
+                         api-token
+                         authority
+                         max-body-size)
   (lambda (conn req)
     (define matched-api (find-api-match api-routes req))
     (define events-request? (and event-bus (sse-request? req)))
     (define resp
       (cond
         [(not (host-allowed? req port)) (error-response 403 "host not allowed")]
+        [(body-too-large? req max-body-size) (error-response 413 "request body too large")]
+        [(and (bridge-request? matched-api events-request?) (cross-site-request? req port))
+         (error-response 403 "cross-origin request rejected")]
         ;; One-time bootstrap: the capability URL (?glaze-token=..., opened by
         ;; run-app) exchanges the token for an HttpOnly cookie and redirects
         ;; to the clean path. api.js no longer hands the token out, so a
@@ -217,8 +272,17 @@
   (and (bytes=? (request-method req) #"GET")
        (equal? (url-path-string (request-uri req)) api-client-path)))
 
+;; url-path-string is called on every request before the static-file guard,
+;; so a raw "../" in the request line (parsed as path/param 'up symbols)
+;; must not blow up string-join's contract — render such segments verbatim;
+;; they simply never match the /glaze/* paths and fall through to the static
+;; handler, which rejects them.
 (define (url-path-string u)
-  (string-join (map path/param-path (url-path u)) "/"))
+  (string-join
+   (for/list ([p (in-list (url-path u))])
+     (define seg (path/param-path p))
+     (if (string? seg) seg (format "~a" seg)))
+   "/"))
 
 ;; ---- SSE endpoint ----
 
@@ -279,27 +343,24 @@
                  (list (string->bytes/utf-8 js))))
 
 (define (generate-api-client api-routes)
+  ;; Group routes by their generated JS name. One name + one method is the
+  ;; plain single entry; one name + several methods (GET/POST on the same
+  ;; path) becomes a single dispatching function that sends the GET when
+  ;; called without a body and the first non-GET route otherwise. Groups are
+  ;; kept in first-seen order so the generated file is deterministic.
+  (define names '())
+  (define groups (make-hash))
+  (for ([r (in-list api-routes)])
+    (define name (route->js-name (route-segments r)))
+    (unless (member name names)
+      (set! names (append names (list name))))
+    (hash-update! groups name (lambda (old) (append old (list r))) '()))
   (define entries
-    (for/list ([r (in-list api-routes)])
-      (define method (route-method r))
-      (define segments (route-segments r))
-      (define args
-        (for/list ([seg (in-list segments)]
-                   #:when (param? seg))
-          (param-id seg)))
-      (define url-expr
-        (string-join (for/list ([seg (in-list segments)])
-                       (if (param? seg)
-                           (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
-                           seg))
-                     "/"))
-      (define method-str (symbol->string method))
-      (format "  ~a: function(~a) { return glaze.call('~a', '~a', ~a); },"
-              (route->js-name segments)
-              (string-join (append args '("body")) ", ")
-              method-str
-              url-expr
-              (if (string=? method-str "GET") "null" "body"))))
+    (for/list ([name (in-list names)])
+      (define group (hash-ref groups name))
+      (if (= (length group) 1)
+          (route-js-entry name (first group))
+          (merged-route-js-entry name group))))
   (string-append "/* Generated by glaze — do not edit. */\n"
                  "window.glaze = window.glaze || {};\n"
                  "glaze.call = async function(method, path, body) {\n"
@@ -324,31 +385,144 @@
                  (string-join entries "\n")
                  "\n};\n"))
 
+;; The path arguments a route's JS entry takes (the captured :params), and
+;; the URL expression that interpolates them.
+(define (route-js-args segments)
+  (for/list ([seg (in-list segments)]
+             #:when (param? seg))
+    (param-id seg)))
+
+(define (route-js-url segments)
+  (string-join
+   (for/list ([seg (in-list segments)])
+     (if (param? seg)
+         (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
+         seg))
+   "/"))
+
+(define (route-js-call route)
+  (define method-str (symbol->string (route-method route)))
+  (format "glaze.call('~a', '~a', ~a)"
+          method-str
+          (route-js-url (route-segments route))
+          (if (string=? method-str "GET") "null" "body")))
+
+(define (route-js-entry name route)
+  (define args (append (route-js-args (route-segments route)) '("body")))
+  (format "  ~a: function(~a) { return ~a; },"
+          name
+          (string-join args ", ")
+          (route-js-call route)))
+
+;; GET /api/items + POST /api/items -> items(id, body): a missing body means
+;; the GET; anything else goes to the first non-GET route (validated at
+;; startup to exist and to be unique).
+(define (merged-route-js-entry name group)
+  (define get-route (findf (lambda (r) (eq? (route-method r) 'GET)) group))
+  (define mutating (findf (lambda (r) (not (eq? (route-method r) 'GET))) group))
+  (define segments (route-segments (or get-route mutating)))
+  (define args (append (route-js-args segments) '("body")))
+  (string-append
+   "  " name ": function(" (string-join args ", ") ") {\n"
+   (if get-route
+       (format "    if (body === undefined || body === null) { return ~a; }\n"
+               (route-js-call get-route))
+       "")
+   (if mutating
+       (format "    return ~a;\n" (route-js-call mutating))
+       "")
+   "  },"))
+
 ;; "api/counter/bump" -> counterBump ; "api/items/:id/bump" -> itemsIdBump
 ;; "api/clip-copy" -> clipCopy. Hyphenated segments camel-case (a bare
 ;; hyphen key like `clip-copy:` would be ILLEGAL JavaScript and break the
-;; whole generated file); the first segment keeps a lowercase head.
+;; whole generated file); the first segment keeps a lowercase head. Every
+;; part is stripped to identifier characters, and a name that would start
+;; with a digit is prefixed with "_" — both keep the generated file parseable
+;; for any route shape; validate-js-client-names rejects what still cannot
+;; work (empty names, collisions).
 (define (js-camel seg first-lower?)
-  (define parts (filter non-empty-string? (string-split seg "-")))
-  (apply string-append
-         (for/list ([p (in-list parts)]
-                    [i (in-naturals)])
-           (if (and (zero? i) first-lower? (regexp-match? #rx"^[a-z]" p))
-               p
-               (string-append (string-upcase (substring p 0 1)) (substring p 1))))))
+  (define parts
+    (for/list ([p (in-list (filter non-empty-string? (string-split seg "-")))])
+      (regexp-replace* #rx"[^A-Za-z0-9_]" p "")))
+  (define kept (filter non-empty-string? parts))
+  (if (null? kept)
+      ""
+      (apply string-append
+             (for/list ([p (in-list kept)]
+                        [i (in-naturals)])
+               (cond
+                 [(and (zero? i) first-lower? (regexp-match? #rx"^[a-z]" p)) p]
+                 [else (string-append (string-upcase (substring p 0 1)) (substring p 1))])))))
 
 (define (route->js-name segments)
   (define drop-api
     (if (and (pair? segments) (string=? (first segments) "api"))
         (rest segments)
         segments))
-  (apply string-append
-         (for/list ([seg (in-list drop-api)]
-                    [i (in-naturals)])
-           (cond
-             [(param? seg) (string-titlecase (param-id seg))]
-             [(zero? i) (js-camel seg #t)]
-             [else (js-camel seg #f)]))))
+  (define raw
+    (apply string-append
+           (for/list ([seg (in-list drop-api)]
+                      [i (in-naturals)])
+             (cond
+               [(param? seg) (string-titlecase (param-id seg))]
+               [(zero? i) (js-camel seg #t)]
+               [else (js-camel seg #f)]))))
+  (if (regexp-match? #rx"^[0-9]" raw)
+      (string-append "_" raw)
+      raw))
+
+(define (route-descriptor r)
+  (format "~a /~a"
+          (route-method r)
+          (string-join
+           (for/list ([seg (in-list (route-segments r))])
+             (if (param? seg) (string-append ":" (param-id seg)) seg))
+           "/")))
+
+;; The generated api.js turns each route into a JS function name. Validation
+;; runs at startup so misconfiguration fails loudly, not as a silently
+;; corrupted client:
+;;   - the same JS name with the same HTTP method twice is a genuine
+;;     collision (later object keys would overwrite earlier ones);
+;;   - the same name with DIFFERENT methods is legal REST (GET + POST on one
+;;     path) — the client merges them into one dispatching function, and
+;;     that merge needs a GET to answer body-less calls;
+;;   - whatever remains must be a valid JavaScript identifier.
+(define (validate-js-client-names routes)
+  (define by-name (make-hash))
+  (for ([r (in-list routes)])
+    (define name (route->js-name (route-segments r)))
+    (unless (regexp-match? #px"^[A-Za-z_$][A-Za-z0-9_$]*$" name)
+      (raise-arguments-error 'start-server
+                             "route produces an invalid JavaScript identifier"
+                             "route"
+                             (route-descriptor r)
+                             "js name"
+                             (if (zero? (string-length name)) "(empty)" name)))
+    (hash-update! by-name name (lambda (old) (append old (list r))) '()))
+  (for ([(name group) (in-hash by-name)])
+    (define duplicate-method
+      (check-duplicates (map route-method group) eq?))
+    (when duplicate-method
+      (define same-method
+        (filter (lambda (r) (eq? (route-method r) duplicate-method)) group))
+      (raise-arguments-error 'start-server
+                             "two routes with the same method map to the same JavaScript function name"
+                             "js name"
+                             name
+                             "first route"
+                             (route-descriptor (first same-method))
+                             "second route"
+                             (route-descriptor (second same-method))))
+    (when (> (length group) 1)
+      (unless (member 'GET (map route-method group))
+        (raise-arguments-error 'start-server
+                               "routes sharing a JavaScript name need a GET route for body-less calls"
+                               "js name"
+                               name
+                               "routes"
+                               (string-join (map route-descriptor group) ", "))))))
 
 ;; Match once so token and capability checks apply to exactly the route whose
 ;; handler will run.
@@ -381,9 +555,13 @@
   (define route (first matched))
   (define captured (second matched))
   (with-handlers ([exn:fail:glaze:bad-param? (lambda (e) (error-response 400 (exn-message e)))]
+                  ;; Internal failures never echo exception text to the page —
+                  ;; messages leak implementation detail (paths, SQL, stack
+                  ;; frames). The full exn goes to the error reporter; the
+                  ;; client gets a stable, generic 500 body.
                   [exn:fail? (lambda (e)
                                ((current-glaze-error-reporter) e (url-path-string (request-uri req)))
-                               (error-response 500 (exn-message e)))])
+                               (error-response 500 "internal error"))])
     (define result
       (parameterize ([current-capability-id (and authority (capability-id authority))]
                      [current-capability-authorizer
@@ -402,20 +580,42 @@
     (if (null? segments)
         '("index.html")
         segments))
-  (define candidate (apply build-path dir rel))
   (cond
-    [(and (file-exists? candidate) (not (directory-exists? candidate)))
-     (make-file-response candidate)]
+    ;; ".." and "." arrive as path/param 'up / 'same symbols. Feeding them to
+    ;; build-path walks outside public-dir (an arbitrary file read via
+    ;; %2e%2e) or crashes the connection thread on the raw 'up contract — so
+    ;; anything that is not a plain string never touches the filesystem.
+    [(not (andmap string? rel)) (make-404-response)]
     [else
-     (define fallback (build-path dir "index.html"))
-     (if (file-exists? fallback)
-         (make-file-response fallback)
-         (make-404-response))]))
+     (define candidate (apply build-path dir rel))
+     (cond
+       [(and (file-exists? candidate)
+             (not (directory-exists? candidate))
+             (static-file-contained? dir candidate))
+        (make-file-response candidate)]
+       [else
+        (define fallback (build-path dir "index.html"))
+        (if (and (file-exists? fallback) (static-file-contained? dir fallback))
+            (make-file-response fallback)
+            (make-404-response))])]))
+
+;; Filesystem-level containment behind the lexical guard above: a symlink
+;; inside public-dir must not smuggle a path outside it. Both sides resolve
+;; every symlink component first (e.g. /tmp -> /private/tmp on macOS), so the
+;; prefix check compares real locations, not spellings.
+(define (static-file-contained? root candidate)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (path-inside? (canonical-path root) (canonical-path candidate))))
 
 (define (make-file-response path)
   (define data (file->bytes path))
   (define mime (path->mime-type path))
-  (response/full 200 #"OK" (current-seconds) mime '() (list data)))
+  (response/full 200
+                 #"OK"
+                 (current-seconds)
+                 mime
+                 (list (header #"X-Content-Type-Options" #"nosniff"))
+                 (list data)))
 
 (define (make-404-response)
   (response/full 404
