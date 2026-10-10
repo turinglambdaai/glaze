@@ -4,6 +4,7 @@
 ;; client, and the define-api-routes macro (Racket proc + route + 400/500).
 
 (require rackunit
+         racket/list
          racket/file
          racket/port
          racket/string
@@ -19,7 +20,12 @@
 (check-true (event-bus? bus) "make-event-bus")
 (define ch (bus-subscribe! bus))
 (bus-broadcast! bus 'tick (hasheq 'n 1))
-(check-equal? (bus-wait ch 2) '(tick #hasheq((n . 1))) "bus delivers payload")
+;; delivery shape: (list seq name data) — the seq drives the SSE id: line
+(define-values (seq1 name1 data1)
+  (let ([evt (bus-wait ch 2)]) (values (first evt) (second evt) (third evt))))
+(check-equal? name1 'tick "bus delivers the event name")
+(check-equal? data1 #hasheq((n . 1)) "bus delivers payload")
+(check-true (exact-positive-integer? seq1) "events carry a sequence number")
 (bus-unsubscribe! bus ch)
 (bus-broadcast! bus 'tick (hasheq 'n 2))
 (check-equal? (bus-wait ch 0.2) 'timeout "unsubscribed channel gets nothing")
@@ -106,8 +112,16 @@
             (with-handlers ([exn:fail? (lambda (e) (channel-put sse-result e))])
               (define-values (_st _headers in)
                 (http-sendrecv "127.0.0.1" "/glaze/events" #:port port #:ssl? #f #:method "GET"))
-              (define event-line (read-line in 'any))
-              (define data-line (read-line in 'any))
+              (define (next-meaningful-line)
+                ;; frames carry an id: <seq> line (GLZ1 event sequence);
+                ;; skip it the way a generic SSE consumer would
+                (let skip ()
+                  (define line (read-line in 'any))
+                  (if (and (string? line) (string-prefix? line "id: "))
+                      (skip)
+                      line)))
+              (define event-line (next-meaningful-line))
+              (define data-line (next-meaningful-line))
               (close-input-port in)
               (channel-put sse-result (format "~a\n~a\n" event-line data-line))))))
 (define subscribed?

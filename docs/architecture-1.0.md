@@ -169,9 +169,13 @@ A 1.0 freeze requires, in order:
 ## Migration order
 
 1. ~~0.11.1 hardening (done) — the security floor.~~
-2. Freeze product scope; no new plugins until the kernel lands.
-3. GLZ1 protocol spec + golden vectors (shared with Rivet where shapes
-   coincide).
+2. ~~Freeze product scope; no new plugins until the kernel lands.~~
+   (in force)
+3. ~~GLZ1 first slice (done in 0.12.0): versioned envelopes, typed error
+   taxonomy, request ids with cooperative cancellation and timeouts, hello
+   manifest, SSE sequence numbers — over the HTTP/SSE transport; the
+   envelope layer is transport-agnostic so the native message-handler
+   transport can adopt it unchanged.~~
 4. macOS vertical slice of the app state machine + host scheme.
 5. Windows/Linux ports; HTTP dev adapter kept for the dev loop.
 6. Facade curation (`core/bridge/window/services/distribution/devtools`,

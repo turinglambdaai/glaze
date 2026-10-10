@@ -5,13 +5,26 @@
 ;;   (run-app #:public-dir "public" #:api (list (GET "api/ping" ...)))
 ;;
 ;; picks a free port, starts the server (static + JSON API), opens the native
-;; WebView window, calls #:on-ready with the handle, and blocks until the
-;; window closes. Returns (values 'webview shutdown); shutdown is a no-op if
-;; called again after the normal window-close path.
+;; WebView window, calls #:on-ready with the handle, and blocks until the app
+;; quits. Returns (values 'webview shutdown); shutdown is a no-op if called
+;; again after the normal quit path.
+;;
+;; The app is a state machine over a custodian:
+;;
+;;   starting -> ready -> running -> stopping -> stopped
+;;
+;; Every app owns a custodian; resources spawned for the app (background
+;; threads such as the update check) are reaped deterministically at quit.
+;; Additional windows attach to the running app through open-app-window;
+;; by default the app quits when its last window closes, and
+;; #:quit-on-last-window? #f keeps a tray-resident app alive until
+;; app-quit!. State changes broadcast 'app-state on the event bus when one
+;; is wired.
 ;;
 ;; Native GUI is the application contract. If the platform WebView cannot
-;; start, run-app stops the local server and propagates the actionable startup
-;; error from glaze/webview. It never opens the system browser as a fallback.
+;; start, run-app stops the local server and propagates the actionable
+;; startup error from glaze/webview. It never opens the system browser as a
+;; fallback.
 
 (require racket/random
          "server.rkt"
@@ -22,7 +35,13 @@
 
 (provide run-app
          make-api-token
-         current-api-token)
+         current-api-token
+         glaze-app?
+         current-app
+         app-id
+         app-state
+         app-quit!
+         open-app-window)
 
 ;; Random 32-hex-char capability token (racket/random's CSPRNG).
 (define (make-api-token)
@@ -36,6 +55,112 @@
 ;; Bound by run-app so callbacks can read the active token (empty when the
 ;; API is open).
 (define current-api-token (make-parameter ""))
+
+;; ---- app record: the lifecycle kernel ----
+
+;; start -> ready -> running -> stopping -> stopped (see module docs).
+(struct glaze-app
+        (id ; string identity (#:app-id or generated)
+         state-box ; box of symbol
+         custodian ; owns app-spawned resources; reaped at quit
+         windows-box ; box of (listof webview?)
+         windows-sema
+         event-bus ; #f or event-bus? — gets 'app-state broadcasts
+         quit-on-last-window?
+         exit-sema ; posted by app-quit! / last-window close
+         once-sema ; serializes teardown
+         shut-down?-box) ; teardown happens once
+  #:transparent)
+
+(define current-app (make-parameter #f))
+
+(define app-states '(starting ready running stopping stopped))
+
+(define (make-app #:app-id app-id #:event-bus event-bus #:quit-on-last-window? quit-on-last-window?)
+  (glaze-app (or app-id (format "glaze-app-~a" (make-api-token)))
+             (box 'starting)
+             (make-custodian)
+             (box '())
+             (make-semaphore 1)
+             event-bus
+             quit-on-last-window?
+             (make-semaphore 0)
+             (make-semaphore 1)
+             (box #f)))
+
+;; State reader: (app-state) reads the current app, (app-state app) an
+;; explicit one.
+(define (app-state [app (current-app)])
+  (unless (glaze-app? app)
+    (raise-argument-error 'app-state "glaze-app?" app))
+  (unbox (glaze-app-state-box app)))
+
+(define (app-id [app (current-app)])
+  (unless (glaze-app? app)
+    (raise-argument-error 'app-id "glaze-app?" app))
+  (glaze-app-id app))
+
+(define (set-app-state! app state)
+  (unless (memq state app-states)
+    (raise-argument-error 'set-app-state! "known app state" state))
+  (set-box! (glaze-app-state-box app) state)
+  (when (glaze-app-event-bus app)
+    (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state state))))
+
+(define (app-quit! [app (current-app)])
+  (unless (glaze-app? app)
+    (raise-argument-error 'app-quit! "glaze-app?" app))
+  (unless (memq (app-state app) '(stopping stopped))
+    (set-app-state! app 'stopping)
+    (semaphore-post (glaze-app-exit-sema app))))
+
+(define (register-window! app wv)
+  (call-with-semaphore
+   (glaze-app-windows-sema app)
+   (lambda () (set-box! (glaze-app-windows-box app) (cons wv (unbox (glaze-app-windows-box app)))))))
+
+(define (unregister-window! app wv)
+  (call-with-semaphore (glaze-app-windows-sema app)
+                       (lambda ()
+                         (set-box! (glaze-app-windows-box app)
+                                   (remq wv (unbox (glaze-app-windows-box app))))
+                         (null? (unbox (glaze-app-windows-box app))))))
+
+;; Open a window attached to the running app. Same window options as
+;; open-window; the app tracks the handle so the quit policy (quit on last
+;; window close vs tray-resident) can decide what a close means.
+(define (open-app-window url
+                         #:title [title "Glaze"]
+                         #:width [width 1024]
+                         #:height [height 768]
+                         #:window-state [state-path #f]
+                         #:on-close [user-on-close (lambda () (void))])
+  (define app (current-app))
+  (unless (glaze-app? app)
+    (raise-arguments-error
+     'open-app-window
+     "no running app — open-app-window runs inside #:on-ready or after run-app started one"
+     "app state"
+     (if app
+         (app-state app)
+         "none")))
+  (when (memq (app-state app) '(stopping stopped))
+    (raise-arguments-error 'open-app-window "the app has already quit" "state" (app-state app)))
+  (define reporter (current-glaze-error-reporter))
+  (define wv
+    (open-window url
+                 #:title title
+                 #:width width
+                 #:height height
+                 #:window-state state-path
+                 #:on-close (lambda ()
+                              (with-handlers ([exn:fail? (lambda (e) (reporter e "app:on-close"))])
+                                (user-on-close))
+                              (define last? (unregister-window! app wv))
+                              (when (and last? (glaze-app-quit-on-last-window? app))
+                                (app-quit! app)))))
+  (register-window! app wv)
+  wv)
 
 (define max-port-attempts 50)
 
@@ -75,6 +200,7 @@
                  #:api-token [api-token #t]
                  #:capability [authority #f]
                  #:max-body-size [max-body-size (* 8 1024 1024)]
+                 #:quit-on-last-window? [quit-on-last-window? #t]
                  #:on-close [user-on-close (lambda () (void))]
                  #:on-error [on-error #f]
                  #:check-update [check-update #f]
@@ -103,6 +229,8 @@
       ;; it, so #f under authority still mints one (historical contract).
       [(or authority (eq? api-token #t)) (make-api-token)]
       [else #f]))
+  (define app
+    (make-app #:app-id app-id #:event-bus event-bus #:quit-on-last-window? quit-on-last-window?))
   (define-values (actual-port raw-shutdown)
     (if port
         (start-server #:port port
@@ -127,65 +255,81 @@
     (if token
         (format "~a?glaze-token=~a" url token)
         url))
-  ;; Once-only shutdown. The semaphore serializes concurrent callers; the
-  ;; flag turns a second call (after the normal window-close path) into a
-  ;; no-op instead of a second raw-shutdown.
-  (define once (make-semaphore 1))
-  (define shut-down? #f)
-  (define (shutdown)
-    (call-with-semaphore once
+  ;; Once-only teardown: the semaphore serializes concurrent callers; the
+  ;; flag turns a second call (after the normal quit path) into a no-op
+  ;; instead of a second raw-shutdown / custodian kill.
+  (define (teardown)
+    (call-with-semaphore (glaze-app-once-sema app)
                          (lambda ()
-                           (unless shut-down?
-                             (set! shut-down? #t)
-                             (raw-shutdown)))))
-  (define closed (make-semaphore 0))
+                           (unless (unbox (glaze-app-shut-down?-box app))
+                             (set-box! (glaze-app-shut-down?-box app) #t)
+                             ;; Leftover windows (quit via app-quit! or a raising path) close
+                             ;; here, on the caller's thread — the thread run-app was called
+                             ;; on, which owns the native window calls.
+                             (define leftover
+                               (call-with-semaphore (glaze-app-windows-sema app)
+                                                    (lambda ()
+                                                      (define wvs (unbox (glaze-app-windows-box app)))
+                                                      (set-box! (glaze-app-windows-box app) '())
+                                                      wvs)))
+                             (for ([wv (in-list leftover)])
+                               (with-handlers ([exn:fail? (lambda (_) (void))])
+                                 (webview-close wv)))
+                             (raw-shutdown)
+                             (custodian-shutdown-all (glaze-app-custodian app))
+                             (set-app-state! app 'stopped)))))
   (parameterize ([current-api-token (or token "")]
-                 [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))])
+                 [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))]
+                 [current-app app])
     ;; Callbacks may fire on backend threads that never entered this
     ;; parameterize; capture the reporter once so on-error applies to them.
     (define reporter (current-glaze-error-reporter))
-    ;; Update check runs in the background: the fetch has a multi-second
-    ;; network timeout and a GUI app must not stall first paint on it. The
-    ;; 'update-available broadcast keeps its original contract (same event,
-    ;; same payload) — consumers cannot tell it arrived asynchronously.
+    ;; The first window. open-app-window's on-close unregisters it and, per
+    ;; the quit policy, quits the app when the last window closes.
+    (define (make-on-close)
+      (lambda ()
+        ;; A user on-close hook that raises must never leave run-app blocked
+        ;; forever: report and finish the close.
+        (with-handlers ([exn:fail? (lambda (e) (reporter e "app:on-close"))])
+          (user-on-close))))
+    ;; Update check runs in the background under the app custodian: the
+    ;; fetch has a multi-second network timeout and a GUI app must not stall
+    ;; first paint on it, and the custodian reaps it at quit. The
+    ;; 'update-available broadcast keeps its original contract.
     (when check-update
-      (thread (lambda ()
-                (define info (do-check-update check-update #:current-version current-version))
-                (when info
-                  (printf "[glaze] update available: ~a (current ~a) — ~a~n"
-                          (hash-ref info 'version #f)
-                          current-version
-                          (hash-ref info 'url #f))
-                  (when event-bus
-                    (bus-broadcast! event-bus 'update-available info))))))
-    ;; If native GUI startup fails, never leave the local HTTP server behind.
-    ;; open-window's exception contains the platform-specific install/repair
-    ;; instructions; preserve it unchanged for the caller/user.
+      (parameterize ([current-custodian (glaze-app-custodian app)])
+        (thread (lambda ()
+                  (define info (do-check-update check-update #:current-version current-version))
+                  (when info
+                    (printf "[glaze] update available: ~a (current ~a) — ~a~n"
+                            (hash-ref info 'version #f)
+                            current-version
+                            (hash-ref info 'url #f))
+                    (when event-bus
+                      (bus-broadcast! event-bus 'update-available info)))))))
+    ;; If native GUI startup fails, never leave the local HTTP server
+    ;; behind. open-window's exception contains the platform-specific
+    ;; install/repair instructions; preserve it unchanged.
     (define wv
       (with-handlers ([exn:fail? (lambda (e)
-                                   (shutdown)
+                                   (teardown)
                                    (raise e))])
-        (open-window open-url
-                     #:title title
-                     #:width width
-                     #:height height
-                     #:window-state state-path
-                     #:on-close
-                     (lambda ()
-                       ;; A user on-close hook that raises must
-                       ;; never leave run-app blocked on `closed`
-                       ;; forever: report and finish the close.
-                       (with-handlers ([exn:fail? (lambda (e) (reporter e "app:on-close"))])
-                         (user-on-close))
-                       (semaphore-post closed)))))
+        (open-app-window open-url
+                         #:title title
+                         #:width width
+                         #:height height
+                         #:window-state state-path
+                         #:on-close (make-on-close))))
+    (set-app-state! app 'ready)
     ;; #:on-ready runs before the event loop owns the window: an exception
-    ;; here must tear the window AND the server down, or both outlive run-app.
+    ;; here must tear the window AND the server down, or both outlive
+    ;; run-app. open-app-window is main-thread land; on-ready is called on
+    ;; run-app's caller thread, the same one.
     (with-handlers ([exn:fail? (lambda (e)
-                                 (with-handlers ([exn:fail? (lambda (_) (void))])
-                                   (webview-close wv))
-                                 (shutdown)
+                                 (teardown)
                                  (raise e))])
       (on-ready wv url))
-    (sync closed)
-    (shutdown)
-    (values 'webview shutdown)))
+    (set-app-state! app 'running)
+    (sync (glaze-app-exit-sema app))
+    (teardown)
+    (values 'webview teardown)))
