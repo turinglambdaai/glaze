@@ -49,13 +49,11 @@
 (define (openssl-usable? executable)
   (with-handlers ([exn:fail? (lambda (_) #f)])
     (define out
-      (with-output-to-string
-        (lambda ()
-          (unless (zero? (system*/exit-code executable "version"))
-            (error 'signing "version probe exited non-zero")))))
+      (with-output-to-string (lambda ()
+                               (unless (zero? (system*/exit-code executable "version"))
+                                 (error 'signing "version probe exited non-zero")))))
     (define match (regexp-match openssl-version-regexp out))
-    (and match
-         (version-at-least? (map string->number (cdr match)) min-openssl-version))))
+    (and match (version-at-least? (map string->number (cdr match)) min-openssl-version))))
 
 (define openssl-cache (box #f))
 
@@ -67,14 +65,13 @@
 
 (define (discover-openssl)
   (define candidates
-    (append
-     (list (getenv "GLAZE_OPENSSL") "openssl")
-     (if (eq? (system-type 'os) 'macosx)
-         (list "/opt/homebrew/opt/openssl@3/bin/openssl"
-               "/opt/homebrew/opt/openssl/bin/openssl"
-               "/usr/local/opt/openssl@3/bin/openssl"
-               "/usr/local/opt/openssl/bin/openssl")
-         '())))
+    (append (list (getenv "GLAZE_OPENSSL") "openssl")
+            (if (eq? (system-type 'os) 'macosx)
+                (list "/opt/homebrew/opt/openssl@3/bin/openssl"
+                      "/opt/homebrew/opt/openssl/bin/openssl"
+                      "/usr/local/opt/openssl@3/bin/openssl"
+                      "/usr/local/opt/openssl/bin/openssl")
+                '())))
   (for/or ([candidate (in-list candidates)]
            #:when candidate)
     (define exe (candidate-executable candidate))
@@ -82,18 +79,18 @@
 
 (define (no-openssl-error)
   (error 'signing
-         (string-append
-          "no usable OpenSSL found: Ed25519 signing requires OpenSSL >= 1.1.1\n"
-          "  (macOS ships /usr/bin/openssl as LibreSSL, which cannot sign Ed25519)\n"
-          "  install OpenSSL 3, e.g. `brew install openssl@3`,\n"
-          "  or point GLAZE_OPENSSL at a full OpenSSL CLI")))
+         (string-append "no usable OpenSSL found: Ed25519 signing requires OpenSSL >= 1.1.1\n"
+                        "  (macOS ships /usr/bin/openssl as LibreSSL, which cannot sign Ed25519)\n"
+                        "  install OpenSSL 3, e.g. `brew install openssl@3`,\n"
+                        "  or point GLAZE_OPENSSL at a full OpenSSL CLI")))
 
 ;; Resolved CLI path, or #f when no usable OpenSSL exists (never raises —
 ;; for diagnostics and test gating).
 (define (openssl-path)
   (or (unbox openssl-cache)
       (let ([found (discover-openssl)])
-        (when found (set-box! openssl-cache found))
+        (when found
+          (set-box! openssl-cache found))
         found)))
 
 (define (openssl-available?)

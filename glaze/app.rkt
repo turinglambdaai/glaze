@@ -134,10 +134,10 @@
   (define shut-down? #f)
   (define (shutdown)
     (call-with-semaphore once
-      (lambda ()
-        (unless shut-down?
-          (set! shut-down? #t)
-          (raw-shutdown)))))
+                         (lambda ()
+                           (unless shut-down?
+                             (set! shut-down? #t)
+                             (raw-shutdown)))))
   (define closed (make-semaphore 0))
   (parameterize ([current-api-token (or token "")]
                  [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))])
@@ -170,14 +170,14 @@
                      #:width width
                      #:height height
                      #:window-state state-path
-                     #:on-close (lambda ()
-                                  ;; A user on-close hook that raises must
-                                  ;; never leave run-app blocked on `closed`
-                                  ;; forever: report and finish the close.
-                                  (with-handlers ([exn:fail? (lambda (e)
-                                                               (reporter e "app:on-close"))])
-                                    (user-on-close))
-                                  (semaphore-post closed)))))
+                     #:on-close
+                     (lambda ()
+                       ;; A user on-close hook that raises must
+                       ;; never leave run-app blocked on `closed`
+                       ;; forever: report and finish the close.
+                       (with-handlers ([exn:fail? (lambda (e) (reporter e "app:on-close"))])
+                         (user-on-close))
+                       (semaphore-post closed)))))
     ;; #:on-ready runs before the event loop owns the window: an exception
     ;; here must tear the window AND the server down, or both outlive run-app.
     (with-handlers ([exn:fail? (lambda (e)

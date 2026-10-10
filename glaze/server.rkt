@@ -78,9 +78,17 @@
     (raise-argument-error 'start-server "exact-nonnegative-integer?" max-body-size))
   ;; Fail at startup, not at first request: a route that cannot be expressed
   ;; in the generated client is a configuration bug.
-  (when serve-client? (validate-js-client-names api-routes))
+  (when serve-client?
+    (validate-js-client-names api-routes))
   (define dispatcher
-    (make-dispatcher public-dir api-routes port event-bus serve-client? api-token authority max-body-size))
+    (make-dispatcher public-dir
+                     api-routes
+                     port
+                     event-bus
+                     serve-client?
+                     api-token
+                     authority
+                     max-body-size))
   (define shutdown-server (serve #:dispatch dispatcher #:port port #:listen-ip "127.0.0.1"))
   ;; `serve` accepts the port synchronously but the accepting loop runs in a
   ;; background thread; if that thread dies (e.g. bind race), callers saw
@@ -178,7 +186,9 @@
        (not (and (equal? (url-scheme u) "http")
                  (member (url-host u) '("127.0.0.1" "localhost" "::1"))
                  (let ([p (url-port u)])
-                   (if p (= p port) (= port 80))))))]
+                   (if p
+                       (= p port)
+                       (= port 80))))))]
     [fetch-site-h
      (not (member (bytes->string/latin-1 (header-value fetch-site-h)) '("same-origin" "none")))]
     [else #f]))
@@ -278,11 +288,12 @@
 ;; they simply never match the /glaze/* paths and fall through to the static
 ;; handler, which rejects them.
 (define (url-path-string u)
-  (string-join
-   (for/list ([p (in-list (url-path u))])
-     (define seg (path/param-path p))
-     (if (string? seg) seg (format "~a" seg)))
-   "/"))
+  (string-join (for/list ([p (in-list (url-path u))])
+                 (define seg (path/param-path p))
+                 (if (string? seg)
+                     seg
+                     (format "~a" seg)))
+               "/"))
 
 ;; ---- SSE endpoint ----
 
@@ -393,12 +404,11 @@
     (param-id seg)))
 
 (define (route-js-url segments)
-  (string-join
-   (for/list ([seg (in-list segments)])
-     (if (param? seg)
-         (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
-         seg))
-   "/"))
+  (string-join (for/list ([seg (in-list segments)])
+                 (if (param? seg)
+                     (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
+                     seg))
+               "/"))
 
 (define (route-js-call route)
   (define method-str (symbol->string (route-method route)))
@@ -409,10 +419,7 @@
 
 (define (route-js-entry name route)
   (define args (append (route-js-args (route-segments route)) '("body")))
-  (format "  ~a: function(~a) { return ~a; },"
-          name
-          (string-join args ", ")
-          (route-js-call route)))
+  (format "  ~a: function(~a) { return ~a; }," name (string-join args ", ") (route-js-call route)))
 
 ;; GET /api/items + POST /api/items -> items(id, body): a missing body means
 ;; the GET; anything else goes to the first non-GET route (validated at
@@ -422,16 +429,19 @@
   (define mutating (findf (lambda (r) (not (eq? (route-method r) 'GET))) group))
   (define segments (route-segments (or get-route mutating)))
   (define args (append (route-js-args segments) '("body")))
-  (string-append
-   "  " name ": function(" (string-join args ", ") ") {\n"
-   (if get-route
-       (format "    if (body === undefined || body === null) { return ~a; }\n"
-               (route-js-call get-route))
-       "")
-   (if mutating
-       (format "    return ~a;\n" (route-js-call mutating))
-       "")
-   "  },"))
+  (string-append "  "
+                 name
+                 ": function("
+                 (string-join args ", ")
+                 ") {\n"
+                 (if get-route
+                     (format "    if (body === undefined || body === null) { return ~a; }\n"
+                             (route-js-call get-route))
+                     "")
+                 (if mutating
+                     (format "    return ~a;\n" (route-js-call mutating))
+                     "")
+                 "  },"))
 
 ;; "api/counter/bump" -> counterBump ; "api/items/:id/bump" -> itemsIdBump
 ;; "api/clip-copy" -> clipCopy. Hyphenated segments camel-case (a bare
@@ -475,10 +485,11 @@
 (define (route-descriptor r)
   (format "~a /~a"
           (route-method r)
-          (string-join
-           (for/list ([seg (in-list (route-segments r))])
-             (if (param? seg) (string-append ":" (param-id seg)) seg))
-           "/")))
+          (string-join (for/list ([seg (in-list (route-segments r))])
+                         (if (param? seg)
+                             (string-append ":" (param-id seg))
+                             seg))
+                       "/")))
 
 ;; The generated api.js turns each route into a JS function name. Validation
 ;; runs at startup so misconfiguration fails loudly, not as a silently
@@ -502,19 +513,18 @@
                              (if (zero? (string-length name)) "(empty)" name)))
     (hash-update! by-name name (lambda (old) (append old (list r))) '()))
   (for ([(name group) (in-hash by-name)])
-    (define duplicate-method
-      (check-duplicates (map route-method group) eq?))
+    (define duplicate-method (check-duplicates (map route-method group) eq?))
     (when duplicate-method
-      (define same-method
-        (filter (lambda (r) (eq? (route-method r) duplicate-method)) group))
-      (raise-arguments-error 'start-server
-                             "two routes with the same method map to the same JavaScript function name"
-                             "js name"
-                             name
-                             "first route"
-                             (route-descriptor (first same-method))
-                             "second route"
-                             (route-descriptor (second same-method))))
+      (define same-method (filter (lambda (r) (eq? (route-method r) duplicate-method)) group))
+      (raise-arguments-error
+       'start-server
+       "two routes with the same method map to the same JavaScript function name"
+       "js name"
+       name
+       "first route"
+       (route-descriptor (first same-method))
+       "second route"
+       (route-descriptor (second same-method))))
     (when (> (length group) 1)
       (unless (member 'GET (map route-method group))
         (raise-arguments-error 'start-server

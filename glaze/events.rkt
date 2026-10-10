@@ -94,11 +94,11 @@
   (for ([ch (in-list snapshot)])
     (unless (sync/timeout 0 (async-channel-put-evt ch payload))
       (call-with-semaphore (event-bus-sema bus)
-        (lambda ()
-          (unless (sync/timeout 0 (async-channel-put-evt ch payload))
-            (async-channel-get ch)
-            (sync/timeout 0 (async-channel-put-evt ch payload))
-            (maybe-report-drop! bus (car payload))))))))
+                           (lambda ()
+                             (unless (sync/timeout 0 (async-channel-put-evt ch payload))
+                               (async-channel-get ch)
+                               (sync/timeout 0 (async-channel-put-evt ch payload))
+                               (maybe-report-drop! bus (car payload))))))))
 
 ;; Blocking receive with timeout — for tests and non-SSE consumers.
 ;; Returns (list name data) or 'timeout.

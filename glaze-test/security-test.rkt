@@ -22,13 +22,12 @@
 
 ;; ---- helpers ----
 
-(define (http-call port path
-                   #:method [method "GET"]
-                   #:data [data #f]
-                   #:headers [headers '()])
+(define (http-call port path #:method [method "GET"] #:data [data #f] #:headers [headers '()])
   (define-values (st h in)
-    (http-sendrecv "127.0.0.1" path
-                   #:port port #:ssl? #f
+    (http-sendrecv "127.0.0.1"
+                   path
+                   #:port port
+                   #:ssl? #f
                    #:method method
                    #:data data
                    #:headers headers))
@@ -60,8 +59,7 @@
 
 ;; ---- static-file containment ----
 
-(define-values (sec-port sec-shutdown)
-  (start-server #:port 18930 #:public-dir public-dir))
+(define-values (sec-port sec-shutdown) (start-server #:port 18930 #:public-dir public-dir))
 
 ;; percent-encoded ".." must serve the SPA fallback, never the outside file
 (let-values ([(st body) (http-call sec-port "/%2e%2e/secret.txt")])
@@ -103,41 +101,42 @@
                             (GET "api/touch" (lambda (req) (hasheq 'ok #t))))))
 
 ;; foreign Origin on the API bridge -> 403
-(let-values ([(st _b) (http-call cs-port "/api/touch"
+(let-values ([(st _b) (http-call cs-port
+                                 "/api/touch"
                                  #:method "POST"
                                  #:data "{}"
                                  #:headers '("Origin: https://evil.example"))])
   (check-true (string-contains? st "403") "foreign Origin on API -> 403"))
 ;; same-origin loopback spellings pass
-(let-values ([(st _b) (http-call cs-port "/api/touch"
+(let-values ([(st _b) (http-call cs-port
+                                 "/api/touch"
                                  #:method "POST"
                                  #:data "{}"
                                  #:headers (list (format "Origin: http://127.0.0.1:~a" cs-port)))])
   (check-true (string-contains? st "200") "same-origin Origin (127.0.0.1) -> 200"))
-(let-values ([(st _b) (http-call cs-port "/api/touch"
+(let-values ([(st _b) (http-call cs-port
+                                 "/api/touch"
                                  #:method "POST"
                                  #:data "{}"
                                  #:headers (list (format "Origin: http://localhost:~a" cs-port)))])
   (check-true (string-contains? st "200") "same-origin Origin (localhost) -> 200"))
 ;; right host, wrong port -> 403
-(let-values ([(st _b) (http-call cs-port "/api/touch"
+(let-values ([(st _b) (http-call cs-port
+                                 "/api/touch"
                                  #:method "POST"
                                  #:data "{}"
                                  #:headers '("Origin: http://127.0.0.1:1"))])
   (check-true (string-contains? st "403") "Origin port mismatch -> 403"))
 ;; Sec-Fetch-Site without Origin (older GET flows)
-(let-values ([(st _b) (http-call cs-port "/api/touch"
-                                 #:headers '("Sec-Fetch-Site: cross-site"))])
+(let-values ([(st _b) (http-call cs-port "/api/touch" #:headers '("Sec-Fetch-Site: cross-site"))])
   (check-true (string-contains? st "403") "Sec-Fetch-Site cross-site -> 403"))
-(let-values ([(st _b) (http-call cs-port "/api/touch"
-                                 #:headers '("Sec-Fetch-Site: same-origin"))])
+(let-values ([(st _b) (http-call cs-port "/api/touch" #:headers '("Sec-Fetch-Site: same-origin"))])
   (check-true (string-contains? st "200") "Sec-Fetch-Site same-origin -> 200"))
 ;; neither header (curl / programmatic clients) is unaffected
 (let-values ([(st _b) (http-call cs-port "/api/touch" #:method "POST" #:data "{}")])
   (check-true (string-contains? st "200") "no Origin/Sec-Fetch headers -> 200"))
 ;; the guard covers the event stream bridge too; static files stay open
-(let-values ([(st _b) (http-call cs-port "/index.html"
-                                 #:headers '("Origin: https://evil.example"))])
+(let-values ([(st _b) (http-call cs-port "/index.html" #:headers '("Origin: https://evil.example"))])
   (check-true (string-contains? st "200") "static files are not Origin-gated"))
 
 (cs-shutdown)
@@ -149,12 +148,14 @@
                 #:public-dir public-dir
                 #:api (list (POST "api/upload" (lambda (req) (hasheq 'ok #t))))
                 #:max-body-size 100))
-(let-values ([(st _b) (http-call bl2-port "/api/upload"
+(let-values ([(st _b) (http-call bl2-port
+                                 "/api/upload"
                                  #:method "POST"
                                  #:data (make-string 200 #\x)
                                  #:headers '("Content-Type: application/json"))])
   (check-true (string-contains? st "413") "oversized body -> 413"))
-(let-values ([(st _b) (http-call bl2-port "/api/upload"
+(let-values ([(st _b) (http-call bl2-port
+                                 "/api/upload"
                                  #:method "POST"
                                  #:data "{\"x\":1}"
                                  #:headers '("Content-Type: application/json"))])
@@ -177,8 +178,7 @@
   (check-true (hash? (bytes->jsexpr body)) "500 body is JSON")
   (check-false (string-contains? (bytes->string/utf-8 body) "hunter2")
                "500 body hides the exception message")
-  (check-false (string-contains? (bytes->string/utf-8 body) "/secret/db")
-               "500 body hides paths")
+  (check-false (string-contains? (bytes->string/utf-8 body) "/secret/db") "500 body hides paths")
   (check-true (string-contains? (first (unbox reported-500)) "hunter2")
               "the reporter still sees the full exception"))
 (e500-shutdown)
@@ -213,8 +213,8 @@
 ;; ---- event-bus overflow is drop-oldest, counted, and reported ----
 
 (define drop-reports '())
-(parameterize ([current-event-drop-reporter
-                (lambda (dropped name) (set! drop-reports (cons name drop-reports)))])
+(parameterize ([current-event-drop-reporter (lambda (dropped name)
+                                              (set! drop-reports (cons name drop-reports)))])
   (define bus (make-event-bus))
   (define ch (bus-subscribe! bus))
   (for ([i (in-range 256)])
@@ -250,22 +250,24 @@
   (define close-errors (box '()))
   (define app-result (make-channel))
   (define app-thread
-    (thread
-     (lambda ()
-       (define-values (kind _shutdown)
-         (run-app #:public-dir app-dir
-                  #:port 18938
-                  #:title "glaze security test"
-                  #:on-close (lambda () (error 'test "close failure"))
-                  #:on-error (lambda (exn uri)
-                               (set-box! close-errors (cons (exn-message exn) (unbox close-errors))))))
-       (channel-put app-result kind))))
+    (thread (lambda ()
+              (define-values (kind _shutdown)
+                (run-app #:public-dir app-dir
+                         #:port 18938
+                         #:title "glaze security test"
+                         #:on-close (lambda () (error 'test "close failure"))
+                         #:on-error (lambda (exn uri)
+                                      (set-box! close-errors
+                                                (cons (exn-message exn) (unbox close-errors))))))
+              (channel-put app-result kind))))
   ;; wait for the server, then close the window the way the OS would
   (let loop ([deadline (+ (current-inexact-milliseconds) 15000)])
     (cond
       [(port-alive? 18938) (void)]
       [(> (current-inexact-milliseconds) deadline) (fail "run-app server never came up")]
-      [else (sleep 0.05) (loop deadline)]))
+      [else
+       (sleep 0.05)
+       (loop deadline)]))
   ;; target the window by its port so a window from an earlier e2e that is
   ;; still tearing down cannot be closed by mistake
   (define target-wv
@@ -278,14 +280,16 @@
       (cond
         [match match]
         [(> (current-inexact-milliseconds) deadline) #f]
-        [else (sleep 0.05) (loop deadline)])))
+        [else
+         (sleep 0.05)
+         (loop deadline)])))
   (check-not-false target-wv "run-app opened its window")
   (when target-wv
     (webview-close target-wv))
   (define kind (sync/timeout 30 app-result))
   (check-equal? kind 'webview "run-app survived a raising on-close hook")
   (check-true (for/or ([m (in-list (unbox close-errors))])
-                 (string-contains? m "close failure"))
+                (string-contains? m "close failure"))
               "on-close failure was reported")
   (kill-thread app-thread))
 
