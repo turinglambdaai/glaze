@@ -225,8 +225,12 @@
   (check-equal? (bus-dropped-count bus) 44 "overflow drops exactly the surplus")
   (check-true (>= (length drop-reports) 1) "overflow was reported")
   ;; oldest events made room for the newest: the queue starts at event 44
-  (check-equal? (bus-wait ch 2) '(tick #hasheq((i . 44))) "oldest events were dropped first")
-  (check-equal? (bus-wait ch 2) '(tick #hasheq((i . 45))) "queue stays ordered after overflow"))
+  (define-values (s44 n44 d44) (let ([e (bus-wait ch 2)]) (values (first e) (second e) (third e))))
+  (check-equal? n44 'tick)
+  (check-equal? d44 (hasheq 'i 44) "oldest events were dropped first")
+  (define e45 (bus-wait ch 2))
+  (check-equal? (second e45) 'tick "queue stays ordered after overflow")
+  (check-equal? (third e45) (hasheq 'i 45)))
 
 ;; ---- run-app lifecycle exception safety (real native window) ----
 

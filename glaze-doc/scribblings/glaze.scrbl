@@ -98,6 +98,37 @@ Bound by @racket[run-app] so callbacks can read the active API token; the value
 is the empty string when API-token protection is disabled.
 }
 
+The application is a state machine over a custodian:
+@racket['starting] → @racket['ready] → @racket['running] →
+@racket['stopping] → @racket['stopped]. Every app owns a custodian, so
+resources spawned for it (background threads such as the update check) are
+reaped deterministically at quit. State transitions broadcast an
+@racket['app-state] event on the bus when one is wired. With
+@racket[#:quit-on-last-window? #f] the app survives its last window closing
+(tray-resident mode) and ends only when @racket[app-quit!] is called;
+additional windows attach through @racket[open-app-window].
+
+@defproc[(glaze-app? [v any/c]) boolean?]{Recognizes the app handle.}
+@defparam[current-app app (or/c #f glaze-app?)]{
+Bound by @racket[run-app] for the duration of the application; readable in
+@racket[#:on-ready], callbacks, and tray menus.
+}
+@defproc[(app-state [app glaze-app? (current-app)]) symbol?]{The lifecycle state.}
+@defproc[(app-id [app glaze-app? (current-app)]) string?]{The application identity (#:app-id or generated).}
+@defproc[(app-quit! [app glaze-app? (current-app)]) void?]{
+Quits the app: transitions to @racket['stopping], closes leftover windows,
+stops the server, and reaps the app custodian.
+}
+@defproc[(open-app-window [url string?]
+          [#:title title string? "Glaze"]
+          [#:width width exact-positive-integer? 1024]
+          [#:height height exact-positive-integer? 768]
+          [#:window-state window-state (or/c #f path-string?) #f]
+          [#:on-close on-close (-> any) (lambda () (void))]) webview?]{
+Opens a window attached to the running app. Requires @racket[current-app]
+to be bound (inside @racket[#:on-ready] or a callback of a running app).
+}
+
 @section{Local Server}
 
 @defmodule*[(glaze/server glaze/browser)]
@@ -751,6 +782,33 @@ five seconds per bus).
 @defproc[(bus-wait [channel async-channel?] [seconds real? 10]) any/c]{}
 @defproc[(bus-dropped-count [bus event-bus?]) exact-nonnegative-integer?]{}
 @defparam[current-event-drop-reporter reporter (-> exact-nonnegative-integer? (or/c symbol? string?) any)]{}
+
+@section[#:tag "glz1"]{GLZ1 Bridge Protocol}
+
+@defmodule[glaze/bridge]
+
+GLZ1 is Glaze's versioned bridge protocol: a request envelope with an id, a
+closed typed-error taxonomy, cancellation, and timeouts, wrapped around the
+registered routes. The HTTP endpoints are @tt{GET /glaze/hello},
+@tt{POST /glaze/invoke}, and @tt{POST /glaze/cancel}; the generated api.js
+exposes @tt{glaze.hello()} / @tt{glaze.invoke(path, args, opts)} /
+@tt{glaze.cancel(id)}. The envelope layer is transport-agnostic — the native
+message-handler transport planned for 1.0 adopts it unchanged.
+
+@defthing[glz1-version exact-nonnegative-integer?]{The protocol version (currently @racket[1]).}
+@defproc[(bridge-error-code? [v any/c]) boolean?]{Recognizes the closed error-taxonomy codes.}
+@defproc[(raise-bridge-error [code bridge-error-code?]
+          [message (or/c #f string?) #f]
+          [data any/c #f]) any]{
+Raise inside an invoke handler to answer a typed bridge error; @racket[data]
+carries structured, non-sensitive detail — never exception text.
+}
+@defstruct*[exn:fail:glaze:bridge ([code bridge-error-code?] [data any/c])]{}
+@defproc[(bridge-cancel-event) (or/c #f semaphore?)]{
+The cancel event of the in-flight request, or @racket[#f] outside an invoke.
+Syncing on it blocks until @tt{POST /glaze/cancel} fires for this request.
+}
+@defproc[(bridge-cancelled?) boolean?]{Non-blocking cancellation poll.}
 
 @section{Native WebView}
 

@@ -4,9 +4,14 @@
 ;; built-in infrastructure endpoints under /glaze/*:
 ;;
 ;;   GET /glaze/events   — Server-Sent Events stream (backend push; mounted
-;;                         when start-server gets #:events (make-event-bus))
+;;                         when start-server gets #:events (make-event-bus));
+;;                         frames carry an id: line with the bus-global seq
 ;;   GET /glaze/api.js   — generated JS client for the registered routes
 ;;                         (mounted unless #:serve-api-client? #f)
+;;   GET /glaze/hello    — GLZ1 protocol version + route manifest
+;;   POST /glaze/invoke  — GLZ1 request envelope around any registered route
+;;                         (typed errors, request id, optional timeout)
+;;   POST /glaze/cancel  — GLZ1 cancellation for an in-flight invoke
 ;;
 ;; Every request passes a Host-header check: the server must be addressed
 ;; as 127.0.0.1 / localhost / [::1] (with or without port). This closes the
@@ -16,6 +21,7 @@
 (require racket/list
          web-server/web-server
          web-server/http/request-structs
+         (only-in web-server/http/request-structs make-request request-bindings/raw-promise)
          web-server/http/response-structs
          web-server/http/response
          net/url
@@ -26,6 +32,7 @@
          racket/string
          racket/tcp
          "api.rkt"
+         "bridge.rkt"
          "capability.rkt"
          "events.rkt")
 
@@ -44,6 +51,9 @@
 
 (define sse-path "glaze/events")
 (define api-client-path "glaze/api.js")
+(define hello-path "glaze/hello")
+(define invoke-path "glaze/invoke")
+(define cancel-path "glaze/cancel")
 
 ;; Start a local HTTP server serving static files from public-dir on 127.0.0.1,
 ;; with optional JSON API routes (see api.rkt) and the built-in /glaze/*
@@ -173,8 +183,16 @@
 ;; programmatic clients send neither header and are unaffected. Same-origin
 ;; is decided against every loopback spelling of this server's port, because
 ;; an app may be opened at localhost instead of 127.0.0.1.
-(define (bridge-request? matched-api events-request?)
-  (or matched-api events-request?))
+(define (glz1-request? req)
+  (define p (url-path-string (request-uri req)))
+  (and (bytes=? (request-method req) #"GET") (member p (list hello-path)) #t))
+
+(define (glz1-post-request? req)
+  (and (bytes=? (request-method req) #"POST")
+       (member (url-path-string (request-uri req)) (list invoke-path cancel-path))))
+
+(define (bridge-request? matched-api events-request? req)
+  (or matched-api events-request? (glz1-request? req) (glz1-post-request? req)))
 
 (define (cross-site-request? req port)
   (define origin-h (headers-assq #"Origin" (request-headers/raw req)))
@@ -208,7 +226,7 @@
       (cond
         [(not (host-allowed? req port)) (error-response 403 "host not allowed")]
         [(body-too-large? req max-body-size) (error-response 413 "request body too large")]
-        [(and (bridge-request? matched-api events-request?) (cross-site-request? req port))
+        [(and (bridge-request? matched-api events-request? req) (cross-site-request? req port))
          (error-response 403 "cross-origin request rejected")]
         ;; One-time bootstrap: the capability URL (?glaze-token=..., opened by
         ;; run-app) exchanges the token for an HttpOnly cookie and redirects
@@ -219,10 +237,14 @@
         ;; The token guards capabilities (API routes + the event stream),
         ;; not resources: static files and the api.js bootstrap stay open —
         ;; the page received its cookie via the bootstrap redirect above.
-        [(and api-token (not (token-ok? req api-token)) (or matched-api events-request?))
+        [(and api-token
+              (not (token-ok? req api-token))
+              (or matched-api events-request? (glz1-request? req) (glz1-post-request? req)))
          (error-response 401 "missing or invalid glaze token")]
         [(and matched-api authority (not (api-match-authorized? authority matched-api req)))
          (error-response 403 "capability denied API route")]
+        [(glz1-request? req) (glz1-hello-response api-routes)]
+        [(glz1-post-request? req) (glz1-post-response req api-routes authority)]
         [matched-api (api-match-response matched-api req authority)]
         [(and events-request? authority (not (capability-authorized? authority 'glaze:events)))
          (error-response 403 "capability denied event stream")]
@@ -307,23 +329,198 @@
             #"text/event-stream"
             (list (header #"Cache-Control" #"no-cache"))
             (lambda (out)
-              (dynamic-wind (lambda () (void))
-                            (lambda ()
-                              (let loop ()
-                                (define v (sync/timeout sse-keepalive-secs ch))
-                                (cond
-                                  [(eq? v 'timeout)
-                                   (fprintf out ": keepalive\n\n")
-                                   (flush-output out)
-                                   (loop)]
-                                  [else
-                                   (match-define (list name data) v)
-                                   (fprintf out "event: ~a\ndata: ~a\n\n" name (jsexpr->string data))
-                                   (flush-output out)
-                                   (loop)])))
-                            (lambda () (bus-unsubscribe! bus ch))))))
+              (dynamic-wind
+               (lambda () (void))
+               (lambda ()
+                 (let loop ()
+                   (define v (sync/timeout sse-keepalive-secs ch))
+                   (cond
+                     [(eq? v 'timeout)
+                      (fprintf out ": keepalive\n\n")
+                      (flush-output out)
+                      (loop)]
+                     [else
+                      ;; payload = (list seq name data); the seq
+                      ;; goes out as the standard SSE id: line so
+                      ;; consumers can detect dropped events by
+                      ;; the gap.
+                      (match-define (list seq name data) v)
+                      (fprintf out "id: ~a\nevent: ~a\ndata: ~a\n\n" seq name (jsexpr->string data))
+                      (flush-output out)
+                      (loop)])))
+               (lambda () (bus-unsubscribe! bus ch))))))
 
-;; ---- generated JS client ----
+;; ---- GLZ1 bridge endpoints ----
+
+;; GET /glaze/hello: protocol version + route manifest. A frontend checks
+;; this before its first invoke; disagreement fails at connect, not midway.
+(define (glz1-hello-response api-routes)
+  (json-bytes-response (build-hello api-routes)))
+
+;; POST /glaze/invoke and POST /glaze/cancel.
+;;
+;; invoke routes the envelope to the same route table plain fetch uses, so
+;; tokens, capability checks, path params, and streaming behave identically;
+;; what the envelope adds is a version check, a request id, typed errors,
+;; cancellation, and an optional timeout. The timeout abandons the WAITER
+;; (the answer is a typed timeout error) even when a handler cannot be
+;; interrupted; cooperative handlers observe cancellation through
+;; bridge-cancel-event / bridge-cancelled?. Streaming responses bypass the
+;; envelope — once bytes are on the wire there is no typed error left.
+(define *bridge-requests* (make-request-table))
+
+(define (glz1-post-response req api-routes authority)
+  (define raw (request-post-data/raw req))
+  (define body
+    (with-handlers ([exn:fail? (lambda (_) (hasheq))])
+      (bytes->jsexpr (cond
+                       [(not raw) #""]
+                       [(eof-object? raw) #""]
+                       [(bytes? raw) raw]
+                       [else #""]))))
+  (if (equal? (url-path-string (request-uri req)) cancel-path)
+      (glz1-cancel-response body)
+      (glz1-invoke-response req body api-routes authority)))
+
+(define (glz1-cancel-response body)
+  (cond
+    [(and (hash? body) (eq? (hash-ref body 'glz #f) glz1-version) (string? (hash-ref body 'id #f)))
+     (request-table-cancel! *bridge-requests* (hash-ref body 'id))
+     (json-bytes-response
+      (hasheq 'glz glz1-version 'id (hash-ref body 'id) 'ok #t 'value "cancel-signalled"))]
+    [else
+     (json-bytes-response (glz1-error-envelope #f 'bad-envelope "cancel needs {glz:1, id}" #f))]))
+
+(define (glz1-invoke-response req body api-routes authority)
+  (define-values (parse-result parse-error)
+    (with-handlers ([exn:fail:glaze:bridge?
+                     (lambda (e)
+                       (values #f
+                               (glz1-error-envelope #f
+                                                    (exn:fail:glaze:bridge-code e)
+                                                    (exn-message e)
+                                                    (exn:fail:glaze:bridge-data e))))])
+      (values (call-with-values (lambda () (parse-invoke-envelope body)) list) #f)))
+  (cond
+    [parse-error (json-bytes-response parse-error)]
+    [else
+     (define id (list-ref parse-result 0))
+     (define path (list-ref parse-result 1))
+     (define method-sym (list-ref parse-result 2))
+     (define args (list-ref parse-result 3))
+     (define segments (filter (lambda (sg) (not (equal? sg ""))) (string-split path "/")))
+     ;; An explicit envelope method must match exactly; without one, GET
+     ;; wins, then the mutating methods in registration order.
+     (define match
+       (cond
+         [method-sym (find-api-match-by-parts api-routes method-sym segments)]
+         [else
+          (or (find-api-match-by-parts api-routes 'GET segments)
+              (for/or ([mth (in-list '(POST PUT DELETE))])
+                (find-api-match-by-parts api-routes mth segments)))]))
+     (define method-mismatch?
+       (and method-sym
+            (not match)
+            (for/or ([mth (in-list '(GET POST PUT DELETE))])
+              (find-api-match-by-parts api-routes mth segments))))
+     (cond
+       [(not match)
+        (json-bytes-response
+         (glz1-error-envelope id
+                              (if method-mismatch? 'method-not-allowed 'unknown-command)
+                              (format "no route matches ~a ~a" (or method-sym 'GET) path)
+                              #f))]
+       [(and authority
+             (route-permission (first match))
+             (not (capability-has-permission? authority (route-permission (first match)))))
+        (json-bytes-response
+         (glz1-error-envelope id 'capability-denied "capability denied API route" #f))]
+       [else
+        (define route (first match))
+        (define captured (second match))
+        ;; Handlers read the JSON body — re-serve the request with the
+        ;; envelope's args as its post data.
+        (define invoke-req (rewrite-request-body req (string->bytes/utf-8 (jsexpr->string args))))
+        (define timeout-secs
+          (let ([ms (and (hash? body) (hash-ref body 'timeout_ms #f))])
+            (and (exact-positive-integer? ms) (/ ms 1000.0))))
+        (call-with-bridge-request
+         *bridge-requests*
+         id
+         (lambda ()
+           (define result-ch (make-channel))
+           (thread
+            (lambda ()
+              (channel-put
+               result-ch
+               (with-handlers
+                   ([exn:fail:glaze:bridge? (lambda (e)
+                                              (glz1-error-envelope id
+                                                                   (exn:fail:glaze:bridge-code e)
+                                                                   (exn-message e)
+                                                                   (exn:fail:glaze:bridge-data e)))]
+                    [exn:fail:glaze:bad-param?
+                     (lambda (e) (glz1-error-envelope id 'invalid-args (exn-message e) #f))]
+                    [exn:fail? (lambda (e)
+                                 ((current-glaze-error-reporter) e (string-append "glz1:" path))
+                                 (glz1-error-envelope id 'internal "internal error" #f))])
+                 (define result
+                   (parameterize ([current-capability-id (and authority (capability-id authority))]
+                                  [current-capability-authorizer
+                                   (and authority
+                                        (lambda (permission resource)
+                                          (capability-authorized? authority permission resource)))])
+                     (apply (route-handler route) invoke-req captured)))
+                 ;; Streaming and full-response handlers bypass
+                 ;; the envelope: the wire is already committed.
+                 (if (response? result)
+                     result
+                     (build-invoke-response id result))))))
+           (define maybe-result
+             (if timeout-secs
+                 (sync/timeout timeout-secs result-ch)
+                 (sync result-ch)))
+           (cond
+             [(not maybe-result)
+              (json-bytes-response (glz1-error-envelope id
+                                                        'timeout
+                                                        (format "handler exceeded ~ams"
+                                                                (hash-ref body 'timeout_ms))
+                                                        #f))]
+             [(response? maybe-result) maybe-result]
+             [else (json-bytes-response maybe-result)])))])]))
+
+(define (glz1-error-envelope id code message data)
+  (hasheq 'glz
+          glz1-version
+          'id
+          id
+          'ok
+          #f
+          'error
+          (hasheq 'code (symbol->string code) 'message message 'data data)))
+
+;; A shallow copy of the request whose post data is the given bytes — invoke
+;; handlers read the envelope's args as their JSON body.
+(define (rewrite-request-body req bs)
+  (make-request (request-method req)
+                (request-uri req)
+                (request-headers/raw req)
+                (request-bindings/raw-promise req)
+                bs
+                (request-host-ip req)
+                (request-host-port req)
+                (request-client-ip req)))
+
+(define (json-bytes-response jsexpr)
+  (response/full 200
+                 #"OK"
+                 (current-seconds)
+                 #"application/json; charset=utf-8"
+                 '()
+                 (list (string->bytes/utf-8 (jsexpr->string jsexpr)))))
+
+;; ---- generated JS client ----;; ---- generated JS client ----
 
 ;; Turns the registered routes into a small typed-by-construction client:
 ;;
@@ -394,7 +591,34 @@
                  "};\n"
                  "glaze.api = {\n"
                  (string-join entries "\n")
-                 "\n};\n"))
+                 "\n};\n"
+                 "glaze.hello = async function() {\n"
+                 "  const r = await fetch('/glaze/hello');\n"
+                 "  return r.json();\n"
+                 "};\n"
+                 "glaze._seq = 0;\n"
+                 "glaze.invoke = async function(path, args, opts = {}) {\n"
+                 "  const id = opts.id || ('r' + (++glaze._seq) + '-' + Date.now());\n"
+                 "  const envelope = {glz: 1, id: id, path: path, args: args || {}};\n"
+                 "  if (opts.method) envelope.method = opts.method;\n"
+                 "  if (opts.timeoutMs) envelope.timeout_ms = opts.timeoutMs;\n"
+                 "  const r = await fetch('/glaze/invoke', {method: 'POST',\n"
+                 "    headers: {'Content-Type': 'application/json'},\n"
+                 "    body: JSON.stringify(envelope)});\n"
+                 "  const out = await r.json();\n"
+                 "  if (!out.ok) {\n"
+                 "    const e = new Error((out.error && out.error.message) || 'bridge error');\n"
+                 "    e.code = out.error && out.error.code;\n"
+                 "    e.requestId = id;\n"
+                 "    throw e;\n"
+                 "  }\n"
+                 "  return out.value;\n"
+                 "};\n"
+                 "glaze.cancel = async function(id) {\n"
+                 "  await fetch('/glaze/cancel', {method: 'POST',\n"
+                 "    headers: {'Content-Type': 'application/json'},\n"
+                 "    body: JSON.stringify({glz: 1, id: id})});\n"
+                 "};\n"))
 
 ;; The path arguments a route's JS entry takes (the captured :params), and
 ;; the URL expression that interpolates them.
@@ -540,6 +764,13 @@
   (define method (string->symbol (string-upcase (bytes->string/latin-1 (request-method req)))))
   (define segments
     (filter (lambda (s) (not (equal? s ""))) (map path/param-path (url-path (request-uri req)))))
+  (for/or ([r (in-list api-routes)])
+    (define captured (route-match r method segments))
+    (and captured (list r captured))))
+
+;; Route lookup from envelope parts — the GLZ1 invoke names its target in
+;; the envelope, not the request URI.
+(define (find-api-match-by-parts api-routes method segments)
   (for/or ([r (in-list api-routes)])
     (define captured (route-match r method segments))
     (and captured (list r captured))))

@@ -100,9 +100,9 @@
 (log-warn pushed "push me")
 (define event (bus-wait bus-ch 5))
 (check-not-eq? event 'timeout "records above min-level push to the bus")
-(check-equal? (first event) 'log)
-(check-equal? (hash-ref (second event) 'message) "push me")
-(check-equal? (hash-ref (second event) 'level) "warn")
+(check-equal? (second event) 'log)
+(check-equal? (hash-ref (third event) 'message) "push me")
+(check-equal? (hash-ref (third event) 'level) "warn")
 
 ;; ---- routes ----
 

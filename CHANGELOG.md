@@ -5,6 +5,47 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-10-10
+
+### Added
+
+- **GLZ1 bridge protocol** (`glaze/bridge`), the first slice of the 1.0
+  runtime kernel (docs/architecture-1.0.md, and the working proposal for
+  the shared core in turinglambdaai/rivet#196):
+  - `GET /glaze/hello` — protocol version + route manifest, so a frontend
+    that disagrees with the backend fails at connect time;
+  - `POST /glaze/invoke` — a versioned request envelope
+    (`{glz, id, path, method?, args?, timeout_ms?}`) around any registered
+    route: same tokens, capability checks, path params, and streaming as
+    plain fetch, plus a request id, a closed typed-error taxonomy
+    (`bad-envelope`, `unknown-command`, `method-not-allowed`,
+    `invalid-args`, `capability-denied`, `timeout`, `cancelled`,
+    `internal`, ...), an optional server-side timeout, and cooperative
+    cancellation (`POST /glaze/cancel` + `bridge-cancel-event` /
+    `bridge-cancelled?` for handlers; the timeout abandons the waiter even
+    when a handler cannot be interrupted);
+  - generated `glaze.hello()` / `glaze.invoke()` / `glaze.cancel()` client
+    helpers in api.js.
+- **App lifecycle state machine** (`glaze/app`): `starting → ready →
+  running → stopping → stopped` over a per-app custodian — background
+  threads (update checks) are reaped deterministically at quit. State
+  transitions broadcast `app-state` on the event bus.
+- **Multi-window / tray-resident apps**: `open-app-window` attaches a
+  window to the running app; `#:quit-on-last-window? #f` keeps a
+  tray-resident app alive after its last window closes until
+  `app-quit!`; `current-app`, `app-state`, `app-id`, `app-quit!` exported.
+- **Event sequence numbers**: bus payloads are now `(list seq name data)`
+  and the SSE endpoint writes the seq as the standard SSE `id:` line, so
+  consumers can detect that the overflow policy dropped events (gap in
+  the sequence) and resync.
+
+### Changed
+
+- `bus-wait` returns `(list seq name data)` instead of
+  `(list name data)`; SSE frames carry an `id:` line. Consumers that parse
+  frames manually skip unknown lines (standard SSE behavior); direct bus
+  consumers read the seq as the first element.
+
 ## [0.11.1] - 2026-10-10
 
 ### Security

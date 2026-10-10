@@ -171,8 +171,8 @@
 (thunk)
 (define event (bus-wait bus-ch 5))
 (check-not-eq? event 'timeout "trigger broadcasts the event")
-(check-equal? (first event) 'global-shortcut)
-(check-equal? (hash-ref (second event) 'accelerator) (string-append cmd-mod "+Shift+D"))
+(check-equal? (second event) 'global-shortcut)
+(check-equal? (hash-ref (third event) 'accelerator) (string-append cmd-mod "+Shift+D"))
 
 ;; idempotent re-register reports alreadyRegistered
 (let-values ([(status body) (call "POST"

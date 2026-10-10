@@ -14,6 +14,11 @@
 ;;   const es = new EventSource('/glaze/events');
 ;;   es.addEventListener('counter-changed', e => e.detail);
 ;;
+;; Delivery shape: every event carries a bus-global sequence number —
+;; broadcast payloads are (list seq name data) and the SSE endpoint writes
+;; the seq as the standard SSE id: line. A consumer seeing a gap in the
+;; sequence knows the overflow policy dropped something and can resync.
+;;
 ;; Overflow policy: a bounded backlog keeps a slow client from growing server
 ;; memory. When it fills, the OLDEST queued event is sacrificed for the new
 ;; one (a lagging UI wants the freshest state, not the stalest), every drop
@@ -32,7 +37,7 @@
          current-event-drop-reporter
          bus-wait)
 
-(struct event-bus (channels sema dropped last-drop-report) #:transparent)
+(struct event-bus (channels sema dropped last-drop-report seq) #:transparent)
 
 (define backlog 256)
 
@@ -45,7 +50,7 @@
               name))))
 
 (define (make-event-bus)
-  (event-bus (make-hasheq) (make-semaphore 1) (box 0) (box 0.0)))
+  (event-bus (make-hasheq) (make-semaphore 1) (box 0) (box 0.0) (box 0)))
 
 (define (bus-subscribe! bus)
   (define ch (make-async-channel backlog))
@@ -74,33 +79,42 @@
     (with-handlers ([exn:fail? (lambda (_) (void))])
       ((current-event-drop-reporter) (unbox (event-bus-dropped bus)) name))))
 
-;; Deliver (name . jsexpr) to every subscriber. Non-blocking: a full backlog
+;; Deliver (seq name data) to every subscriber. Non-blocking: a full backlog
 ;; drops the subscriber's OLDEST event to make room (the stale one), which is
 ;; the right trade for UI state. The get+put pair runs under the bus
 ;; semaphore so concurrent broadcasters cannot race the swap; between a
 ;; failed put and the swap the subscriber may have drained the queue, in
 ;; which case the swap sacrifices the then-newest event — rare, and still a
-;; drop, not a corruption.
+;; drop, not a corruption. The sequence number is assigned under the same
+;; semaphore, so it reflects true broadcast order even with concurrent
+;; producers.
 (define (bus-broadcast! bus name data)
   (unless (or (symbol? name) (string? name))
     (raise-argument-error 'bus-broadcast! "(or/c symbol? string?)" name))
-  (define payload
-    (list (if (string? name)
-              (string->symbol name)
-              name)
-          data))
-  (define snapshot
-    (call-with-semaphore (event-bus-sema bus) (lambda () (hash-keys (event-bus-channels bus)))))
-  (for ([ch (in-list snapshot)])
+  (define name-sym
+    (if (string? name)
+        (string->symbol name)
+        name))
+  ;; The seq is assigned under the same semaphore that snapshots the
+  ;; subscriber list, so it reflects true broadcast order even with
+  ;; concurrent producers.
+  (define-values (seq channels)
+    (call-with-semaphore (event-bus-sema bus)
+                         (lambda ()
+                           (define next (add1 (unbox (event-bus-seq bus))))
+                           (set-box! (event-bus-seq bus) next)
+                           (values next (hash-keys (event-bus-channels bus))))))
+  (define payload (list seq name-sym data))
+  (for ([ch (in-list channels)])
     (unless (sync/timeout 0 (async-channel-put-evt ch payload))
       (call-with-semaphore (event-bus-sema bus)
                            (lambda ()
                              (unless (sync/timeout 0 (async-channel-put-evt ch payload))
                                (async-channel-get ch)
                                (sync/timeout 0 (async-channel-put-evt ch payload))
-                               (maybe-report-drop! bus (car payload))))))))
+                               (maybe-report-drop! bus name-sym)))))))
 
 ;; Blocking receive with timeout — for tests and non-SSE consumers.
-;; Returns (list name data) or 'timeout.
+;; Returns (list seq name data) or 'timeout.
 (define (bus-wait ch [secs 10])
   (or (sync/timeout secs ch) 'timeout))
