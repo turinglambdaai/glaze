@@ -245,52 +245,22 @@
   (sleep 0.3)
   (check-false (port-alive? 18937) "on-ready failure stopped the server")
 
-  ;; a raising #:on-close hook must not wedge run-app: it reports and the
-  ;; app still closes, returning normally.
+  ;; A raising #:on-close hook must not wedge run-app: it reports and the
+  ;; app still closes, returning normally. run-app stays on the main thread
+  ;; (AppKit/GTK/Win32 window calls are main-thread-only); the close is
+  ;; driven from #:on-ready the same way a user closing the window is.
   (define close-errors (box '()))
-  (define app-result (make-channel))
-  (define app-thread
-    (thread (lambda ()
-              (define-values (kind _shutdown)
-                (run-app #:public-dir app-dir
-                         #:port 18938
-                         #:title "glaze security test"
-                         #:on-close (lambda () (error 'test "close failure"))
-                         #:on-error (lambda (exn uri)
-                                      (set-box! close-errors
-                                                (cons (exn-message exn) (unbox close-errors))))))
-              (channel-put app-result kind))))
-  ;; wait for the server, then close the window the way the OS would
-  (let loop ([deadline (+ (current-inexact-milliseconds) 15000)])
-    (cond
-      [(port-alive? 18938) (void)]
-      [(> (current-inexact-milliseconds) deadline) (fail "run-app server never came up")]
-      [else
-       (sleep 0.05)
-       (loop deadline)]))
-  ;; target the window by its port so a window from an earlier e2e that is
-  ;; still tearing down cannot be closed by mistake
-  (define target-wv
-    (let loop ([deadline (+ (current-inexact-milliseconds) 15000)])
-      (define match
-        (findf (lambda (wv)
-                 (define u (webview-url wv))
-                 (and u (string-contains? u ":18938")))
-               (all-webviews)))
-      (cond
-        [match match]
-        [(> (current-inexact-milliseconds) deadline) #f]
-        [else
-         (sleep 0.05)
-         (loop deadline)])))
-  (check-not-false target-wv "run-app opened its window")
-  (when target-wv
-    (webview-close target-wv))
-  (define kind (sync/timeout 30 app-result))
+  (define-values (kind _shutdown)
+    (run-app #:public-dir app-dir
+             #:port 18938
+             #:title "glaze security test"
+             #:on-ready (lambda (wv url) (webview-close wv))
+             #:on-close (lambda () (error 'test "close failure"))
+             #:on-error (lambda (exn uri)
+                          (set-box! close-errors (cons (exn-message exn) (unbox close-errors))))))
   (check-equal? kind 'webview "run-app survived a raising on-close hook")
   (check-true (for/or ([m (in-list (unbox close-errors))])
                 (string-contains? m "close failure"))
-              "on-close failure was reported")
-  (kill-thread app-thread))
+              "on-close failure was reported"))
 
 (delete-directory/files fixture-dir)
