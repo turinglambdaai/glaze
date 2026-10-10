@@ -41,8 +41,9 @@ guidance. Glaze never substitutes a system-browser tab for the desktop window.
           [#:width width exact-positive-integer? 1024]
           [#:height height exact-positive-integer? 768]
           [#:events events (or/c #f event-bus?) #f]
-          [#:api-token api-token (or/c #f string? #t) #f]
+          [#:api-token api-token (or/c #f string? #t) #t]
           [#:capability capability (or/c #f capability?) #f]
+          [#:max-body-size max-body-size exact-nonnegative-integer? 8388608]
           [#:on-close on-close (-> any) (lambda () (void))]
           [#:on-error on-error (or/c #f procedure?) #f]
           [#:check-update check-update (or/c #f string?) #f]
@@ -61,11 +62,21 @@ returns @racket[(values 'webview shutdown)]. If native WebView startup fails,
 Glaze first stops the local server and then propagates an actionable startup
 error. There is intentionally no browser-fallback option.
 
-@racket[#:api-token] may be a string or @racket[#t]. With @racket[#t], Glaze
-generates a random capability token and uses a one-time bootstrap URL to set an
-HttpOnly cookie for the embedded frontend. @racket[#:on-error] receives API
-handler failures. @racket[#:check-update] wires an update manifest into the
+The bridge is token-protected by default: @racket[#:api-token] defaults to
+@racket[#t], which generates a random capability token and uses a one-time
+bootstrap URL to set an HttpOnly cookie for the embedded frontend, so a loopback
+port is never an open API for other local processes or web pages. Pass an
+explicit string to choose the token, or @racket[#:api-token #f] to opt out
+(dev tooling, trusted kiosk setups). @racket[#:max-body-size] caps the request
+body the server will buffer (413 above the limit). @racket[#:on-error] receives
+API handler failures. @racket[#:check-update] wires an update manifest into the
 application lifecycle.
+
+The lifecycle is exception-safe: an @racket[#:on-ready] callback that raises
+tears the window and the server down before propagating, and an
+@racket[#:on-close] hook that raises is reported through
+@racket[#:on-error] while the close still completes — a callback bug can
+neither leak the server nor wedge the application.
 
 When @racket[#:capability] is supplied, @racket[run-app] automatically creates
 an API token if necessary. Every API route then requires a declared and granted
@@ -98,7 +109,8 @@ is the empty string when API-token protection is disabled.
           [#:events events (or/c #f event-bus?) #f]
           [#:api-token api-token (or/c #f string?) #f]
           [#:capability capability (or/c #f capability?) #f]
-          [#:serve-api-client? serve-api-client? boolean? #t])
+          [#:serve-api-client? serve-api-client? boolean? #t]
+          [#:max-body-size max-body-size exact-nonnegative-integer? 8388608])
          (values exact-nonnegative-integer? procedure?)]{
 Starts the loopback HTTP server that powers the embedded frontend. Static
 resources, SPA index fallback, JSON routes, generated API client, and optional
@@ -110,7 +122,19 @@ application mode.
 The low-level server requires an explicit, non-empty @racket[#:api-token] whenever
 @racket[#:capability] is supplied, keeping runtime authority bound to the
 embedded WebView rather than an unauthenticated loopback caller.
+
+Every request passes a Host-header check (DNS rebinding), a request-body
+limit, and — for API routes and the event stream — a cross-site guard: a
+foreign @racket[Origin] header or a @racket[Sec-Fetch-Site] value other than
+@racket["same-origin"]/​@racket["none"] is rejected with 403, which stops
+other web pages from posting to the loopback bridge. Static file serving is
+contained to @racket[#:public-dir], including through percent-encoded
+@litchar{..} segments and symlinks; route names that cannot be expressed in
+the generated JavaScript client (collisions, invalid identifiers) fail at
+startup. Handler exceptions answer a generic 500 body — the full exception
+goes to the @racket[current-glaze-error-reporter], never to the page.
 }
+
 
 @defproc[(stop-server [shutdown-proc procedure?]) void?]{Stops the server.}
 
@@ -715,12 +739,18 @@ Glaze uses same-origin Server-Sent Events for backend-to-frontend push.
 @defproc[(bus-broadcast! [bus event-bus?]
                           [name (or/c symbol? string?)]
                           [data jsexpr?]) void?]{
-Broadcasts an event without blocking the producer; a full per-subscriber
-backlog drops that event for the slow subscriber only.
+Broadcasts an event without blocking the producer. When a slow subscriber's
+backlog (256 events) is full, the subscriber's OLDEST event is dropped to
+make room — a lagging UI wants the freshest state. Drops are never silent:
+@racket[bus-dropped-count] reports the total and the first drop in a burst is
+reported through @racket[current-event-drop-reporter] (at most once every
+five seconds per bus).
 }
 @defproc[(bus-subscribe! [bus event-bus?]) async-channel?]{}
 @defproc[(bus-unsubscribe! [bus event-bus?] [channel async-channel?]) void?]{}
 @defproc[(bus-wait [channel async-channel?] [seconds real? 10]) any/c]{}
+@defproc[(bus-dropped-count [bus event-bus?]) exact-nonnegative-integer?]{}
+@defparam[current-event-drop-reporter reporter (-> exact-nonnegative-integer? (or/c symbol? string?) any)]{}
 
 @section{Native WebView}
 

@@ -5,6 +5,67 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.1] - 2026-10-10
+
+### Security
+
+- Fix an arbitrary-file-read in static file serving: percent-encoded `..`
+  segments (`/%2e%2e/secret.txt`) escaped `#:public-dir` and a raw `../` in
+  the request line crashed the connection thread. All path segments that are
+  not plain strings are rejected before touching the filesystem, and every
+  file served is verified to sit inside the public dir after full symlink
+  resolution (so a symlink inside `public/` cannot smuggle a path outside).
+- The bridge (API routes + event stream) now rejects cross-site requests: a
+  foreign `Origin` header or a `Sec-Fetch-Site` other than `same-origin` /
+  `none` answers 403. This stops other web pages from driving the local API
+  with simple cross-origin POSTs; curl-style programmatic clients send
+  neither header and are unaffected.
+- `run-app` now generates an API token by default (`#:api-token #t`): the
+  embedded WebView receives it through the one-time bootstrap URL as before,
+  while the loopback API stops being an open target for every local process.
+  Pass `#:api-token #f` explicitly to run an open bridge.
+- Add a request-body limit (`#:max-body-size`, default 8 MiB) with a 413
+  response; oversized uploads can no longer make the server buffer
+  unbounded data.
+- Handler exceptions no longer echo exception text in the 500 body
+  (information leak); the full exception still reaches
+  `current-glaze-error-reporter`.
+
+### Fixed
+
+- `run-app` lifecycle is exception-safe: a `#:on-ready` callback that raises
+  now closes the window and stops the server before propagating (neither
+  leaked before), and a raising `#:on-close` hook is reported through
+  `#:on-error` while the close still completes — previously it could block
+  `run-app` forever. Shutdown is once-only under concurrency.
+- The SSE event bus no longer drops events silently on overflow: a full
+  backlog now sacrifices the subscriber's oldest event for the new one, and
+  drops are counted (`bus-dropped-count`) and reported through
+  `current-event-drop-reporter` (throttled).
+- Ed25519 update signing no longer depends on PATH luck: macOS ships
+  `/usr/bin/openssl` as LibreSSL, which cannot sign Ed25519 and made the
+  signing tests fail on stock macOS. The OpenSSL CLI is now chosen by
+  capability — `GLAZE_OPENSSL` override, then a version probe of `openssl`
+  on PATH (OpenSSL >= 1.1.1 only), then well-known Homebrew locations — and
+  a missing CLI raises one actionable error. New `openssl-path` /
+  `openssl-available?` exports.
+- Generated JS client names are validated at startup: two routes mapping to
+  one name (silent overwrite), or names that sanitize to nothing, fail with
+  the offending routes listed. Segments are sanitized to identifier
+  characters and digit-leading names get a `_` prefix. Routes sharing a
+  path with different methods (GET + POST) now generate one dispatching
+  function instead of silently overwriting each other.
+
+### Added
+
+- `docs/architecture-1.0.md`: the 1.0 runtime RFC (app state machine,
+  GLZ1 bridge protocol, host model, module layering, Rivet shared-kernel
+  plan, 1.0 gate).
+- New `glaze-test/security-test.rkt` locking in the above: traversal,
+  symlink escape, cross-site guard, body limit, 500 sanitization, client
+  name validation, bus overflow accounting, and real-window lifecycle
+  exception safety.
+
 ## [0.11.0] - 2026-10-10
 
 ### Added

@@ -15,6 +15,8 @@
          allow-permission
          scoped-permission
          path-permission
+         path-inside?
+         canonical-path
          url-permission
          command-permission
          command-resource
