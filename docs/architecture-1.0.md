@@ -141,7 +141,7 @@ Glaze and Rivet are two renderers over one application model:
 Neither should depend on the other. The shared part — app identity and
 manifest, typed schema, wire encoding, lifecycle semantics, capability
 authority, distribution/update/signing, diagnostics — is a neutral third
-layer (`racket-app-core` in spirit). Extracting it means one golden-vector
+layer (`keel` — <https://github.com/turinglambdaai/keel> — first slice released 2026-10-11). Extracting it means one golden-vector
 test suite and one compatibility baseline serve both projects, instead of
 two teams separately rewriting packaging, update, signing, permissions,
 and lifecycle.
