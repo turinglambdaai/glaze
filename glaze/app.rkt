@@ -263,6 +263,11 @@
                          (lambda ()
                            (unless (unbox (glaze-app-shut-down?-box app))
                              (set-box! (glaze-app-shut-down?-box app) #t)
+                             ;; keel's lifecycle: every exit goes through
+                             ;; stopping — startup and on-ready failures
+                             ;; included.
+                             (unless (eq? (app-state app) 'stopping)
+                               (set-app-state! app 'stopping))
                              ;; Leftover windows (quit via app-quit! or a raising path) close
                              ;; here, on the caller's thread — the thread run-app was called
                              ;; on, which owns the native window calls.
