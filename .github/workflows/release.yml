@@ -224,6 +224,9 @@ jobs:
           sudo wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
           sudo chmod +x /usr/local/bin/appimagetool
 
+      - name: Install keel
+        run: raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
+
       - name: Install Glaze package
         run: raco pkg install --auto --no-docs --link "$PWD"
 
@@ -275,6 +278,9 @@ jobs:
         uses: Bogdanp/setup-racket@v1.11
         with:
           version: '9.3'
+
+      - name: Install keel
+        run: raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
 
       - name: Install Glaze package
         run: raco pkg install --auto --no-docs --link "$PWD"
