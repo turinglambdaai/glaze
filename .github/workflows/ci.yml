@@ -23,10 +23,6 @@ jobs:
         with:
           version: ${{ matrix.racket-version }}
 
-      - name: Install keel
-        shell: bash
-        run: raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
-
       - name: Install Glaze package
         shell: bash
         run: raco pkg install --auto --no-docs --link "$PWD"
@@ -76,10 +72,6 @@ jobs:
         uses: Bogdanp/setup-racket@v1.11
         with:
           version: ${{ matrix.racket-version }}
-
-      - name: Install keel
-        shell: bash
-        run: raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
 
       - name: Install Glaze package
         shell: bash
@@ -149,10 +141,6 @@ jobs:
         uses: Bogdanp/setup-racket@v1.11
         with:
           version: ${{ matrix.racket-version }}
-
-      - name: Install keel
-        shell: bash
-        run: raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
 
       - name: Install Glaze package
         shell: bash

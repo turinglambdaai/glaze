@@ -86,8 +86,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel && \
-            raco pkg install --auto --no-docs --name glaze --link "$PWD"
+          raco pkg install --auto --no-docs --name glaze --link "$PWD"
           raco test --package glaze
           raco scribble ++xref-in setup/xref load-collections-xref \
             --htmls --dest "$RUNNER_TEMP/glaze-doc" \
@@ -116,7 +115,6 @@ jobs:
           set -euo pipefail
           smoke_root="$(mktemp -d)"
           export PLTUSERHOME="$smoke_root/racket-user"
-          raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
           raco pkg install --auto --no-docs --name glaze \
             "$PWD/release-assets/glaze-${GLAZE_VERSION}.zip"
           PLTUSERHOME="$smoke_root/racket-user" \
@@ -154,7 +152,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
           raco pkg install --auto --no-docs --name glaze --link $PWD
           Push-Location examples/showcase
           raco glaze build `
@@ -224,9 +221,6 @@ jobs:
           sudo wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
           sudo chmod +x /usr/local/bin/appimagetool
 
-      - name: Install keel
-        run: raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
-
       - name: Install Glaze package
         run: raco pkg install --auto --no-docs --link "$PWD"
 
@@ -278,9 +272,6 @@ jobs:
         uses: Bogdanp/setup-racket@v1.11
         with:
           version: '9.3'
-
-      - name: Install keel
-        run: raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
 
       - name: Install Glaze package
         run: raco pkg install --auto --no-docs --link "$PWD"
