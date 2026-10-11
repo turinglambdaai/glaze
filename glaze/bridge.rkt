@@ -27,6 +27,15 @@
 (require json
          racket/list
          racket/string
+         (only-in keel app-error-code? app-null)
+         (only-in keel
+                  schema-command
+                  schema-parameter
+                  schema-record
+                  Value
+                  String
+                  make-app-schema
+                  app-schema->app-value)
          "api.rkt")
 
 (provide glz1-version
@@ -41,6 +50,8 @@
          exn:fail:glaze:bridge-data
          parse-invoke-envelope
          build-invoke-response
+         outcome-for-code
+         bridge-error-object
          build-hello
          make-request-table
          request-table-cancel!
@@ -68,7 +79,7 @@
                         invalid-args
                         token-required
                         capability-denied
-                        timeout
+                        timed-out
                         cancelled
                         internal))
 
@@ -120,11 +131,59 @@
 
 ;; HTTP status per error code — the transport binding stays in the server;
 ;; the protocol only names the class.
+;; Every terminal invoke response names its outcome with the keel request
+;; vocabulary (succeeded / failed / cancelled / timed-out); the error object
+;; itself is a keel-shaped structured error (kebab code, message, data).
 (define (build-invoke-response id result)
-  (hasheq 'glz glz1-version 'id id 'ok #t 'value result))
+  (hasheq 'glz glz1-version 'id id 'ok #t 'outcome "succeeded" 'value result))
+
+(define (outcome-for-code code)
+  (cond
+    [(eq? code 'cancelled) "cancelled"]
+    [(eq? code 'timed-out) "timed-out"]
+    [else "failed"]))
+
+;; Build the wire error object through keel's structured-error shape, so the
+;; code is validated kebab-case and the shape stays portable. `data` stays a
+;; jsexpr on the wire (glaze-side detail); keel's app-null stands in for "no
+;; data".
+(define (bridge-error-object code message data)
+  (unless (app-error-code? (symbol->string code))
+    (raise-argument-error 'bridge-error-object "kebab-case error code" code))
+  (hasheq 'code
+          (symbol->string code)
+          'message
+          (or message (string-titlecase (symbol->string code)))
+          'data
+          data))
 
 ;; GET /glaze/hello — what a frontend checks before its first invoke.
-(define (build-hello routes [app-id #f])
+;; `name-fn` derives each route's portable command name (server.rkt passes
+;; the generated-JS-name function). The manifest carries both the raw route
+;; list and a keel app-schema rendering of the same surface, so a frontend
+;; (or a tool) can consume the transport-neutral description.
+(define invoke-error-codes
+  (list "invalid-args" "capability-denied" "token-required" "timed-out" "cancelled" "internal"))
+
+(define (build-hello routes [app-id #f] [name-fn #f])
+  (define schema
+    (make-app-schema "glaze-routes"
+                     1
+                     #:commands
+                     (for/list ([r (in-list routes)])
+                       (schema-command ((or name-fn
+                                            (lambda (segments)
+                                              (string-join (for/list ([seg (in-list segments)])
+                                                             (if (param? seg)
+                                                                 (param-id seg)
+                                                                 seg))
+                                                           "-")))
+                                        (route-segments r))
+                                       (for/list ([seg (in-list (route-segments r))]
+                                                  #:when (param? seg))
+                                         (schema-parameter (param-id seg) String))
+                                       Value
+                                       invoke-error-codes))))
   (hasheq 'glz
           glz1-version
           'name
@@ -141,7 +200,23 @@
                                                   (if (param? seg)
                                                       (string-append ":" (param-id seg))
                                                       seg))
-                                                "/"))))))
+                                                "/"))))
+          'schema
+          (app-value->jsexpr (app-schema->app-value schema))))
+
+;; keel renders app-values with immutable STRING-key maps and its Null
+;; sentinel; the wire speaks jsexpr, whose object keys are symbols. Convert
+;; at the transport boundary — string keys become symbols, keel Null becomes
+;; the JSON null symbol, errors unfold to their object shape.
+(define (app-value->jsexpr v)
+  (cond
+    [(hash? v)
+     (for/hasheq ([(key value) (in-hash v)])
+       (values (string->symbol key) (app-value->jsexpr value)))]
+    [(pair? v) (map app-value->jsexpr v)]
+    [(null? v) v]
+    [(eq? v app-null) 'null]
+    [else v]))
 
 ;; ---- request table (cancellation) ----
 

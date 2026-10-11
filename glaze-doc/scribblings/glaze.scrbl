@@ -795,6 +795,15 @@ exposes @tt{glaze.hello()} / @tt{glaze.invoke(path, args, opts)} /
 @tt{glaze.cancel(id)}. The envelope layer is transport-agnostic — the native
 message-handler transport planned for 1.0 adopts it unchanged.
 
+The protocol is aligned with @hyperlink["https://github.com/turinglambdaai/keel"]{keel},
+the transport-neutral application contract shared with Rivet: every invoke
+response names its terminal @racket['outcome]
+(@racket["succeeded"] / @racket["failed"] / @racket["cancelled"] /
+@racket["timed-out"]); the error object is keel-shaped (kebab-case code,
+message, data); @tt{/glaze/hello} carries a keel @tt{app-schema} rendering of
+the route surface; and the app lifecycle state machine validates every
+transition against keel's lifecycle contract.
+
 @defthing[glz1-version exact-nonnegative-integer?]{The protocol version (currently @racket[1]).}
 @defproc[(bridge-error-code? [v any/c]) boolean?]{Recognizes the closed error-taxonomy codes.}
 @defproc[(raise-bridge-error [code bridge-error-code?]

@@ -86,7 +86,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          raco pkg install --auto --no-docs --name glaze --link "$PWD"
+          raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel && \
+            raco pkg install --auto --no-docs --name glaze --link "$PWD"
           raco test --package glaze
           raco scribble ++xref-in setup/xref load-collections-xref \
             --htmls --dest "$RUNNER_TEMP/glaze-doc" \
@@ -114,8 +115,9 @@ jobs:
         run: |
           set -euo pipefail
           smoke_root="$(mktemp -d)"
-          PLTUSERHOME="$smoke_root/racket-user" \
-            raco pkg install --auto --no-docs --name glaze \
+          export PLTUSERHOME="$smoke_root/racket-user"
+          raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
+          raco pkg install --auto --no-docs --name glaze \
             "$PWD/release-assets/glaze-${GLAZE_VERSION}.zip"
           PLTUSERHOME="$smoke_root/racket-user" \
             racket -e '(require glaze glaze/server glaze/events)'
@@ -152,6 +154,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          raco pkg install --auto --no-docs --skip-installed git+https://github.com/turinglambdaai/keel
           raco pkg install --auto --no-docs --name glaze --link $PWD
           Push-Location examples/showcase
           raco glaze build `

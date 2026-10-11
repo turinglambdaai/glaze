@@ -355,7 +355,7 @@
 ;; GET /glaze/hello: protocol version + route manifest. A frontend checks
 ;; this before its first invoke; disagreement fails at connect, not midway.
 (define (glz1-hello-response api-routes)
-  (json-bytes-response (build-hello api-routes)))
+  (json-bytes-response (build-hello api-routes #f route->js-name)))
 
 ;; POST /glaze/invoke and POST /glaze/cancel.
 ;;
@@ -483,13 +483,15 @@
            (cond
              [(not maybe-result)
               (json-bytes-response (glz1-error-envelope id
-                                                        'timeout
+                                                        'timed-out
                                                         (format "handler exceeded ~ams"
                                                                 (hash-ref body 'timeout_ms))
                                                         #f))]
              [(response? maybe-result) maybe-result]
              [else (json-bytes-response maybe-result)])))])]))
 
+;; The outcome field uses keel's request vocabulary; ok #f always names a
+;; failed/cancelled/timed-out terminal, and the error object is keel-shaped.
 (define (glz1-error-envelope id code message data)
   (hasheq 'glz
           glz1-version
@@ -497,8 +499,10 @@
           id
           'ok
           #f
+          'outcome
+          (outcome-for-code code)
           'error
-          (hasheq 'code (symbol->string code) 'message message 'data data)))
+          (bridge-error-object code message data)))
 
 ;; A shallow copy of the request whose post data is the given bytes — invoke
 ;; handlers read the envelope's args as their JSON body.

@@ -41,11 +41,11 @@
            (lambda () (raise-bridge-error 'bad-envelope "test" #f))
            "raise-bridge-error raises the bridge exn")
 (check-equal? (exn:fail:glaze:bridge-code (with-handlers ([exn:fail:glaze:bridge? values])
-                                            (raise-bridge-error 'timeout "late" (hasheq 'ms 5))))
-              'timeout
+                                            (raise-bridge-error 'timed-out "late" (hasheq 'ms 5))))
+              'timed-out
               "bridge exn carries the code")
 (check-equal? (exn:fail:glaze:bridge-data (with-handlers ([exn:fail:glaze:bridge? values])
-                                            (raise-bridge-error 'timeout "late" (hasheq 'ms 5))))
+                                            (raise-bridge-error 'timed-out "late" (hasheq 'ms 5))))
               (hasheq 'ms 5)
               "bridge exn carries structured data")
 
@@ -81,7 +81,7 @@
 (current-glaze-error-reporter (lambda (_exn _uri) (void)))
 (define-values (port shutdown) (start-server #:port 18991 #:public-dir dir #:api api #:events bus))
 
-;; hello: version + route manifest
+;; hello: version + route manifest + keel schema rendering
 (let-values ([(_st b) (call "GET" "/glaze/hello")])
   (define hello (bytes->jsexpr b))
   (check-equal? (hash-ref hello 'glz) glz1-version "hello speaks the protocol version")
@@ -90,7 +90,18 @@
   (check-true (for/or ([r (in-list (hash-ref hello 'routes))])
                 (and (equal? (hash-ref r 'path) "/api/items/:id")
                      (equal? (hash-ref r 'method) "GET")))
-              "manifest includes param routes"))
+              "manifest includes param routes")
+  ;; the same surface as a transport-neutral keel schema (jsexpr: symbol
+  ;; keys; values stay strings)
+  (define schema (hash-ref hello 'schema))
+  (check-equal? (hash-ref schema 'id) "glaze-routes")
+  (check-equal? (hash-ref schema 'contract) 1)
+  (check-true (list? (hash-ref schema 'commands)) "schema lists commands")
+  (check-true (for/or ([c (in-list (hash-ref schema 'commands))])
+                (and (equal? (hash-ref c 'name) "ping")
+                     (equal? (hash-ref (hash-ref c 'result) 'name) "Value")
+                     (and (member "timed-out" (hash-ref c 'errors)) #t)))
+              "commands carry keel result type and error codes"))
 
 ;; invoke: happy path with envelope shape
 (let-values ([(_st b)
@@ -99,6 +110,7 @@
   (check-equal? (hash-ref out 'glz) 1)
   (check-equal? (hash-ref out 'id) "r1")
   (check-true (hash-ref out 'ok))
+  (check-equal? (hash-ref out 'outcome) "succeeded" "keel terminal outcome")
   (check-equal? (hash-ref (hash-ref out 'value) 'pong) #t))
 
 ;; invoke: path params from the envelope path
@@ -117,11 +129,12 @@
   (check-true (hash-ref out 'ok))
   (check-equal? (hash-ref (hash-ref out 'value) 'created) "tok"))
 
-;; invoke: unknown command -> typed error
+;; invoke: unknown command -> typed error with a failed terminal
 (let-values ([(_st b)
               (call "POST" "/glaze/invoke" "{\"glz\":1,\"id\":\"r4\",\"path\":\"api/nothing\"}")])
   (define out (bytes->jsexpr b))
   (check-false (hash-ref out 'ok))
+  (check-equal? (hash-ref out 'outcome) "failed" "typed errors are failed terminals")
   (check-equal? (hash-ref (hash-ref out 'error) 'code) "unknown-command"))
 
 ;; invoke: explicit method mismatch -> method-not-allowed (no silent GET
@@ -160,7 +173,9 @@
 (let-values ([(_st b) (call "POST"
                             "/glaze/invoke"
                             "{\"glz\":1,\"id\":\"r9\",\"path\":\"api/slow\",\"timeout_ms\":300}")])
-  (check-equal? (hash-ref (hash-ref (bytes->jsexpr b) 'error) 'code) "timeout"))
+  (define timed-out (bytes->jsexpr b))
+  (check-equal? (hash-ref (hash-ref timed-out 'error) 'code) "timed-out")
+  (check-equal? (hash-ref timed-out 'outcome) "timed-out" "outcome names the terminal"))
 
 ;; invoke + cancel: the cooperative handler observes cancellation
 (let-values ([(_st b)

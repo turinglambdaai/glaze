@@ -5,6 +5,34 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] - 2026-10-11
+
+### Added
+
+- **keel integration** — glaze is the first consumer of
+  [keel](https://github.com/turinglambdaai/keel), the transport-neutral
+  application contract shared with Rivet:
+  - the app lifecycle state machine validates every transition against
+    keel's lifecycle contract; every exit (startup and on-ready failures
+    included) now goes through `stopping` before `stopped`;
+  - every GLZ1 invoke response carries a terminal `outcome` —
+    `succeeded` / `failed` / `cancelled` / `timed-out` (keel's request
+    vocabulary); the error object is keel-shaped (kebab-case code,
+    message, data);
+  - `/glaze/hello` now includes a keel `app-schema` rendering of the route
+    surface (commands with parameters, result type, error codes) beside
+    the raw route list, so frontends and tools can consume the
+    transport-neutral description.
+
+### Changed
+
+- The GLZ1 error code `timeout` is renamed to `timed-out` to match keel's
+  request-outcome vocabulary (0.x window; the `timeout_ms` envelope field
+  is unchanged).
+- `keel` is a declared dependency (installed from GitHub; not yet on the
+  catalog). CI and release pipelines install it before glaze; downstream
+  packagers must do the same until catalog submission is approved.
+
 ## [0.12.0] - 2026-10-10
 
 ### Added
