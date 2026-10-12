@@ -15,8 +15,7 @@
     "web-server-lib"
     "db-lib"
     ;; Shared application contract (value codec, structured errors,
-    ;; lifecycle, schema). Not on the catalog yet — install from
-    ;; https://github.com/turinglambdaai/keel before linking glaze.
+    ;; lifecycle, schema), resolved through the Racket package catalog.
     "keel"
     ;; Tests ship inside this package, so rackunit is a runtime dep.
     "rackunit-lib"))
@@ -29,8 +28,8 @@
 
 ;; NOTE: Racket's `valid-version?` rejects a trailing ".0" component
 ;; ("0.8.0" is invalid; "0.8" is the same release).
-(define version "0.13")
-(define release-version "0.13.0")
+(define version "0.13.1")
+(define release-version "0.13.1")
 
 ;; `raco test --package` otherwise executes every backend implementation as a
 ;; standalone test module. The dispatcher and platform CI exercise these

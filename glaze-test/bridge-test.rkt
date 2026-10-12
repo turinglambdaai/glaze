@@ -67,14 +67,36 @@
                    [(GET "api/slow")
                     (slow)
                     ;; cooperative: finishes early when cancelled
+                    (set-box! slow-handler-thread (current-thread))
                     (let loop ([n 0])
                       (cond
                         [(bridge-cancelled?) "cancelled"]
                         [(>= n 50) "done"]
                         [else
-                         (sleep 0.1)
+                         (sleep 0.02)
                          (loop (add1 n))]))]
+                   [(GET "api/cancel-aware")
+                    (cancel-aware)
+                    (let loop ()
+                      (if (bridge-cancelled?)
+                          (raise-bridge-error 'cancelled "request cancelled")
+                          (begin
+                            (sleep 0.02)
+                            (loop))))]
                    [(GET "api/boom") (boom) (error 'internal "SECRET-DB-PATH")])
+
+(define slow-handler-thread (box #f))
+
+;; Keel command names must remain unique when Glaze overloads one generated
+;; client name with several HTTP methods.
+(define-api-routes overloaded-api
+                   [(GET "api/items") (items-get) 'get]
+                   [(POST "api/items") (items-post) 'post])
+(define overloaded-schema (hash-ref (build-hello overloaded-api) 'schema))
+(check-equal? (for/list ([command (in-list (hash-ref overloaded-schema 'commands))])
+                (hash-ref command 'name))
+              '("api-items-get" "api-items-post")
+              "overloaded routes receive stable unique keel command names")
 
 (define dir (make-temporary-file "glz1-t-~a" 'directory))
 (define bus (make-event-bus))
@@ -172,17 +194,20 @@
 ;; invoke: timeout abandons the waiter with a typed error
 (let-values ([(_st b) (call "POST"
                             "/glaze/invoke"
-                            "{\"glz\":1,\"id\":\"r9\",\"path\":\"api/slow\",\"timeout_ms\":300}")])
+                            "{\"glz\":1,\"id\":\"r9\",\"path\":\"api/slow\",\"timeout_ms\":100}")])
   (define timed-out (bytes->jsexpr b))
   (check-equal? (hash-ref (hash-ref timed-out 'error) 'code) "timed-out")
-  (check-equal? (hash-ref timed-out 'outcome) "timed-out" "outcome names the terminal"))
+  (check-equal? (hash-ref timed-out 'outcome) "timed-out" "outcome names the terminal")
+  (check-equal? (hash-ref (hash-ref timed-out 'error) 'data) 'null "missing error data is JSON null")
+  (check-not-false (sync/timeout 2 (thread-dead-evt (unbox slow-handler-thread)))
+                   "a timed-out handler can finish without leaking on result publication"))
 
 ;; invoke + cancel: the cooperative handler observes cancellation
 (let-values ([(_st b)
               (let ()
                 (define worker
                   (thread (lambda ()
-                            (sleep 0.3)
+                            (sleep 0.1)
                             (call "POST" "/glaze/cancel" "{\"glz\":1,\"id\":\"r10\"}"))))
                 (define-values (st b)
                   (call "POST" "/glaze/invoke" "{\"glz\":1,\"id\":\"r10\",\"path\":\"api/slow\"}"))
@@ -191,6 +216,24 @@
   (define out (bytes->jsexpr b))
   (check-true (hash-ref out 'ok))
   (check-equal? (hash-ref out 'value) "cancelled" "cooperative handler observed the cancel"))
+
+;; A handler that accepts cancellation raises the typed terminal; the invoke
+;; owns exactly one Keel outcome even though cancel is a separate request.
+(let-values ([(_st b) (let ()
+                        (define worker
+                          (thread (lambda ()
+                                    (sleep 0.1)
+                                    (call "POST" "/glaze/cancel" "{\"glz\":1,\"id\":\"r11\"}"))))
+                        (define-values (st b)
+                          (call "POST"
+                                "/glaze/invoke"
+                                "{\"glz\":1,\"id\":\"r11\",\"path\":\"api/cancel-aware\"}"))
+                        (thread-wait worker)
+                        (values st b))])
+  (define out (bytes->jsexpr b))
+  (check-false (hash-ref out 'ok))
+  (check-equal? (hash-ref out 'outcome) "cancelled")
+  (check-equal? (hash-ref (hash-ref out 'error) 'code) "cancelled"))
 
 ;; cancel of an unknown id is an idempotent success
 (let-values ([(_st b) (call "POST" "/glaze/cancel" "{\"glz\":1,\"id\":\"nope\"}")])

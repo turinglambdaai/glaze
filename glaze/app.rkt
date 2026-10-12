@@ -27,6 +27,7 @@
 ;; fallback.
 
 (require racket/random
+         (only-in keel lifecycle-transition?)
          "server.rkt"
          "capability.rkt"
          "events.rkt"
@@ -62,6 +63,7 @@
 (struct glaze-app
         (id ; string identity (#:app-id or generated)
          state-box ; box of symbol
+         state-sema ; serializes validated transitions + notifications
          custodian ; owns app-spawned resources; reaped at quit
          windows-box ; box of (listof webview?)
          windows-sema
@@ -74,11 +76,10 @@
 
 (define current-app (make-parameter #f))
 
-(define app-states '(starting ready running stopping stopped))
-
 (define (make-app #:app-id app-id #:event-bus event-bus #:quit-on-last-window? quit-on-last-window?)
   (glaze-app (or app-id (format "glaze-app-~a" (make-api-token)))
              (box 'starting)
+             (make-semaphore 1)
              (make-custodian)
              (box '())
              (make-semaphore 1)
@@ -100,18 +101,54 @@
     (raise-argument-error 'app-id "glaze-app?" app))
   (glaze-app-id app))
 
-(define (set-app-state! app state)
-  (unless (memq state app-states)
-    (raise-argument-error 'set-app-state! "known app state" state))
-  (set-box! (glaze-app-state-box app) state)
-  (when (glaze-app-event-bus app)
-    (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state state))))
+(define (try-app-state-transition! app expected next)
+  ;; The expected state is part of the operation: a close/quit callback may
+  ;; race run-app between ready and running. Losing that race is a harmless
+  ;; #f, never an overwrite of the newer state. Keep the mutation and event
+  ;; publication under one lock so observers see the same order as the state
+  ;; machine.
+  (unless (lifecycle-transition? expected next)
+    (raise-arguments-error 'try-app-state-transition!
+                           "transition is not allowed by keel"
+                           "from"
+                           expected
+                           "to"
+                           next))
+  (call-with-semaphore
+   (glaze-app-state-sema app)
+   (lambda ()
+     (cond
+       [(not (eq? (unbox (glaze-app-state-box app)) expected)) #f]
+       [else
+        (set-box! (glaze-app-state-box app) next)
+        (when (glaze-app-event-bus app)
+          (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state next)))
+        #t]))))
+
+(define (transition-app-to-stopping! app)
+  (call-with-semaphore
+   (glaze-app-state-sema app)
+   (lambda ()
+     (define current (unbox (glaze-app-state-box app)))
+     (cond
+       [(memq current '(stopping stopped)) #f]
+       [else
+        (unless (lifecycle-transition? current 'stopping)
+          (raise-arguments-error 'transition-app-to-stopping!
+                                 "transition is not allowed by keel"
+                                 "from"
+                                 current
+                                 "to"
+                                 'stopping))
+        (set-box! (glaze-app-state-box app) 'stopping)
+        (when (glaze-app-event-bus app)
+          (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state 'stopping)))
+        #t]))))
 
 (define (app-quit! [app (current-app)])
   (unless (glaze-app? app)
     (raise-argument-error 'app-quit! "glaze-app?" app))
-  (unless (memq (app-state app) '(stopping stopped))
-    (set-app-state! app 'stopping)
+  (when (transition-app-to-stopping! app)
     (semaphore-post (glaze-app-exit-sema app))))
 
 (define (register-window! app wv)
@@ -266,8 +303,7 @@
                              ;; keel's lifecycle: every exit goes through
                              ;; stopping — startup and on-ready failures
                              ;; included.
-                             (unless (eq? (app-state app) 'stopping)
-                               (set-app-state! app 'stopping))
+                             (transition-app-to-stopping! app)
                              ;; Leftover windows (quit via app-quit! or a raising path) close
                              ;; here, on the caller's thread — the thread run-app was called
                              ;; on, which owns the native window calls.
@@ -282,7 +318,9 @@
                                  (webview-close wv)))
                              (raw-shutdown)
                              (custodian-shutdown-all (glaze-app-custodian app))
-                             (set-app-state! app 'stopped)))))
+                             (unless (try-app-state-transition! app 'stopping 'stopped)
+                               (error 'run-app
+                                      "application did not reach stopping before teardown"))))))
   (parameterize ([current-api-token (or token "")]
                  [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))]
                  [current-app app])
@@ -325,16 +363,35 @@
                          #:height height
                          #:window-state state-path
                          #:on-close (make-on-close))))
-    (set-app-state! app 'ready)
-    ;; #:on-ready runs before the event loop owns the window: an exception
-    ;; here must tear the window AND the server down, or both outlive
-    ;; run-app. open-app-window is main-thread land; on-ready is called on
-    ;; run-app's caller thread, the same one.
-    (with-handlers ([exn:fail? (lambda (e)
-                                 (teardown)
-                                 (raise e))])
-      (on-ready wv url))
-    (set-app-state! app 'running)
+    ;; The first close callback can race startup. Only the thread that still
+    ;; owns starting may enter ready and call on-ready; a concurrent quit has
+    ;; already moved the app to stopping and posted exit-sema.
+    (when (try-app-state-transition! app 'starting 'ready)
+      ;; #:on-ready runs before the event loop owns the window: an exception
+      ;; here must tear the window AND the server down, or both outlive
+      ;; run-app. open-app-window is main-thread land; on-ready is called on
+      ;; run-app's caller thread, the same one.
+      (with-handlers ([exn:fail? (lambda (e)
+                                   (teardown)
+                                   (raise e))])
+        (on-ready wv url))
+      ;; app-quit! is valid inside on-ready. In that case ready -> stopping
+      ;; already won and this conditional transition intentionally loses.
+      (try-app-state-transition! app 'ready 'running))
     (sync (glaze-app-exit-sema app))
     (teardown)
     (values 'webview teardown)))
+
+(module+ test
+  (require rackunit)
+
+  ;; A quit racing the ready -> running handoff must win without letting the
+  ;; startup thread overwrite stopping. This is the small, headless test for
+  ;; the race that native-window CI cannot schedule deterministically.
+  (define test-app (make-app #:app-id "lifecycle-test" #:event-bus #f #:quit-on-last-window? #t))
+  (check-true (try-app-state-transition! test-app 'starting 'ready))
+  (check-true (transition-app-to-stopping! test-app))
+  (check-false (try-app-state-transition! test-app 'ready 'running))
+  (check-equal? (app-state test-app) 'stopping)
+  (check-true (try-app-state-transition! test-app 'stopping 'stopped))
+  (check-exn exn:fail? (lambda () (try-app-state-transition! test-app 'stopped 'running))))

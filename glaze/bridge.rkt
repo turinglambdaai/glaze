@@ -27,7 +27,7 @@
 (require json
          racket/list
          racket/string
-         (only-in keel app-error-code? app-null)
+         (only-in keel app-error-code app-error-data app-error-message app-null make-app-error)
          (only-in keel
                   schema-command
                   schema-parameter
@@ -89,7 +89,7 @@
 ;; Raise inside an invoke handler to answer a typed bridge error.
 (struct exn:fail:glaze:bridge exn:fail (code data) #:transparent)
 
-(define (raise-bridge-error code [message #f] [data #f])
+(define (raise-bridge-error code [message #f] [data app-null])
   (unless (bridge-error-code? code)
     (raise-argument-error 'bridge-error "bridge-error-code?" code))
   (raise (exn:fail:glaze:bridge (or message (string-titlecase (symbol->string code)))
@@ -148,14 +148,19 @@
 ;; jsexpr on the wire (glaze-side detail); keel's app-null stands in for "no
 ;; data".
 (define (bridge-error-object code message data)
-  (unless (app-error-code? (symbol->string code))
-    (raise-argument-error 'bridge-error-object "kebab-case error code" code))
+  ;; Construct the shared value rather than merely copying its JSON shape.
+  ;; This validates the code, message, and recursively converted data against
+  ;; Keel before the transport boundary serializes it.
+  (define error-value
+    (make-app-error (symbol->string code)
+                    (or message (string-titlecase (symbol->string code)))
+                    (jsexpr->app-value data)))
   (hasheq 'code
-          (symbol->string code)
+          (app-error-code error-value)
           'message
-          (or message (string-titlecase (symbol->string code)))
+          (app-error-message error-value)
           'data
-          data))
+          (app-value->jsexpr (app-error-data error-value))))
 
 ;; GET /glaze/hello — what a frontend checks before its first invoke.
 ;; `name-fn` derives each route's portable command name (server.rkt passes
@@ -166,24 +171,52 @@
   (list "invalid-args" "capability-denied" "token-required" "timed-out" "cancelled" "internal"))
 
 (define (build-hello routes [app-id #f] [name-fn #f])
+  (define route-name
+    (or name-fn
+        (lambda (segments)
+          (string-join (for/list ([seg (in-list segments)])
+                         (if (param? seg)
+                             (param-id seg)
+                             seg))
+                       "-"))))
+  (define base-names
+    (for/list ([r (in-list routes)])
+      (route-name (route-segments r))))
+  (define base-counts
+    (for/fold ([counts (hash)]) ([base (in-list base-names)])
+      (hash-update counts base add1 0)))
+  ;; Keel command names are unique. Glaze deliberately supports one generated
+  ;; JS function for GET/POST routes sharing a path, so qualify only overloaded
+  ;; names with the method. If duplicate registrations still collide, append a
+  ;; stable ordinal rather than making /glaze/hello fail at runtime.
+  (define qualified-names
+    (for/list ([r (in-list routes)]
+               [base (in-list base-names)])
+      (if (= (hash-ref base-counts base) 1)
+          base
+          (format "~a-~a" base (string-downcase (symbol->string (route-method r)))))))
+  (define qualified-counts
+    (for/fold ([counts (hash)]) ([name (in-list qualified-names)])
+      (hash-update counts name add1 0)))
+  (define seen (make-hash))
+  (define command-names
+    (for/list ([name (in-list qualified-names)])
+      (define ordinal (add1 (hash-ref seen name 0)))
+      (hash-set! seen name ordinal)
+      (if (= (hash-ref qualified-counts name) 1)
+          name
+          (format "~a-~a" name ordinal))))
   (define schema
     (make-app-schema "glaze-routes"
                      1
-                     #:commands
-                     (for/list ([r (in-list routes)])
-                       (schema-command ((or name-fn
-                                            (lambda (segments)
-                                              (string-join (for/list ([seg (in-list segments)])
-                                                             (if (param? seg)
-                                                                 (param-id seg)
-                                                                 seg))
-                                                           "-")))
-                                        (route-segments r))
-                                       (for/list ([seg (in-list (route-segments r))]
-                                                  #:when (param? seg))
-                                         (schema-parameter (param-id seg) String))
-                                       Value
-                                       invoke-error-codes))))
+                     #:commands (for/list ([r (in-list routes)]
+                                           [command-name (in-list command-names)])
+                                  (schema-command command-name
+                                                  (for/list ([seg (in-list (route-segments r))]
+                                                             #:when (param? seg))
+                                                    (schema-parameter (param-id seg) String))
+                                                  Value
+                                                  invoke-error-codes))))
   (hasheq 'glz
           glz1-version
           'name
@@ -216,6 +249,22 @@
     [(pair? v) (map app-value->jsexpr v)]
     [(null? v) v]
     [(eq? v app-null) 'null]
+    [else v]))
+
+(define (jsexpr->app-value v)
+  (cond
+    [(hash? v)
+     (for/hash ([(key value) (in-hash v)])
+       (values
+        (cond
+          [(symbol? key) (symbol->string key)]
+          [(string? key) key]
+          [else
+           (raise-argument-error 'bridge-error-object "jsexpr object with symbol or string keys" v)])
+        (jsexpr->app-value value)))]
+    [(pair? v) (map jsexpr->app-value v)]
+    [(null? v) v]
+    [(eq? v 'null) app-null]
     [else v]))
 
 ;; ---- request table (cancellation) ----

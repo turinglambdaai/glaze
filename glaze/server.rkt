@@ -18,7 +18,8 @@
 ;; DNS-rebinding hole where a malicious page resolves its own domain to the
 ;; loopback interface to reach the app's API from the browser.
 
-(require racket/list
+(require racket/async-channel
+         racket/list
          web-server/web-server
          web-server/http/request-structs
          (only-in web-server/http/request-structs make-request request-bindings/raw-promise)
@@ -389,7 +390,7 @@
      (json-bytes-response
       (hasheq 'glz glz1-version 'id (hash-ref body 'id) 'ok #t 'value "cancel-signalled"))]
     [else
-     (json-bytes-response (glz1-error-envelope #f 'bad-envelope "cancel needs {glz:1, id}" #f))]))
+     (json-bytes-response (glz1-error-envelope #f 'bad-envelope "cancel needs {glz:1, id}" 'null))]))
 
 (define (glz1-invoke-response req body api-routes authority)
   (define-values (parse-result parse-error)
@@ -429,12 +430,12 @@
          (glz1-error-envelope id
                               (if method-mismatch? 'method-not-allowed 'unknown-command)
                               (format "no route matches ~a ~a" (or method-sym 'GET) path)
-                              #f))]
+                              'null))]
        [(and authority
              (route-permission (first match))
              (not (capability-has-permission? authority (route-permission (first match)))))
         (json-bytes-response
-         (glz1-error-envelope id 'capability-denied "capability denied API route" #f))]
+         (glz1-error-envelope id 'capability-denied "capability denied API route" 'null))]
        [else
         (define route (first match))
         (define captured (second match))
@@ -448,10 +449,13 @@
          *bridge-requests*
          id
          (lambda ()
-           (define result-ch (make-channel))
+           ;; A timed-out caller stops receiving. A bounded async channel lets
+           ;; the handler publish its eventual result and terminate instead
+           ;; of leaking forever in a synchronous channel-put.
+           (define result-ch (make-async-channel 1))
            (thread
             (lambda ()
-              (channel-put
+              (async-channel-put
                result-ch
                (with-handlers
                    ([exn:fail:glaze:bridge? (lambda (e)
@@ -460,10 +464,10 @@
                                                                    (exn-message e)
                                                                    (exn:fail:glaze:bridge-data e)))]
                     [exn:fail:glaze:bad-param?
-                     (lambda (e) (glz1-error-envelope id 'invalid-args (exn-message e) #f))]
+                     (lambda (e) (glz1-error-envelope id 'invalid-args (exn-message e) 'null))]
                     [exn:fail? (lambda (e)
                                  ((current-glaze-error-reporter) e (string-append "glz1:" path))
-                                 (glz1-error-envelope id 'internal "internal error" #f))])
+                                 (glz1-error-envelope id 'internal "internal error" 'null))])
                  (define result
                    (parameterize ([current-capability-id (and authority (capability-id authority))]
                                   [current-capability-authorizer
@@ -486,7 +490,7 @@
                                                         'timed-out
                                                         (format "handler exceeded ~ams"
                                                                 (hash-ref body 'timeout_ms))
-                                                        #f))]
+                                                        'null))]
              [(response? maybe-result) maybe-result]
              [else (json-bytes-response maybe-result)])))])]))
 
@@ -524,7 +528,7 @@
                  '()
                  (list (string->bytes/utf-8 (jsexpr->string jsexpr)))))
 
-;; ---- generated JS client ----;; ---- generated JS client ----
+;; ---- generated JS client ----
 
 ;; Turns the registered routes into a small typed-by-construction client:
 ;;

@@ -4,7 +4,7 @@
 
 **Human-first. Agent-native. Local by design. —— 为人而生，为 Agent 原生设计，本地优先。**
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.13.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.13.1-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
 
@@ -47,7 +47,7 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | WebView 缺失时 | **明确失败 + 安装指引** | 前置依赖错误 | 不适用（自带） | 前置依赖错误 |
 | Agent 友好的 UI 验证（title/url/截图） | **内置** | 需 WebDriver | 需 CDP | 有限 |
 
-三个平台的 WebView 后端均通过真窗口 CI e2e（open、加载、截图、导航、关闭、on-close）。剩余诚实差距：IPC 仍是纯 JSON、没有类型层；Linux 需要桌面会话或 Xvfb。
+三个平台的 WebView 后端均通过真窗口 CI e2e（open、加载、截图、导航、关闭、on-close）。剩余诚实差距：GLZ1 仍运行在本机 HTTP/SSE 上，还不是原生 WebView 消息通道；Linux 需要桌面会话或 Xvfb。
 
 ## 平台支持状态
 
