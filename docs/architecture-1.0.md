@@ -1,6 +1,6 @@
 # Glaze 1.0 Runtime Architecture (RFC)
 
-**Status:** draft, pre-1.0 direction
+**Status:** draft, pre-1.0 direction; implementation progress through 0.13.1
 **Scope:** runtime kernel, bridge protocol, security model, module layout,
 and the relationship with Rivet.
 
@@ -25,8 +25,12 @@ exception-safe `run-app` lifecycle, observable event-bus overflow
 instead of PATH accident, and startup-time validation of generated JS
 client names.
 
-Those are fixes. They harden the current model; they do not change it. The
-model itself still has three structural limits:
+The 0.12.0 through 0.13.1 releases then landed the first kernel slices:
+GLZ1 hello/invoke/cancel envelopes, typed errors, request cancellation and
+timeouts, a custodian-owned application lifecycle, multi-window support,
+observable event sequence gaps, and Keel-backed lifecycle, outcome, error,
+and route-schema vocabulary. Those are real runtime changes, but the
+production host boundary is not finished. Three structural limits remain:
 
 1. **The loopback HTTP server is the security boundary.** Host checks,
    tokens, and Origin guards shrink the attack surface, but a TCP port that
@@ -34,13 +38,15 @@ model itself still has three structural limits:
    base for production IPC. Tauri puts the boundary in a versioned async
    message protocol with window-scoped capabilities and a runtime
    authority; the web content never talks to a port.
-2. **Lifecycle is implicit.** `run-app` blocks on one window's close; there
-   is no app state machine, no custodian-owned resource tree for plugin
-   resources, and no story for multi-window, tray-resident, or explicit-quit
-   lifecycles.
-3. **The bridge is unversioned.** JSON routes + SSE with no wire-protocol
-   version, no schema compatibility check, no request cancellation, no
-   structured errors, no binary channel, no per-window identity.
+2. **The native host has no window-scoped authority.** The current pure-Racket
+   WebView hosts navigate to the loopback server and do not yet expose a
+   message handler or controlled application-resource scheme. Capabilities
+   therefore attach to the shared HTTP origin, not an individual window.
+3. **The schema is descriptive rather than authoritative.** `/glaze/hello`
+   exposes a validated Keel projection of routes, but route declarations do
+   not yet drive wire validation, TypeScript declarations, compatibility
+   checks, streams, or a binary channel. The public facade also remains much
+   larger than the intended 1.0 surface.
 
 ## Target architecture
 
@@ -140,11 +146,13 @@ Glaze and Rivet are two renderers over one application model:
 
 Neither should depend on the other. The shared part — app identity and
 manifest, typed schema, wire encoding, lifecycle semantics, capability
-authority, distribution/update/signing, diagnostics — is a neutral third
-layer (`keel` — <https://github.com/turinglambdaai/keel> — first slice released 2026-10-11). Extracting it means one golden-vector
-test suite and one compatibility baseline serve both projects, instead of
-two teams separately rewriting packaging, update, signing, permissions,
-and lifecycle.
+authority, distribution/update/signing, and diagnostics — is a neutral third
+layer (`keel` — <https://github.com/turinglambdaai/keel>). Keel's codec,
+golden corpus, schema, and lifecycle vocabulary are released and
+catalog-published, and Glaze is a consumer as of 0.13.0. Extracting these
+contracts means one golden-vector suite and one compatibility baseline serve
+both projects, instead of two teams separately rewriting packaging, update,
+signing, permissions, and lifecycle.
 
 Near-term coordination (no big-bang extraction): Glaze's GLZ1 design
 absorbs the parts Rivet already proved — schema, typed RPC, event/state,
@@ -176,8 +184,11 @@ A 1.0 freeze requires, in order:
    manifest, SSE sequence numbers — over the HTTP/SSE transport; the
    envelope layer is transport-agnostic so the native message-handler
    transport can adopt it unchanged.~~
-4. macOS vertical slice of the app state machine + host scheme.
-5. Windows/Linux ports; HTTP dev adapter kept for the dev loop.
-6. Facade curation (`core/bridge/window/services/distribution/devtools`,
-   `experimental/`).
+4. macOS vertical slice of the controlled resource scheme + native message
+   handler, reusing the landed GLZ1 envelopes.
+5. Windows/Linux native-transport ports and per-window capability authority;
+   HTTP/SSE kept for the development loop.
+6. Typed command declarations, compatibility checks, JS/TypeScript client
+   generation, and facade curation
+   (`core/bridge/window/services/distribution/devtools`, `experimental/`).
 7. The 1.0 gate above.
