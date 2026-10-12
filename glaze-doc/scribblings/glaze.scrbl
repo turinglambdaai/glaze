@@ -817,7 +817,13 @@ carries structured, non-sensitive detail — never exception text.
 The cancel event of the in-flight request, or @racket[#f] outside an invoke.
 Syncing on it blocks until @tt{POST /glaze/cancel} fires for this request.
 }
-@defproc[(bridge-cancelled?) boolean?]{Non-blocking cancellation poll.}
+@defproc[(bridge-cancelled?) boolean?]{
+Non-blocking cancellation poll. A handler that accepts the request should
+raise @racket[(raise-bridge-error 'cancelled "request cancelled")] so its
+invoke response owns the @racket["cancelled"] terminal outcome. Returning a
+normal value remains a successful completion even if cancellation was
+observed.
+}
 
 @section{Native WebView}
 

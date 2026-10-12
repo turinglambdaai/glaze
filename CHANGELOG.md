@@ -5,6 +5,27 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.1] - 2026-10-12
+
+### Fixed
+
+- Enforce every application state change through Keel's lifecycle transition
+  table. State changes and notifications are serialized, and a quit racing the
+  `ready` to `running` handoff can no longer be overwritten by startup.
+- Let handlers finish after an invoke timeout without blocking forever while
+  publishing an abandoned result.
+- Give overloaded routes stable, unique Keel command names in
+  `/glaze/hello`; GET and POST routes sharing a generated client name no
+  longer make schema construction fail.
+- Build GLZ1 errors through Keel's checked structured-error constructor and
+  emit JSON `null`, rather than `false`, when error data is absent.
+- Cover accepted cancellation with the `cancelled` terminal outcome and add a
+  headless regression test for lifecycle quit/startup races.
+
+### Changed
+
+- Resolve the declared `keel` dependency from the Racket package catalog.
+
 ## [0.13.0] - 2026-10-11
 
 ### Added
@@ -29,9 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The GLZ1 error code `timeout` is renamed to `timed-out` to match keel's
   request-outcome vocabulary (0.x window; the `timeout_ms` envelope field
   is unchanged).
-- `keel` is a declared dependency (installed from GitHub; not yet on the
-  catalog). CI and release pipelines install it before glaze; downstream
-  packagers must do the same until catalog submission is approved.
+- `keel` is a declared dependency, resolved from the Racket package catalog.
 
 ## [0.12.0] - 2026-10-10
 
