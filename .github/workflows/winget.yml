@@ -17,12 +17,12 @@ jobs:
   publish:
     name: Update manifest on winget-pkgs
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check for WINGET_TOKEN
         id: token
         run: echo "ok=${{ secrets.WINGET_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
-      - uses: vedantmgoyal9/winget-releaser@main
+      - uses: vedantmgoyal9/winget-releaser@f29ed1ffd34f91223a2aebaa71beaab0901ff9fd # v2
         if: steps.token.outputs.ok == 'true'
         with:
           identifier: TuringLambda.Glaze
@@ -33,12 +33,12 @@ jobs:
   bootstrap:
     name: First-time package submission (run once)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
       GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Require submission token and seed manifests
         run: |
           set -euo pipefail
