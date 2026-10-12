@@ -15,7 +15,7 @@ concurrency:
 jobs:
   source:
     name: Validate and build source release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
       version: ${{ steps.metadata.outputs.version }}
@@ -203,7 +203,7 @@ jobs:
   linux-packages:
     name: Build Linux packages
     needs: source
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     steps:
@@ -309,7 +309,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: [source, windows-installer, linux-packages, macos-dmg]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:

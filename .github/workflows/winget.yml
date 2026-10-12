@@ -17,7 +17,7 @@ jobs:
   publish:
     name: Update manifest on winget-pkgs
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check for WINGET_TOKEN
         id: token
@@ -33,7 +33,7 @@ jobs:
   bootstrap:
     name: First-time package submission (run once)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
       GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
