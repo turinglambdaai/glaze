@@ -62,6 +62,7 @@
          native-transport-count-resource!
          native-transport-shutdown!
          native-scheme-segments
+         native-app-origin
          native-api-client-js
          native-bootstrap-js)
 
@@ -463,12 +464,22 @@
 ;; The host scheme handlers route on this, so a hostile or malformed URL
 ;; simply produces #f / non-"glaze" segments and falls to the 404 path.
 (require (only-in net/uri-codec uri-decode))
+;; WKWebView/WebKitGTK load the controlled scheme directly
+;; (glaze://app/...). WebView2 refuses top-level navigation to custom
+;; schemes — the exact reason Tauri uses http://tauri.localhost on
+;; Windows — so the Windows host serves http://glaze.localhost/... and the
+;; parser accepts both shapes.
 (define (native-scheme-segments url-str)
-  (define m (regexp-match #rx"^glaze://app/(.*)$" (or url-str "")))
+  (define m
+    (or (regexp-match #rx"^glaze://app/(.*)$" (or url-str ""))
+        (regexp-match #rx"^https?://glaze[.]localhost/(.*)$" (or url-str ""))))
   (and m
        (let* ([rest (second m)]
               [path (car (regexp-split #rx"[?#]" rest))])
          (filter non-empty-string? (map uri-decode (string-split path "/"))))))
+;; The origin the page runs on, per platform (for e2e assertions).
+(define (native-app-origin)
+  (if (eq? (system-type 'os) 'windows) "http://glaze.localhost/" "glaze://app/"))
 
 ;; ---- page-side bindings ----
 

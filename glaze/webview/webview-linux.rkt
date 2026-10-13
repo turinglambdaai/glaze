@@ -121,6 +121,14 @@
   (maybe-bind webkit-lib
               "webkit_user_content_manager_register_script_message_handler"
               (_fun _pointer _string -> _void)))
+(define webkit_user_script_new
+  (maybe-bind webkit-lib
+              "webkit_user_script_new"
+              (_fun _string _int _int _pointer _pointer -> _pointer)))
+(define webkit_user_content_manager_add_script
+  (maybe-bind webkit-lib "webkit_user_content_manager_add_script" (_fun _pointer _pointer -> _void)))
+(define webkit_user_script_unref
+  (maybe-bind webkit-lib "webkit_user_script_unref" (_fun _pointer -> _void)))
 (define webkit_web_context_get_default
   (maybe-bind webkit-lib "webkit_web_context_get_default" (_fun -> _pointer)))
 (define webkit_web_context_register_uri_scheme
@@ -334,6 +342,8 @@
     (unless (and webkit_web_view_new_with_user_content_manager
                  webkit_user_content_manager_new
                  webkit_user_content_manager_register_script_message_handler
+                 webkit_user_script_new
+                 webkit_user_content_manager_add_script
                  webkit_web_context_get_default
                  webkit_web_context_register_uri_scheme
                  webkit_uri_scheme_request_get_uri
@@ -383,6 +393,19 @@
         (let ()
           (set! ucm (webkit_user_content_manager_new))
           (webkit_user_content_manager_register_script_message_handler ucm "glz1")
+          ;; The bootstrap must be injected at document start (WKUserScript /
+          ;; AddScriptToExecuteOnDocumentCreated equivalents live here on
+          ;; this platform; without it __glz1 is missing and the page never
+          ;; posts a single message).
+          (define user-script
+            (webkit_user_script_new native-bootstrap-js
+                                    0 ; WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START
+                                    2 ; WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES
+                                    #f
+                                    #f))
+          (webkit_user_content_manager_add_script ucm user-script)
+          (when webkit_user_script_unref
+            (webkit_user_script_unref user-script))
           (webkit_web_view_new_with_user_content_manager ucm))
         (webkit_web_view_new)))
   (gtk_container_add window webview)

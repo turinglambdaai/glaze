@@ -545,8 +545,11 @@
   (define instance (GetModuleHandleW #f))
 
   ;; controller callback: AddRef both interfaces into the handle, Navigate,
-  ;; signal ready.
-  (define url-ptr (wstr (if native-transport "glaze://app/" url)))
+  ;; signal ready. WebView2 refuses top-level navigation to custom schemes
+  ;; (the reason Tauri uses http://tauri.localhost on Windows), so the page
+  ;; loads from http://glaze.localhost/ and the resource filter intercepts
+  ;; it before any network access.
+  (define url-ptr (wstr (if native-transport "http://glaze.localhost/" url)))
   (define ctrl-handler
     (make-com-handler
      IID-CtrlHandler
@@ -595,7 +598,7 @@
                      (add-script cwv (wstr native-bootstrap-js) #f)
                      (define add-filter
                        (cast (vtfn cwv 57) _fpointer (_fun _pointer _pointer _int -> _int32)))
-                     (add-filter cwv (wstr "glaze://app/*") 0) ; WEB_RESOURCE_CONTEXT_ALL
+                     (add-filter cwv (wstr "http://glaze.localhost/*") 0) ; WEB_RESOURCE_CONTEXT_ALL
                      (define wrr-handler
                        (make-com-event-handler IID-WebResourceHandler
                                                (lambda (_sender args)

@@ -181,10 +181,10 @@
 (check! "native invoke round trip reached the backend" (and nt-roundtrip-ok? #t))
 (check! "native result carries the invoke value"
         (equal? (and (hash? (unbox nt-recorded)) (hash-ref (unbox nt-recorded) 'pong)) #t))
-(check! "native page really runs on the glaze scheme"
+(check! "native page really runs on the controlled origin"
         (string-prefix? (or (and (hash? (unbox nt-recorded)) (hash-ref (unbox nt-recorded) 'href #f))
                             "")
-                        "glaze://app/"))
+                        (native-app-origin)))
 (define nt-stats (native-transport-stats nt))
 (check! "scheme served the page resources" (>= (hash-ref nt-stats 'resources-served 0) 1))
 (check! "message handler carried both invokes" (>= (hash-ref nt-stats 'messages-received 0) 2))
