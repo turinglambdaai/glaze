@@ -45,6 +45,7 @@
 (require racket/match
          "../window-state.rkt"
          "startup-feedback.rkt"
+         (only-in "../native-transport.rkt" native-transport?)
          (only-in "../tray/tray-protocol.rkt" menu?))
 
 ;; A webview handle wraps the backend-specific handle + the backend tag.
@@ -160,6 +161,7 @@
                      #:height [height 768]
                      #:devtools? [devtools? #f]
                      #:window-state [state-path #f]
+                     #:native-transport [native-transport #f]
                      #:on-close [on-close (lambda () (void))])
   (open-webview url
                 #:title title
@@ -167,6 +169,7 @@
                 #:height height
                 #:devtools? devtools?
                 #:window-state state-path
+                #:native-transport native-transport
                 #:on-close on-close))
 
 (define (open-webview url
@@ -175,7 +178,11 @@
                       #:height [height 768]
                       #:devtools? [devtools? #f]
                       #:window-state [state-path #f]
+                      #:native-transport [native-transport #f]
                       #:on-close [on-close (lambda () (void))])
+  (when native-transport
+    (unless (native-transport? native-transport)
+      (raise-argument-error 'open-webview "native-transport?" native-transport)))
   (clear-webview-error!)
   (define saved-state (and state-path (read-window-state state-path)))
   (define normalized-state
@@ -209,6 +216,7 @@
                                         (window-state-height normalized-state)
                                         height)
                            #:devtools? devtools?
+                           #:native-transport native-transport
                            #:on-close save-before-close)))
   (cond
     [h

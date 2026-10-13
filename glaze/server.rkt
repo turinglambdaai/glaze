@@ -35,7 +35,8 @@
          "api.rkt"
          "bridge.rkt"
          "capability.rkt"
-         "events.rkt")
+         "events.rkt"
+         "native-transport.rkt")
 
 (provide start-dev-server
          start-server
@@ -43,12 +44,9 @@
          path->mime-type
          current-glaze-error-reporter)
 
-;; Exception reporter for API-handler failures (the 500 path). Default logs
-;; to stderr; run-app parameterizes this to its #:on-error callback.
-(define current-glaze-error-reporter
-  (make-parameter
-   (lambda (exn uri)
-     (fprintf (current-error-port) "[glaze] handler error on ~a: ~a\n" uri (exn-message exn)))))
+;; Exception reporter for API-handler failures (the 500 path): the parameter
+;; lives in native-transport.rkt so both transports report through it. Default
+;; logs to stderr; run-app parameterizes this to its #:on-error callback.
 
 (define sse-path "glaze/events")
 (define api-client-path "glaze/api.js")
@@ -368,6 +366,11 @@
 ;; interrupted; cooperative handlers observe cancellation through
 ;; bridge-cancel-event / bridge-cancelled?. Streaming responses bypass the
 ;; envelope — once bytes are on the wire there is no typed error left.
+;;
+;; The envelope pipeline itself (parse, match, capability, handler dispatch,
+;; timeouts) lives in native-transport.rkt and is shared verbatim with the
+;; native message-handler transport; this binding only rewrites the original
+;; request so handlers see their args as the JSON body.
 (define *bridge-requests* (make-request-table))
 
 (define (glz1-post-response req api-routes authority)
@@ -393,120 +396,16 @@
      (json-bytes-response (glz1-error-envelope #f 'bad-envelope "cancel needs {glz:1, id}" 'null))]))
 
 (define (glz1-invoke-response req body api-routes authority)
-  (define-values (parse-result parse-error)
-    (with-handlers ([exn:fail:glaze:bridge?
-                     (lambda (e)
-                       (values #f
-                               (glz1-error-envelope #f
-                                                    (exn:fail:glaze:bridge-code e)
-                                                    (exn-message e)
-                                                    (exn:fail:glaze:bridge-data e))))])
-      (values (call-with-values (lambda () (parse-invoke-envelope body)) list) #f)))
-  (cond
-    [parse-error (json-bytes-response parse-error)]
-    [else
-     (define id (list-ref parse-result 0))
-     (define path (list-ref parse-result 1))
-     (define method-sym (list-ref parse-result 2))
-     (define args (list-ref parse-result 3))
-     (define segments (filter (lambda (sg) (not (equal? sg ""))) (string-split path "/")))
-     ;; An explicit envelope method must match exactly; without one, GET
-     ;; wins, then the mutating methods in registration order.
-     (define match
-       (cond
-         [method-sym (find-api-match-by-parts api-routes method-sym segments)]
-         [else
-          (or (find-api-match-by-parts api-routes 'GET segments)
-              (for/or ([mth (in-list '(POST PUT DELETE))])
-                (find-api-match-by-parts api-routes mth segments)))]))
-     (define method-mismatch?
-       (and method-sym
-            (not match)
-            (for/or ([mth (in-list '(GET POST PUT DELETE))])
-              (find-api-match-by-parts api-routes mth segments))))
-     (cond
-       [(not match)
-        (json-bytes-response
-         (glz1-error-envelope id
-                              (if method-mismatch? 'method-not-allowed 'unknown-command)
-                              (format "no route matches ~a ~a" (or method-sym 'GET) path)
-                              'null))]
-       [(and authority
-             (route-permission (first match))
-             (not (capability-has-permission? authority (route-permission (first match)))))
-        (json-bytes-response
-         (glz1-error-envelope id 'capability-denied "capability denied API route" 'null))]
-       [else
-        (define route (first match))
-        (define captured (second match))
-        ;; Handlers read the JSON body — re-serve the request with the
-        ;; envelope's args as its post data.
-        (define invoke-req (rewrite-request-body req (string->bytes/utf-8 (jsexpr->string args))))
-        (define timeout-secs
-          (let ([ms (and (hash? body) (hash-ref body 'timeout_ms #f))])
-            (and (exact-positive-integer? ms) (/ ms 1000.0))))
-        (call-with-bridge-request
-         *bridge-requests*
-         id
-         (lambda ()
-           ;; A timed-out caller stops receiving. A bounded async channel lets
-           ;; the handler publish its eventual result and terminate instead
-           ;; of leaking forever in a synchronous channel-put.
-           (define result-ch (make-async-channel 1))
-           (thread
-            (lambda ()
-              (async-channel-put
-               result-ch
-               (with-handlers
-                   ([exn:fail:glaze:bridge? (lambda (e)
-                                              (glz1-error-envelope id
-                                                                   (exn:fail:glaze:bridge-code e)
-                                                                   (exn-message e)
-                                                                   (exn:fail:glaze:bridge-data e)))]
-                    [exn:fail:glaze:bad-param?
-                     (lambda (e) (glz1-error-envelope id 'invalid-args (exn-message e) 'null))]
-                    [exn:fail? (lambda (e)
-                                 ((current-glaze-error-reporter) e (string-append "glz1:" path))
-                                 (glz1-error-envelope id 'internal "internal error" 'null))])
-                 (define result
-                   (parameterize ([current-capability-id (and authority (capability-id authority))]
-                                  [current-capability-authorizer
-                                   (and authority
-                                        (lambda (permission resource)
-                                          (capability-authorized? authority permission resource)))])
-                     (apply (route-handler route) invoke-req captured)))
-                 ;; Streaming and full-response handlers bypass
-                 ;; the envelope: the wire is already committed.
-                 (if (response? result)
-                     result
-                     (build-invoke-response id result))))))
-           (define maybe-result
-             (if timeout-secs
-                 (sync/timeout timeout-secs result-ch)
-                 (sync result-ch)))
-           (cond
-             [(not maybe-result)
-              (json-bytes-response (glz1-error-envelope id
-                                                        'timed-out
-                                                        (format "handler exceeded ~ams"
-                                                                (hash-ref body 'timeout_ms))
-                                                        'null))]
-             [(response? maybe-result) maybe-result]
-             [else (json-bytes-response maybe-result)])))])]))
-
-;; The outcome field uses keel's request vocabulary; ok #f always names a
-;; failed/cancelled/timed-out terminal, and the error object is keel-shaped.
-(define (glz1-error-envelope id code message data)
-  (hasheq 'glz
-          glz1-version
-          'id
-          id
-          'ok
-          #f
-          'outcome
-          (outcome-for-code code)
-          'error
-          (bridge-error-object code message data)))
+  (define result
+    (dispatch-invoke body
+                     api-routes
+                     authority
+                     *bridge-requests*
+                     #:make-handler-request (lambda (_method _path body-bytes)
+                                              (rewrite-request-body req body-bytes))))
+  (if (response? result)
+      result
+      (json-bytes-response result)))
 
 ;; A shallow copy of the request whose post data is the given bytes — invoke
 ;; handlers read the envelope's args as their JSON body.
@@ -559,24 +458,8 @@
                  (list (string->bytes/utf-8 js))))
 
 (define (generate-api-client api-routes)
-  ;; Group routes by their generated JS name. One name + one method is the
-  ;; plain single entry; one name + several methods (GET/POST on the same
-  ;; path) becomes a single dispatching function that sends the GET when
-  ;; called without a body and the first non-GET route otherwise. Groups are
-  ;; kept in first-seen order so the generated file is deterministic.
-  (define names '())
-  (define groups (make-hash))
-  (for ([r (in-list api-routes)])
-    (define name (route->js-name (route-segments r)))
-    (unless (member name names)
-      (set! names (append names (list name))))
-    (hash-update! groups name (lambda (old) (append old (list r))) '()))
-  (define entries
-    (for/list ([name (in-list names)])
-      (define group (hash-ref groups name))
-      (if (= (length group) 1)
-          (route-js-entry name (first group))
-          (merged-route-js-entry name group))))
+  ;; Transport bindings for the HTTP adapter: fetch + EventSource. The route
+  ;; entries come from glaze/bridge and are identical to the native client's.
   (string-append "/* Generated by glaze — do not edit. */\n"
                  "window.glaze = window.glaze || {};\n"
                  "glaze.call = async function(method, path, body) {\n"
@@ -598,7 +481,7 @@
                  "  return glaze._es;\n"
                  "};\n"
                  "glaze.api = {\n"
-                 (string-join entries "\n")
+                 (api-client-entries api-routes)
                  "\n};\n"
                  "glaze.hello = async function() {\n"
                  "  const r = await fetch('/glaze/hello');\n"
@@ -628,91 +511,8 @@
                  "    body: JSON.stringify({glz: 1, id: id})});\n"
                  "};\n"))
 
-;; The path arguments a route's JS entry takes (the captured :params), and
-;; the URL expression that interpolates them.
-(define (route-js-args segments)
-  (for/list ([seg (in-list segments)]
-             #:when (param? seg))
-    (param-id seg)))
-
-(define (route-js-url segments)
-  (string-join (for/list ([seg (in-list segments)])
-                 (if (param? seg)
-                     (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
-                     seg))
-               "/"))
-
-(define (route-js-call route)
-  (define method-str (symbol->string (route-method route)))
-  (format "glaze.call('~a', '~a', ~a)"
-          method-str
-          (route-js-url (route-segments route))
-          (if (string=? method-str "GET") "null" "body")))
-
-(define (route-js-entry name route)
-  (define args (append (route-js-args (route-segments route)) '("body")))
-  (format "  ~a: function(~a) { return ~a; }," name (string-join args ", ") (route-js-call route)))
-
-;; GET /api/items + POST /api/items -> items(id, body): a missing body means
-;; the GET; anything else goes to the first non-GET route (validated at
-;; startup to exist and to be unique).
-(define (merged-route-js-entry name group)
-  (define get-route (findf (lambda (r) (eq? (route-method r) 'GET)) group))
-  (define mutating (findf (lambda (r) (not (eq? (route-method r) 'GET))) group))
-  (define segments (route-segments (or get-route mutating)))
-  (define args (append (route-js-args segments) '("body")))
-  (string-append "  "
-                 name
-                 ": function("
-                 (string-join args ", ")
-                 ") {\n"
-                 (if get-route
-                     (format "    if (body === undefined || body === null) { return ~a; }\n"
-                             (route-js-call get-route))
-                     "")
-                 (if mutating
-                     (format "    return ~a;\n" (route-js-call mutating))
-                     "")
-                 "  },"))
-
-;; "api/counter/bump" -> counterBump ; "api/items/:id/bump" -> itemsIdBump
-;; "api/clip-copy" -> clipCopy. Hyphenated segments camel-case (a bare
-;; hyphen key like `clip-copy:` would be ILLEGAL JavaScript and break the
-;; whole generated file); the first segment keeps a lowercase head. Every
-;; part is stripped to identifier characters, and a name that would start
-;; with a digit is prefixed with "_" — both keep the generated file parseable
-;; for any route shape; validate-js-client-names rejects what still cannot
-;; work (empty names, collisions).
-(define (js-camel seg first-lower?)
-  (define parts
-    (for/list ([p (in-list (filter non-empty-string? (string-split seg "-")))])
-      (regexp-replace* #rx"[^A-Za-z0-9_]" p "")))
-  (define kept (filter non-empty-string? parts))
-  (if (null? kept)
-      ""
-      (apply string-append
-             (for/list ([p (in-list kept)]
-                        [i (in-naturals)])
-               (cond
-                 [(and (zero? i) first-lower? (regexp-match? #rx"^[a-z]" p)) p]
-                 [else (string-append (string-upcase (substring p 0 1)) (substring p 1))])))))
-
-(define (route->js-name segments)
-  (define drop-api
-    (if (and (pair? segments) (string=? (first segments) "api"))
-        (rest segments)
-        segments))
-  (define raw
-    (apply string-append
-           (for/list ([seg (in-list drop-api)]
-                      [i (in-naturals)])
-             (cond
-               [(param? seg) (string-titlecase (param-id seg))]
-               [(zero? i) (js-camel seg #t)]
-               [else (js-camel seg #f)]))))
-  (if (regexp-match? #rx"^[0-9]" raw)
-      (string-append "_" raw)
-      raw))
+;; The route -> JS-name rules and the per-route client entries live in
+;; glaze/bridge (shared with the native transport client).
 
 (define (route-descriptor r)
   (format "~a /~a"
@@ -776,12 +576,8 @@
     (define captured (route-match r method segments))
     (and captured (list r captured))))
 
-;; Route lookup from envelope parts — the GLZ1 invoke names its target in
-;; the envelope, not the request URI.
-(define (find-api-match-by-parts api-routes method segments)
-  (for/or ([r (in-list api-routes)])
-    (define captured (route-match r method segments))
-    (and captured (list r captured))))
+;; Route lookup from envelope parts lives in native-transport.rkt
+;; (find-api-match-by-parts) and is shared with the native transport.
 
 (define (api-match-authorized? authority matched req)
   (define route (first matched))
@@ -825,46 +621,22 @@
 (define (serve-static-file dir req)
   (define uri-path (url-path (request-uri req)))
   (define segments (filter (lambda (s) (not (equal? s ""))) (map path/param-path uri-path)))
-  (define rel
-    (if (null? segments)
-        '("index.html")
-        segments))
-  (cond
-    ;; ".." and "." arrive as path/param 'up / 'same symbols. Feeding them to
-    ;; build-path walks outside public-dir (an arbitrary file read via
-    ;; %2e%2e) or crashes the connection thread on the raw 'up contract — so
-    ;; anything that is not a plain string never touches the filesystem.
-    [(not (andmap string? rel)) (make-404-response)]
-    [else
-     (define candidate (apply build-path dir rel))
-     (cond
-       [(and (file-exists? candidate)
-             (not (directory-exists? candidate))
-             (static-file-contained? dir candidate))
-        (make-file-response candidate)]
-       [else
-        (define fallback (build-path dir "index.html"))
-        (if (and (file-exists? fallback) (static-file-contained? dir fallback))
-            (make-file-response fallback)
-            (make-404-response))])]))
-
-;; Filesystem-level containment behind the lexical guard above: a symlink
-;; inside public-dir must not smuggle a path outside it. Both sides resolve
-;; every symlink component first (e.g. /tmp -> /private/tmp on macOS), so the
-;; prefix check compares real locations, not spellings.
-(define (static-file-contained? root candidate)
-  (with-handlers ([exn:fail? (lambda (_) #f)])
-    (path-inside? (canonical-path root) (canonical-path candidate))))
-
-(define (make-file-response path)
-  (define data (file->bytes path))
-  (define mime (path->mime-type path))
-  (response/full 200
-                 #"OK"
-                 (current-seconds)
-                 mime
-                 (list (header #"X-Content-Type-Options" #"nosniff"))
-                 (list data)))
+  ;; The serving rules (lexical guard, symlink containment, SPA fallback,
+  ;; MIME table) are shared with the native scheme handler; this binding
+  ;; wraps the bytes in an HTTP response.
+  (define-values (mime data)
+    (static-resource dir
+                     (if (null? segments)
+                         '("index.html")
+                         segments)))
+  (if mime
+      (response/full 200
+                     #"OK"
+                     (current-seconds)
+                     mime
+                     (list (header #"X-Content-Type-Options" #"nosniff"))
+                     (list data))
+      (make-404-response)))
 
 (define (make-404-response)
   (response/full 404
@@ -873,32 +645,3 @@
                  #"text/plain; charset=utf-8"
                  '()
                  (list #"Not found")))
-
-(define (path->mime-type p)
-  (define ext (path-get-extension p))
-  (cond
-    [(not ext) #"application/octet-stream"]
-    [(member ext '(#".html" #".htm")) #"text/html; charset=utf-8"]
-    [(member ext '(#".css")) #"text/css; charset=utf-8"]
-    [(member ext '(#".js" #".mjs")) #"application/javascript; charset=utf-8"]
-    [(member ext '(#".json")) #"application/json; charset=utf-8"]
-    [(member ext '(#".xml")) #"application/xml; charset=utf-8"]
-    [(member ext '(#".txt")) #"text/plain; charset=utf-8"]
-    [(member ext '(#".svg")) #"image/svg+xml"]
-    [(member ext '(#".png")) #"image/png"]
-    [(member ext '(#".jpg" #".jpeg")) #"image/jpeg"]
-    [(member ext '(#".gif")) #"image/gif"]
-    [(member ext '(#".webp")) #"image/webp"]
-    [(member ext '(#".avif")) #"image/avif"]
-    [(member ext '(#".ico")) #"image/x-icon"]
-    [(member ext '(#".woff2")) #"font/woff2"]
-    [(member ext '(#".woff")) #"font/woff"]
-    [(member ext '(#".ttf")) #"font/ttf"]
-    [(member ext '(#".otf")) #"font/otf"]
-    [(member ext '(#".wasm")) #"application/wasm"]
-    [(member ext '(#".mp4")) #"video/mp4"]
-    [(member ext '(#".webm")) #"video/webm"]
-    [(member ext '(#".ogg" #".ogv")) #"video/ogg"]
-    [(member ext '(#".mp3")) #"audio/mpeg"]
-    [(member ext '(#".map")) #"application/json; charset=utf-8"]
-    [else #"application/octet-stream"]))

@@ -31,6 +31,7 @@
          "server.rkt"
          "capability.rkt"
          "events.rkt"
+         "native-transport.rkt"
          (rename-in "update.rkt" [check-update do-check-update])
          "webview/main.rkt")
 
@@ -171,6 +172,7 @@
                          #:width [width 1024]
                          #:height [height 768]
                          #:window-state [state-path #f]
+                         #:native-transport [native-transport #f]
                          #:on-close [user-on-close (lambda () (void))])
   (define app (current-app))
   (unless (glaze-app? app)
@@ -190,6 +192,7 @@
                  #:width width
                  #:height height
                  #:window-state state-path
+                 #:native-transport native-transport
                  #:on-close (lambda ()
                               (with-handlers ([exn:fail? (lambda (e) (reporter e "app:on-close"))])
                                 (user-on-close))
@@ -244,9 +247,24 @@
                  #:current-version [current-version "0.0.0"]
                  #:app-id [app-id #f]
                  #:window-state [window-state-option #f]
+                 #:transport [transport 'http]
                  #:on-ready [on-ready (lambda (wv url) (void))])
   (when (and authority (not (capability? authority)))
     (raise-argument-error 'run-app "(or/c #f capability?)" authority))
+  (unless (memq transport '(http native))
+    (raise-argument-error 'run-app "(or/c 'http 'native)" transport))
+  ;; The native transport ships on macOS first; the Windows/Linux message
+  ;; handler + scheme ports are migration step 5 (docs/architecture-1.0.md).
+  (when (and (eq? transport 'native) (not (eq? (system-type 'os) 'macosx)))
+    (raise-arguments-error 'run-app
+                           "the native transport currently ships on macOS only"
+                           "platform"
+                           (system-type 'os)))
+  (define native? (eq? transport 'native))
+  ;; The native transport has no listener to protect: the message handler is
+  ;; the trust boundary, so no token is minted and #:port is meaningless.
+  (when (and native? port)
+    (raise-arguments-error 'run-app "#:port is meaningless with #:transport 'native" "port" port))
   (define state-path
     (cond
       [(not window-state-option) #f]
@@ -261,6 +279,7 @@
       [else (raise-argument-error 'run-app "(or/c #f #t path-string?)" window-state-option)]))
   (define token
     (cond
+      [native? #f]
       [(string? api-token) api-token]
       ;; A capability cannot work without a token: start-server would reject
       ;; it, so #f under authority still mints one (historical contract).
@@ -268,28 +287,44 @@
       [else #f]))
   (define app
     (make-app #:app-id app-id #:event-bus event-bus #:quit-on-last-window? quit-on-last-window?))
-  (define-values (actual-port raw-shutdown)
-    (if port
-        (start-server #:port port
-                      #:public-dir public-dir
-                      #:api api-routes
-                      #:events event-bus
-                      #:api-token token
-                      #:capability authority
-                      #:max-body-size max-body-size)
-        (start-server-on-free-port #:public-dir public-dir
-                                   #:api api-routes
+  ;; Native transport: dispatch threads live under the app custodian and the
+  ;; error reporter matches run-app's, so handler failures surface the same
+  ;; way on both transports.
+  (define native-transport-handle
+    (and native?
+         (parameterize ([current-custodian (glaze-app-custodian app)]
+                        [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))])
+           (start-native-transport #:api api-routes
+                                   #:authority authority
                                    #:events event-bus
-                                   #:api-token token
-                                   #:capability authority
-                                   #:max-body-size max-body-size)))
-  (define url (format "http://127.0.0.1:~a/" actual-port))
+                                   #:public-dir public-dir))))
+  (define-values (actual-port raw-shutdown)
+    (if native?
+        (values #f void)
+        (if port
+            (start-server #:port port
+                          #:public-dir public-dir
+                          #:api api-routes
+                          #:events event-bus
+                          #:api-token token
+                          #:capability authority
+                          #:max-body-size max-body-size)
+            (start-server-on-free-port #:public-dir public-dir
+                                       #:api api-routes
+                                       #:events event-bus
+                                       #:api-token token
+                                       #:capability authority
+                                       #:max-body-size max-body-size))))
+  (define url
+    (if native?
+        "glaze://app/"
+        (format "http://127.0.0.1:~a/" actual-port)))
   ;; Capability URL: the one-time ?glaze-token= bootstrap exchanges the token
   ;; for an HttpOnly cookie and redirects to the clean URL. Without it the
   ;; page would have no way to receive the token (api.js deliberately no
   ;; longer hands it out); programmatic clients use the X-Glaze-Token header.
   (define open-url
-    (if token
+    (if (and token (not native?))
         (format "~a?glaze-token=~a" url token)
         url))
   ;; Once-only teardown: the semaphore serializes concurrent callers; the
@@ -317,6 +352,9 @@
                                (with-handlers ([exn:fail? (lambda (_) (void))])
                                  (webview-close wv)))
                              (raw-shutdown)
+                             (when native-transport-handle
+                               (with-handlers ([exn:fail? (lambda (_) (void))])
+                                 (native-transport-shutdown! native-transport-handle)))
                              (custodian-shutdown-all (glaze-app-custodian app))
                              (unless (try-app-state-transition! app 'stopping 'stopped)
                                (error 'run-app
@@ -362,6 +400,7 @@
                          #:width width
                          #:height height
                          #:window-state state-path
+                         #:native-transport native-transport-handle
                          #:on-close (make-on-close))))
     ;; The first close callback can race startup. Only the thread that still
     ;; owns starting may enter ready and call on-ready; a concurrent quit has

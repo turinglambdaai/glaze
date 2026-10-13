@@ -1,6 +1,7 @@
 # Glaze 1.0 Runtime Architecture (RFC)
 
 **Status:** draft, pre-1.0 direction; implementation progress through 0.13.1
+plus the macOS native-transport slice (see the migration order below).
 **Scope:** runtime kernel, bridge protocol, security model, module layout,
 and the relationship with Rivet.
 
@@ -185,7 +186,11 @@ A 1.0 freeze requires, in order:
    envelope layer is transport-agnostic so the native message-handler
    transport can adopt it unchanged.~~
 4. macOS vertical slice of the controlled resource scheme + native message
-   handler, reusing the landed GLZ1 envelopes.
+   handler, reusing the landed GLZ1 envelopes. (landed: `run-app
+   #:transport 'native` serves the page from `glaze://app/` through a
+   WKURLSchemeHandler and carries every bridge call over the `glz1`
+   message handler; the dispatch core lives in `glaze/native-transport.rkt`
+   and is shared with the HTTP adapter.)
 5. Windows/Linux native-transport ports and per-window capability authority;
    HTTP/SSE kept for the development loop.
 6. Typed command declarations, compatibility checks, JS/TypeScript client
