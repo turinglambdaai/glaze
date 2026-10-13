@@ -504,8 +504,8 @@
   (log "message: hr=0x~x" (bitwise-and hr #xffffffff))
   (when (= hr S_OK)
     (define text (wstr->string p))
-    (log "message: text=~.60a" (or text ""))
     (when (string? text)
+      (log "message: envelope received")
       (native-transport-message! transport text))))
 
 (struct native-wiring (transport env) #:transparent)

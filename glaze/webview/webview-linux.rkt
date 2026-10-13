@@ -277,25 +277,18 @@
     (serve!)))
 
 ;; "script-message-received::glz1" callback: (ucm, js_result, user_data).
-(define (native-message-callback _ucm js-result _user-data)
-  (fprintf (current-error-port) "[glaze-linux-webview] message: enter\n")
+(define (native-message-callback ucm js-result _user-data)
+  ;; The wiring lookup keys on the UCM pointer — the stable per-window
+  ;; identity this callback is connected to. (An earlier revision keyed on
+  ;; js-result, which is a fresh object per message and never matched.)
   (define wiring
     (call-with-semaphore native-wirings-sema
-                         (lambda () (hash-ref native-wirings (cast js-result _pointer _uintptr) #f))))
+                         (lambda () (hash-ref native-wirings (cast ucm _pointer _uintptr) #f))))
   (when wiring
-    (with-handlers ([exn:fail? (lambda (e)
-                                 (fprintf (current-error-port)
-                                          "[glaze-linux-webview] message: EXN ~a\n"
-                                          (exn-message e))
-                                 ((current-glaze-error-reporter) e "glz1:linux"))])
+    (with-handlers ([exn:fail? (lambda (e) ((current-glaze-error-reporter) e "glz1:linux"))])
       (define value (webkit_javascript_result_get_js_value js-result))
-      (fprintf (current-error-port)
-               "[glaze-linux-webview] message: value?=~s jsc-bound?=~s\n"
-               (and value #t)
-               (and jsc_value_is_string #t))
       (when (and value (jsc_value_is_string value))
         (define text (jsc_value_to_string value))
-        (fprintf (current-error-port) "[glaze-linux-webview] message: text=~.60a\n" (or text ""))
         (when (string? text)
           (native-transport-message! (native-wiring-transport wiring) text))))))
 
