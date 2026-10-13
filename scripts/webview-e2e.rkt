@@ -186,6 +186,7 @@
                             "")
                         (native-app-origin)))
 (define nt-stats (native-transport-stats nt))
+(log (format "native stats: ~s" nt-stats))
 (check! "scheme served the page resources" (>= (hash-ref nt-stats 'resources-served 0) 1))
 (check! "message handler carried both invokes" (>= (hash-ref nt-stats 'messages-received 0) 2))
 (webview-close ntw)
