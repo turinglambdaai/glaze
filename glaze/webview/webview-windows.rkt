@@ -439,9 +439,12 @@
   (and (= hr S_OK) req ((cwv-getter 3) req))) ; get_Uri
 
 (define (win-scheme-serve! wiring args)
+  (log "scheme: enter")
   (define transport (native-wiring-transport wiring))
   (define env (native-wiring-env wiring))
+  (log "scheme: wiring ok, env=~s" (and env #t))
   (define (respond! mime data)
+    (log "scheme: respond mime=~a len=~a" (bytes->string/latin-1 mime) (bytes-length data))
     (define stream (and SHCreateMemStream (SHCreateMemStream data (bytes-length data))))
     (define make-resp
       (cast (vtfn env 4)
@@ -467,9 +470,12 @@
   (define (respond-status! code)
     (respond! #"text/plain" (string->bytes/utf-8 (format "~a" code))))
   (with-handlers ([exn:fail? (lambda (e)
+                               (log "scheme: EXN ~a" (exn-message e))
                                ((current-glaze-error-reporter) e "glz1:scheme")
                                (respond-status! 404))])
-    (define segments (native-scheme-segments (win-scheme-url args)))
+    (define url (win-scheme-url args))
+    (log "scheme: url=~s" url)
+    (define segments (native-scheme-segments url))
     (cond
       [(not segments) (respond-status! 404)]
       [(equal? segments '("glaze" "api.js"))
@@ -488,14 +494,17 @@
            (respond-status! 404))])))
 
 (define (win-handle-message! wiring args)
+  (log "message: enter")
   (define transport (native-wiring-transport wiring))
   (define fn
     (cast (vtfn args 5) ; TryGetWebMessageAsString
           _fpointer
           (_fun _pointer (p : (_ptr o _pointer)) -> (r : _int32) -> (values r p))))
   (define-values (hr p) (fn args))
+  (log "message: hr=0x~x" (bitwise-and hr #xffffffff))
   (when (= hr S_OK)
     (define text (wstr->string p))
+    (log "message: text=~.60a" (or text ""))
     (when (string? text)
       (native-transport-message! transport text))))
 
@@ -575,6 +584,7 @@
                    ;; event handlers must be in place BEFORE the first
                    ;; navigation, so the page never touches a TCP port.
                    (when native-transport
+                     (log "native: registering handlers")
                      (define wiring (native-wiring native-transport (unbox env-box)))
                      (define add-script
                        (cast (vtfn cwv 27) _fpointer (_fun _pointer _pointer -> _int32)))
@@ -586,6 +596,7 @@
                        (make-com-event-handler IID-WebResourceHandler
                                                (lambda (_sender args)
                                                  (win-scheme-serve! wiring args))))
+                     (log "native: script+filter done")
                      (define add-wrr
                        (cast (vtfn cwv 55)
                              _fpointer
@@ -596,7 +607,9 @@
                                    (r : _int32)
                                    ->
                                    (values r t))))
+                     (log "native: wrr added")
                      (add-wrr cwv wrr-handler)
+                     (log "native: wmr registering")
                      (define wmr-handler
                        (make-com-event-handler IID-WebMessageHandler
                                                (lambda (_sender args)
