@@ -54,9 +54,12 @@
 
 (require ffi/unsafe
          ffi/unsafe/objc
+         racket/async-channel
          racket/file
          racket/list
          racket/string
+         (only-in net/uri-codec uri-decode)
+         "../native-transport.rkt"
          "../tray/tray-protocol.rkt")
 
 (provide open-webview
@@ -111,9 +114,14 @@
               NSRunLoop
               NSURL
               NSURLRequest
+              NSURLResponse
+              NSHTTPURLResponse
+              NSMutableDictionary
+              NSData
               NSBitmapImageRep
               WKWebView
-              WKWebViewConfiguration)
+              WKWebViewConfiguration
+              WKUserScript)
 
 ;; AppKit geometry structs (CGRect family; ffi/unsafe/objc does not
 ;; predefine them, same as the tray backend defines _NSSize).
@@ -175,6 +183,197 @@
                       (when (procedure? proc)
                         (callback-remove! window)
                         (proc))))
+
+;; ---- native transport wiring (docs/architecture-1.0.md) ----
+;; With a native-transport attached, the page is loaded from the controlled
+;; glaze://app/ scheme instead of the loopback HTTP server:
+;;   - GlazeSchemeHandler serves frontend resources from the transport's
+;;     public-dir (same lexical guard, symlink containment, SPA fallback and
+;;     MIME table as the dev adapter) plus the native variant of the
+;;     generated api.js; glaze/* bridge paths 404 instead of falling back —
+;;     on the native transport the bridge surface is message-handler-only;
+;;   - GlazeScriptHandler receives GLZ1 envelopes posted to the "glz1"
+;;     message handler and feeds them to the transport (non-blocking: the
+;;     transport dispatches on its own threads);
+;;   - responses and event batches return as JavaScript snippets on a
+;;     delivery queue drained by the shared pump thread — evaluateJavaScript
+;;     must run on the thread that pumps the WebView, and ours is the pump.
+;; Both handlers run on the pump thread; serving a resource does synchronous
+;; (fast, local) file IO there, which the pump tolerates for local assets.
+
+(struct native-wiring (transport scheme-handler script-handler) #:transparent)
+
+;; handler pointer -> wiring, same registry idea as close-callbacks.
+(define native-wirings (make-hasheq))
+(define native-wirings-sema (make-semaphore 1))
+
+(define (native-wiring-put! key wiring)
+  (call-with-semaphore native-wirings-sema (lambda () (hash-set! native-wirings key wiring))))
+
+(define (native-wiring-ref key)
+  (call-with-semaphore native-wirings-sema (lambda () (hash-ref native-wirings key #f))))
+
+(define (native-wiring-remove! key)
+  (call-with-semaphore native-wirings-sema (lambda () (hash-remove! native-wirings key))))
+
+;; "glaze://app/sub/x.js?query#frag" -> '("sub" "x.js"), percent-decoded.
+(define (glaze-scheme-segments url-str)
+  (define m (regexp-match #rx"^glaze://app/(.*)$" (or url-str "")))
+  (and m
+       (let* ([rest (second m)]
+              [path (car (regexp-split #rx"[?#]" rest))])
+         (filter non-empty-string? (map uri-decode (string-split path "/"))))))
+
+;; The task's NSURL object — for building responses.
+(define (scheme-task-url task)
+  (define req (tell #:type _id task request))
+  (define nsurl (and (cast req _id _pointer) (tell #:type _id req URL)))
+  (and (cast nsurl _id _pointer) nsurl))
+
+;; The absolute URL text — for segment routing.
+(define (scheme-task-url-string task)
+  (define nsurl (scheme-task-url task))
+  (and nsurl (tell #:type _string (tell #:type _id nsurl absoluteString) UTF8String)))
+
+(define (respond-scheme-data! task mime data)
+  ;; NSURLResponse wants a bare media type (no "; charset=" parameters) and
+  ;; a separate text encoding — the same split as an HTTP Content-Type
+  ;; header into its two halves.
+  (define mime-str (bytes->string/latin-1 mime))
+  (define bare-mime (car (regexp-split #rx";" mime-str)))
+  (define resp
+    (tell (tell NSURLResponse alloc)
+          initWithURL:
+          #:type _id
+          (scheme-task-url task)
+          MIMEType:
+          (->nsstring bare-mime)
+          expectedContentLength:
+          #:type _intptr
+          (bytes-length data)
+          textEncodingName:
+          (->nsstring "utf-8")))
+  ;; alloc+init keeps the object retained — convenience constructors return
+  ;; autoreleased objects that the pump's per-iteration autorelease pool
+  ;; would drain before WebKit's deferred XPC forwarding reads them (the
+  ;; URL commits but the page renders blank). Same reason the response is
+  ;; built with alloc+init above.
+  (define nsdata
+    (tell (tell NSData alloc)
+          initWithBytes:
+          #:type _bytes
+          data
+          length:
+          #:type _uintptr
+          (bytes-length data)))
+  (tellv task didReceiveResponse: #:type _id resp)
+  (tellv task didReceiveData: #:type _id nsdata)
+  (tellv task didFinish))
+
+(define (respond-scheme-status! task status)
+  (define resp
+    (tell (tell NSHTTPURLResponse alloc)
+          initWithURL:
+          #:type _id
+          (scheme-task-url task)
+          statusCode:
+          #:type _int
+          status
+          HTTPVersion:
+          (->nsstring "HTTP/1.1")
+          headerFields:
+          #:type _id
+          #f))
+  (tellv task didReceiveResponse: #:type _id resp)
+  (tellv task didFinish))
+
+;; WebKit swallows scheme-task responses issued synchronously inside
+;; startURLSchemeTask: delivery (the request arrives, the renderer never
+;; sees the bytes). Every response is therefore deferred to a later pump
+;; iteration through this queue of thunks.
+(define scheme-response-queue (make-async-channel #f))
+
+(define (serve-scheme-task! wiring task)
+  (define transport (native-wiring-transport wiring))
+  (define segments (glaze-scheme-segments (scheme-task-url-string task)))
+  (define respond!
+    (cond
+      [(not segments) (lambda () (respond-scheme-status! task 404))]
+      [(equal? segments '("glaze" "api.js"))
+       (lambda ()
+         (native-transport-count-resource! transport)
+         (respond-scheme-data! task
+                               #"application/javascript; charset=utf-8"
+                               (string->bytes/utf-8 (native-api-client-js (native-transport-routes
+                                                                           transport)))))]
+      ;; The bridge surface (/glaze/*) is message-handler-only here; never
+      ;; fall back to index.html for it.
+      [(and (pair? segments) (string=? (first segments) "glaze"))
+       (lambda () (respond-scheme-status! task 404))]
+      [else
+       (define-values (mime data) (static-resource (native-transport-public-dir transport) segments))
+       (if mime
+           (lambda ()
+             (native-transport-count-resource! transport)
+             (respond-scheme-data! task mime data))
+           (lambda () (respond-scheme-status! task 404)))]))
+  (async-channel-put scheme-response-queue respond!))
+
+(define-objc-class GlazeSchemeHandler
+                   NSObject
+                   ()
+                   (- _void
+                      (webView: [_id sender] startURLSchemeTask: [_id task])
+                      (define wiring (native-wiring-ref (cast self _id _uintptr)))
+                      (when wiring
+                        (with-handlers ([exn:fail? (lambda (e)
+                                                     ((current-glaze-error-reporter) e "glz1:scheme")
+                                                     (with-handlers ([exn:fail? (lambda (_) (void))])
+                                                       (respond-scheme-status! task 404)))])
+                          (serve-scheme-task! wiring task))))
+                   (- _void
+                      (webView: [_id sender] stopURLSchemeTask: [_id task])
+                      ;; Resources are served synchronously inside start...;
+                      ;; a stop after completion is a no-op and a stop racing
+                      ;; start abandons at most one built response.
+                      (void)))
+
+(define-objc-class
+ GlazeScriptHandler
+ NSObject
+ ()
+ (- _void
+    (userContentController: [_id userContentController] didReceiveScriptMessage: [_id message])
+    (define wiring (native-wiring-ref (cast self _id _uintptr)))
+    (when wiring
+      (define body (tell #:type _id message body))
+      ;; The bootstrap always posts a JSON string; a foreign
+      ;; body type (an NSNumber, say) has no UTF8String and
+      ;; would raise an ObjC exception — route only strings.
+      (when (and (cast body _id _pointer) (tell #:type _bool body isKindOfClass: #:type _id NSString))
+        (define text (tell #:type _string body UTF8String))
+        (when (string? text)
+          (native-transport-message! (native-wiring-transport wiring) text))))))
+
+;; JavaScript snippets awaiting evaluateJavaScript on the pump thread:
+;; (cons webview js-string), FIFO so per-window delivery order is stable.
+(define deliver-queue (make-async-channel #f))
+
+(define (drain-deliveries!)
+  (let loop ()
+    (define v (async-channel-try-get deliver-queue))
+    (when v
+      (with-handlers ([exn:fail? (lambda (_) (void))])
+        (tellv (car v) evaluateJavaScript: (->nsstring (cdr v)) completionHandler: #:type _id #f))
+      (loop))))
+
+(define (drain-scheme-responses!)
+  (let loop ()
+    (define respond! (async-channel-try-get scheme-response-queue))
+    (when respond!
+      (with-handlers ([exn:fail? (lambda (_) (void))])
+        (respond!))
+      (loop))))
 
 ;; ---- menu bar ----
 ;; Custom menus ride on the standard NSApp main menu (the Edit/Window menus
@@ -456,6 +655,11 @@
     (define keep-going? (call-with-semaphore pump-lock (lambda () (> open-windows 0))))
     (when keep-going?
       (pump-once)
+      ;; Deliver pending native-transport JavaScript (responses, event
+      ;; batches) and deferred scheme-task responses while the pump thread
+      ;; owns the WebView.
+      (drain-deliveries!)
+      (drain-scheme-responses!)
       ;; Mandatory scheduler yield: when an event or runloop source is always
       ;; ready, the native calls return immediately and a yield-less loop would
       ;; monopolize the OS thread, starving every other Racket thread.
@@ -467,9 +671,13 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:native-transport [native-transport #f]
                       #:on-close [on-close (lambda () (void))])
   (unless (supported?)
     (error 'open-webview "macOS WebView backend unavailable (WebKit failed to load)"))
+  (when native-transport
+    (unless (native-transport? native-transport)
+      (raise-argument-error 'open-webview "native-transport?" native-transport)))
   (define app (ensure-app!))
 
   ;; NSRect frame for the window (Cocoa centers it on screen). CGFloat fields
@@ -494,6 +702,27 @@
 
   ;; WKWebView as the content view, tracking window resizes.
   (define config (tell (tell WKWebViewConfiguration alloc) init))
+  ;; Native transport: scheme handler + GLZ1 message handler + bootstrap user
+  ;; script must all be on the configuration BEFORE the WKWebView exists.
+  (define scheme-handler #f)
+  (define script-handler #f)
+  (when native-transport
+    (set! scheme-handler (tell (tell GlazeSchemeHandler alloc) init))
+    (set! script-handler (tell (tell GlazeScriptHandler alloc) init))
+    (tellv config setURLSchemeHandler: #:type _id scheme-handler forURLScheme: (->nsstring "glaze"))
+    (define user-content (tell config userContentController))
+    (tellv user-content addScriptMessageHandler: #:type _id script-handler name: (->nsstring "glz1"))
+    (define bootstrap
+      (tell (tell WKUserScript alloc)
+            initWithSource:
+            (->nsstring native-bootstrap-js)
+            injectionTime:
+            #:type _int
+            0 ; WKUserScriptInjectionTimeAtDocumentStart
+            forMainFrameOnly:
+            #:type _bool
+            #t))
+    (tellv user-content addUserScript: #:type _id bootstrap))
   (define webview
     (tell (tell WKWebView alloc) initWithFrame: #:type _NSRect frame configuration: config))
   (tellv webview
@@ -515,7 +744,23 @@
                  (lambda ()
                    (set-box! closed? #t)
                    (release-pump!)
+                   (when native-transport
+                     (with-handlers ([exn:fail? (lambda (_) (void))])
+                       (native-transport-shutdown! native-transport))
+                     (native-wiring-remove! (cast scheme-handler _id _uintptr))
+                     (native-wiring-remove! (cast script-handler _id _uintptr)))
                    (on-close)))
+
+  (define wv (mac:webview window webview delegate closed? (box #f) #f))
+  ;; Register the handlers before the first request can arrive, and route
+  ;; transport deliveries through this window's WebView.
+  (when native-transport
+    (define wiring (native-wiring native-transport scheme-handler script-handler))
+    (native-wiring-put! (cast scheme-handler _id _uintptr) wiring)
+    (native-wiring-put! (cast script-handler _id _uintptr) wiring)
+    (native-transport-set-deliver! native-transport
+                                   (lambda (js) (async-channel-put deliver-queue (cons webview js)))))
+  (navigate wv url)
 
   (tellv window makeKeyAndOrderFront: #:type _id window)
   ;; orderFrontRegardless: makeKeyAndOrderFront is a no-op when the app is
@@ -528,9 +773,6 @@
   (if (tell app respondsToSelector: #:type _SEL (selector activate))
       (tellv app activate)
       (tellv app activateIgnoringOtherApps: #:type _bool #t))
-
-  (define wv (mac:webview window webview delegate closed? (box #f) #f))
-  (navigate wv url)
 
   ;; One shared pump services every open window; acquire only after navigate
   ;; succeeded so a throwing open cannot strand the thread.

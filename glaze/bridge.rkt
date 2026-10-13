@@ -60,7 +60,9 @@
          call-with-bridge-request
          current-bridge-request-slot
          bridge-cancel-event
-         bridge-cancelled?)
+         bridge-cancelled?
+         route->js-name
+         api-client-entries)
 
 ;; ---- version ----
 
@@ -324,3 +326,112 @@
                   (parameterize ([current-bridge-request-slot slot])
                     (body)))
                 (lambda () (request-table-retire! table id))))
+
+;; ---- generated JS client entries (transport-independent) ----
+;; The route -> JS-function-name rules and the per-route client entries are
+;; shared by the HTTP client (server.rkt) and the native-transport client
+;; (native-transport.rkt); only the transport bindings around them differ.
+
+;; "api/counter/bump" -> counterBump ; "api/items/:id/bump" -> itemsIdBump
+;; "api/clip-copy" -> clipCopy. Hyphenated segments camel-case (a bare
+;; hyphen key like `clip-copy:` would be ILLEGAL JavaScript and break the
+;; whole generated file); the first segment keeps a lowercase head. Every
+;; part is stripped to identifier characters, and a name that would start
+;; with a digit is prefixed with "_" — both keep the generated file parseable
+;; for any route shape; validate-js-client-names rejects what still cannot
+;; work (empty names, collisions).
+(define (js-camel seg first-lower?)
+  (define parts
+    (for/list ([p (in-list (filter non-empty-string? (string-split seg "-")))])
+      (regexp-replace* #rx"[^A-Za-z0-9_]" p "")))
+  (define kept (filter non-empty-string? parts))
+  (if (null? kept)
+      ""
+      (apply string-append
+             (for/list ([p (in-list kept)]
+                        [i (in-naturals)])
+               (cond
+                 [(and (zero? i) first-lower? (regexp-match? #rx"^[a-z]" p)) p]
+                 [else (string-append (string-upcase (substring p 0 1)) (substring p 1))])))))
+
+(define (route->js-name segments)
+  (define drop-api
+    (if (and (pair? segments) (string=? (first segments) "api"))
+        (rest segments)
+        segments))
+  (define raw
+    (apply string-append
+           (for/list ([seg (in-list drop-api)]
+                      [i (in-naturals)])
+             (cond
+               [(param? seg) (string-titlecase (param-id seg))]
+               [(zero? i) (js-camel seg #t)]
+               [else (js-camel seg #f)]))))
+  (if (regexp-match? #rx"^[0-9]" raw)
+      (string-append "_" raw)
+      raw))
+
+;; The path arguments a route's JS entry takes (the captured :params), and
+;; the URL expression that interpolates them.
+(define (route-js-args segments)
+  (for/list ([seg (in-list segments)]
+             #:when (param? seg))
+    (param-id seg)))
+
+(define (route-js-url segments)
+  (string-join (for/list ([seg (in-list segments)])
+                 (if (param? seg)
+                     (string-append "'+encodeURIComponent(" (param-id seg) ")+'")
+                     seg))
+               "/"))
+
+(define (route-js-call route)
+  (define method-str (symbol->string (route-method route)))
+  (format "glaze.call('~a', '~a', ~a)"
+          method-str
+          (route-js-url (route-segments route))
+          (if (string=? method-str "GET") "null" "body")))
+
+(define (route-js-entry name route)
+  (define args (append (route-js-args (route-segments route)) '("body")))
+  (format "  ~a: function(~a) { return ~a; }," name (string-join args ", ") (route-js-call route)))
+
+;; GET /api/items + POST /api/items -> items(id, body): a missing body means
+;; the GET; anything else goes to the first non-GET route (validated at
+;; startup to exist and to be unique).
+(define (merged-route-js-entry name group)
+  (define get-route (findf (lambda (r) (eq? (route-method r) 'GET)) group))
+  (define mutating (findf (lambda (r) (not (eq? (route-method r) 'GET))) group))
+  (define segments (route-segments (or get-route mutating)))
+  (define args (append (route-js-args segments) '("body")))
+  (string-append "  "
+                 name
+                 ": function("
+                 (string-join args ", ")
+                 ") {\n"
+                 (if get-route
+                     (format "    if (body === undefined || body === null) { return ~a; }\n"
+                             (route-js-call get-route))
+                     "")
+                 (if mutating
+                     (format "    return ~a;\n" (route-js-call mutating))
+                     "")
+                 "  },"))
+
+;; The `glaze.api` object entries shared by both generated clients. Routes
+;; are grouped by generated JS name and kept in first-seen order so the
+;; generated file is deterministic on every transport.
+(define (api-client-entries api-routes)
+  (define names '())
+  (define groups (make-hash))
+  (for ([r (in-list api-routes)])
+    (define name (route->js-name (route-segments r)))
+    (unless (member name names)
+      (set! names (append names (list name))))
+    (hash-update! groups name (lambda (old) (append old (list r))) '()))
+  (string-join (for/list ([name (in-list names)])
+                 (define group (hash-ref groups name))
+                 (if (= (length group) 1)
+                     (route-js-entry name (first group))
+                     (merged-route-js-entry name group)))
+               "\n"))

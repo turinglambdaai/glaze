@@ -5,6 +5,40 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- macOS vertical slice of the native host transport
+  (`docs/architecture-1.0.md`, part of #53): with
+  `run-app #:transport 'native`, the page loads from the controlled
+  `glaze://app/` scheme instead of a loopback port and calls the backend
+  through the WebView's native GLZ1 message handler — the web content never
+  touches a TCP socket. `#:api-token` is meaningless in this mode (the
+  message handler is the trust boundary); `#:capability` authorities still
+  gate routes, and the event bus is delivered as sequenced batches through
+  `window.__glz1Events`.
+- The scheme handler serves frontend resources with the same containment,
+  SPA fallback, and MIME rules as the HTTP adapter, plus a native variant of
+  `/glaze/api.js` (same generated route entries, bindings over the message
+  handler), so existing app HTML works unchanged in native mode.
+- `glaze/native-transport`: the transport-neutral GLZ1 dispatch core
+  (`dispatch-bridge` / `dispatch-invoke`), shared static resource serving,
+  and the native page bindings; `start-native-transport` +
+  `native-transport-message!` + `native-transport-set-deliver!` are the
+  host-side integration points for the remaining platform ports.
+
+### Changed
+
+- The GLZ1 invoke pipeline and the generated-client route entries moved
+  from `glaze/server.rkt` into `glaze/bridge.rkt` /
+  `glaze/native-transport.rkt` and are shared verbatim by the HTTP
+  development adapter and the native transport; HTTP behavior is unchanged.
+- The macOS scheme handler answers with a bare media type plus a separate
+  text encoding (`NSURLResponse`): a `; charset=` parameter inside
+  `MIMEType:` makes WebKit commit the navigation but silently drop the
+  response bytes — the page renders blank.
+
 ## [0.13.1] - 2026-10-12
 
 ### Fixed

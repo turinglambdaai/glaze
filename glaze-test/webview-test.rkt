@@ -7,7 +7,13 @@
 ;; delivered synchronously via performClose:.
 
 (require rackunit
+         racket/async-channel
          racket/file
+         racket/string
+         glaze/api
+         glaze/app
+         glaze/events
+         glaze/native-transport
          glaze/server
          glaze/webview/main)
 
@@ -152,4 +158,118 @@
   (check-not-false (sync/timeout 3 (thread-dead-evt (mod-thread wb)))
                    "shared pump exits after the last window closes")
   (mv-stop)
-  (delete-directory/files mv-dir))
+  (delete-directory/files mv-dir)
+
+  ;; ---- native transport end-to-end (docs/architecture-1.0.md step 4) ----
+  ;; The page loads from the controlled glaze://app/ scheme (never a TCP
+  ;; port) and drives the backend through the GLZ1 message handler: the
+  ;; inline script invokes api/ping, then posts the result to api/record.
+  ;; Recording through a second invoke proves the FULL round trip — the
+  ;; bootstrap was injected at document start, the message handler reached
+  ;; the transport, dispatch ran the route, and the response was delivered
+  ;; back into the page's promise chain.
+  (define nt-dir (make-temporary-file "glaze-nt-~a" 'directory))
+  (call-with-output-file
+   (build-path nt-dir "index.html")
+   (lambda (o)
+     (display
+      (string-append
+       "<!DOCTYPE html><html><head><title>native-e2e</title>"
+       "<script src=\"/glaze/api.js\"></script></head><body>native</body>"
+       "<script>"
+       "glaze.invoke('api/ping')"
+       ".then(function (v) { return glaze.invoke('api/record', { pong: v.pong, href: location.href }); })"
+       ".catch(function (e) { window.__glz1Error = String(e); });"
+       "</script></html>")
+      o)))
+  (define nt-recorded (box #f))
+  (define nt-done (make-semaphore 0))
+  (define nt-routes
+    (list (GET "api/ping" (lambda (req) (hasheq 'pong #t)))
+          (POST "api/record"
+                (lambda (req)
+                  (set-box! nt-recorded (request-json-body req))
+                  (semaphore-post nt-done)
+                  (hasheq 'saved #t)))))
+  (define nt (start-native-transport #:api nt-routes #:public-dir nt-dir))
+  (define mod-url (dynamic-require 'glaze/webview/webview-macos 'url))
+  (define nt-closed? (box #f))
+  (define ntw
+    (mod-open "glaze://app/"
+              #:title "native-e2e"
+              #:native-transport nt
+              #:on-close (lambda () (set-box! nt-closed? #t))))
+  (check-true (mod-mac:webview? ntw) "native window opened")
+  (define nt-url-ok?
+    (let dl ([deadline (+ (current-inexact-milliseconds) 10000)])
+      (cond
+        [(equal? (mod-url ntw) "glaze://app/") #t]
+        [(> (current-inexact-milliseconds) deadline) #f]
+        [else
+         (sleep 0.1)
+         (dl deadline)])))
+  (check-true nt-url-ok? "page committed from the controlled glaze scheme")
+  (check-not-false (sync/timeout 30 nt-done) "page invoke round trip reached the backend")
+  (define nt-body (unbox nt-recorded))
+  (check-equal? (and (hash? nt-body) (hash-ref nt-body 'pong)) #t "invoke returned through the page")
+  (check-true (and (hash? nt-body)
+                   (hash-ref nt-body 'href "")
+                   (string-prefix? (hash-ref nt-body 'href) "glaze://app/"))
+              "the page really runs on the glaze scheme")
+  (define nt-stats (native-transport-stats nt))
+  (check-true (>= (hash-ref nt-stats 'resources-served 0) 1) "the scheme handler served index.html")
+  (check-true (>= (hash-ref nt-stats 'messages-received 0) 2) "both invokes arrived as messages")
+  (mod-close ntw)
+  (sleep 0.2)
+  (check-true (unbox nt-closed?) "native window on-close fired")
+  (check-not-false (sync/timeout 3 (thread-dead-evt (mod-thread ntw)))
+                   "pump exits after the native window closes")
+  (delete-directory/files nt-dir)
+
+  ;; ---- run-app with #:transport 'native ----
+  ;; Same loop through the public entry point: no server, tokenless, and
+  ;; run-app reports the glaze:// URL to #:on-ready.
+  (define ra-dir (make-temporary-file "glaze-ra-~a" 'directory))
+  (call-with-output-file
+   (build-path ra-dir "index.html")
+   (lambda (o)
+     (display
+      (string-append "<!DOCTYPE html><html><head><title>runapp-native</title>"
+                     "<script src=\"/glaze/api.js\"></script></head><body>ra</body>"
+                     "<script>"
+                     "glaze.invoke('api/ping')"
+                     ".then(function (v) { return glaze.invoke('api/record', { pong: v.pong }); })"
+                     ".catch(function (e) { window.__glz1Error = String(e); });"
+                     "</script></html>")
+      o)))
+  (define ra-recorded (box #f))
+  (define ra-done (make-semaphore 0))
+  (define ra-url-box (box #f))
+  (define ra-routes
+    (list (GET "api/ping" (lambda (req) (hasheq 'pong #t)))
+          (POST "api/record"
+                (lambda (req)
+                  (set-box! ra-recorded (request-json-body req))
+                  (semaphore-post ra-done)
+                  (hasheq 'saved #t)))))
+  (define ra-thread
+    (thread (lambda ()
+              (run-app #:public-dir ra-dir
+                       #:api ra-routes
+                       #:transport 'native
+                       #:api-token #f
+                       #:title "runapp-native"
+                       #:on-ready (lambda (wv u)
+                                    (set-box! ra-url-box u)
+                                    ;; Close once the page reported back (or on timeout, so a
+                                    ;; broken bridge fails the assertions instead of hanging).
+                                    (thread (lambda ()
+                                              (sync/timeout 30 ra-done)
+                                              (sleep 0.5)
+                                              (webview-close wv))))))))
+  (check-not-false (sync/timeout 45 (thread-dead-evt ra-thread)) "run-app native completed")
+  (check-equal? (unbox ra-url-box) "glaze://app/" "on-ready reports the glaze scheme URL")
+  (check-equal? (and (hash? (unbox ra-recorded)) (hash-ref (unbox ra-recorded) 'pong))
+                #t
+                "run-app native round trip recorded the invoke")
+  (delete-directory/files ra-dir))

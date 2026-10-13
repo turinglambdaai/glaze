@@ -172,7 +172,12 @@
                       #:width [width 1024]
                       #:height [height 768]
                       #:devtools? [devtools? #f]
+                      #:native-transport [native-transport #f]
                       #:on-close [on-close (lambda () (void))])
+  ;; The native transport ships on macOS first (docs/architecture-1.0.md
+  ;; migration step 5 covers the ports).
+  (when native-transport
+    (error 'open-webview "the native transport is not supported on this platform yet"))
   (define (show-devtools-later!)
     ;; The inspector window needs the webview realized; retry briefly.
     (thread (lambda ()

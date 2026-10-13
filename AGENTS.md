@@ -71,6 +71,27 @@ macOS 的 WKWebView 随系统提供；失败时重点保留初始化错误和运
 | macOS | NSWindow + WKWebView objc FFI | 本机 + CI 真窗口 e2e |
 | Linux | GtkWindow + WebKitGTK FFI | CI Xvfb 真窗口 e2e |
 
+## 原生传输（native transport）
+
+`run-app #:transport 'native`（macOS 先行，`glaze/native-transport.rkt`）：
+页面从受控 `glaze://app/` scheme 加载（WKURLSchemeHandler），所有桥调用走
+`glz1` message handler（WKScriptMessageHandler），页面不接触任何 TCP 端口。
+HTTP/SSE 降级为开发适配器。关键契约：
+
+- scheme 响应的 `NSURLResponse` **必须用裸媒体类型**（`text/html`）+ 独立的
+  `textEncodingName`；`MIMEType:` 里带 `; charset=utf-8` 会让 WebKit 提交导航
+  但静默丢弃响应字节（URL 提交、页面空白、无报错——最难查的一种失败）。
+- 响应不在 `startURLSchemeTask:` 投递上下文里同步发出，而是排进
+  `scheme-response-queue` 由共享 pump 线程在后续 runloop 迭代发出。
+- native 模式没有 token（message handler 即信任边界）；capability 仍然生效。
+- 事件总线以 `(seq, name, data)` 序号批次经 `window.__glz1Events` 投递。
+- `native-transport-shutdown!` 幂等（宿主关闭路径与 run-app teardown 都会调；
+  control channel 容量 1，重复 put 无消费者时会永久阻塞——别去掉幂等守卫）。
+
+`glaze-test/native-transport-test.rkt` 覆盖传输核心（无窗口，全平台 CI）；
+`glaze-test/webview-test.rkt` 的 macOS 段覆盖 scheme + 消息处理器 + run-app
+native 真窗口 e2e。
+
 三平台 e2e 应至少覆盖：open、页面加载、title/url、截图、navigate、close、on-close。
 
 ## Windows WebView2 关键历史坑
