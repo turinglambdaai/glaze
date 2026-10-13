@@ -348,6 +348,18 @@
                    (sleep 0.1)
                    (retry deadline)])))))
   (gtk_init #f #f)
+  ;; Native transport: the glaze:// scheme must be registered on the web
+  ;; context BEFORE the first webview that uses it spins up its web
+  ;; process. The callback dispatches per requesting webview, so the
+  ;; per-window wiring can be registered afterwards.
+  (when native-transport
+    (define scheme-cptr (function-ptr native-scheme-callback (_fun _pointer _pointer -> _void)))
+    (set! callback-ptrs (cons scheme-cptr callback-ptrs))
+    (webkit_web_context_register_uri_scheme (webkit_web_context_get_default)
+                                            "glaze"
+                                            scheme-cptr
+                                            #f
+                                            #f))
   (define window (gtk_window_new 0)) ; GTK_WINDOW_TOPLEVEL = 0
   (gtk_window_set_title window title)
   (gtk_window_set_default_size window width height)
@@ -385,15 +397,6 @@
     (define wiring (native-wiring native-transport #f))
     (native-wiring-put! (cast webview _pointer _uintptr) wiring)
     (native-wiring-put! (cast ucm _pointer _uintptr) wiring)
-    ;; Register on the default web context; the callback dispatches per
-    ;; requesting webview, so several native windows/apps can coexist.
-    (define scheme-cptr (function-ptr native-scheme-callback (_fun _pointer _pointer -> _void)))
-    (set! callback-ptrs (cons scheme-cptr callback-ptrs))
-    (webkit_web_context_register_uri_scheme (webkit_web_context_get_default)
-                                            "glaze"
-                                            scheme-cptr
-                                            #f
-                                            #f)
     (define msg-cptr
       (function-ptr (lambda (_ucm js-result _user-data)
                       (native-message-callback _ucm js-result _user-data))

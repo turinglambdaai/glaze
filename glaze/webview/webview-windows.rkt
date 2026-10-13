@@ -94,6 +94,12 @@
 ;; ICoreWebView2CreateCoreWebView2ControllerCompletedHandler
 (define IID-CtrlHandler
   (bytes #xE0 #xA7 #xC1 #x63 #x68 #xCB #x3B #x44 #x8B #xA8 #x4D #x08 #xCF #x11 #xF0 #xAE))
+;; ICoreWebView2WebMessageReceivedEventHandler
+(define IID-WebMessageHandler
+  (bytes #x19 #x3F #x21 #x57 #xE6 #x00 #xFA #x49 #x8E #x07 #x89 #x8E #xA0 #x1E #xCB #xD2))
+;; ICoreWebView2WebResourceRequestedEventHandler
+(define IID-WebResourceHandler
+  (bytes #x4C #xB7 #x00 #xAB #xF1 #x15 #x46 #x46 #x80 #xE8 #xE7 #x63 #x41 #xD2 #x5D #x71))
 
 (define (log fmt . args)
   (apply fprintf (current-error-port) (string-append "[glaze-win-webview] " fmt "\n") args))
@@ -167,9 +173,19 @@
 ;; callbacks: Invoke(self, sender, args) with TWO pointers. The init
 ;; handler's _int32 second-argument annotation would truncate a 64-bit
 ;; pointer, so event handlers get their own constructor.
-(define (make-com-event-handler on-event)
+(define (make-com-event-handler iid on-event)
   (define (qi self in-iid out)
-    #f) ; events are registered without QI
+    (define incoming (ptr->bytes in-iid 16))
+    (cond
+      ;; WebView2 queries the handler (at least for IUnknown) when the
+      ;; listener is registered; answering S_OK without writing the out
+      ;; pointer hands it a garbage pointer.
+      [(or (bytes=? incoming iid) (bytes=? incoming IID-IUnknown))
+       (ptr-set! out _pointer 0 self)
+       S_OK]
+      [else
+       (ptr-set! out _pointer 0 #f)
+       E_NOINTERFACE]))
   (define (addref self)
     2)
   (define (release self)
@@ -567,7 +583,8 @@
                        (cast (vtfn cwv 57) _fpointer (_fun _pointer _pointer _int -> _int32)))
                      (add-filter cwv (wstr "glaze://app/*") 0) ; WEB_RESOURCE_CONTEXT_ALL
                      (define wrr-handler
-                       (make-com-event-handler (lambda (_sender args)
+                       (make-com-event-handler IID-WebResourceHandler
+                                               (lambda (_sender args)
                                                  (win-scheme-serve! wiring args))))
                      (define add-wrr
                        (cast (vtfn cwv 55)
@@ -581,7 +598,8 @@
                                    (values r t))))
                      (add-wrr cwv wrr-handler)
                      (define wmr-handler
-                       (make-com-event-handler (lambda (_sender args)
+                       (make-com-event-handler IID-WebMessageHandler
+                                               (lambda (_sender args)
                                                  (win-handle-message! wiring args))))
                      (define add-wmr
                        (cast (vtfn cwv 34)
