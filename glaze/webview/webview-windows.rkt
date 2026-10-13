@@ -586,9 +586,13 @@
                    (when native-transport
                      (log "native: registering handlers")
                      (define wiring (native-wiring native-transport (unbox env-box)))
+                     ;; AddScriptToExecuteOnDocumentCreated(script,
+                     ;; handler) — the completion handler is a third [in]
+                     ;; parameter (nullable); omitting it made WebView2 read
+                     ;; a garbage stack value and call it later: segfault.
                      (define add-script
-                       (cast (vtfn cwv 27) _fpointer (_fun _pointer _pointer -> _int32)))
-                     (add-script cwv (wstr native-bootstrap-js))
+                       (cast (vtfn cwv 27) _fpointer (_fun _pointer _pointer _pointer -> _int32)))
+                     (add-script cwv (wstr native-bootstrap-js) #f)
                      (define add-filter
                        (cast (vtfn cwv 57) _fpointer (_fun _pointer _pointer _int -> _int32)))
                      (add-filter cwv (wstr "glaze://app/*") 0) ; WEB_RESOURCE_CONTEXT_ALL

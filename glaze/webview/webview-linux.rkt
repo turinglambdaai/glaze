@@ -273,8 +273,7 @@
   (fprintf (current-error-port) "[glaze-linux-webview] message: enter\n")
   (define wiring
     (call-with-semaphore native-wirings-sema
-                         (lambda ()
-                           (hash-ref native-wirings (cast js-result _pointer _uintptr) #f))))
+                         (lambda () (hash-ref native-wirings (cast js-result _pointer _uintptr) #f))))
   (when wiring
     (with-handlers ([exn:fail? (lambda (e)
                                  (fprintf (current-error-port)
@@ -370,7 +369,8 @@
                                             "glaze"
                                             scheme-cptr
                                             #f
-                                            #f))
+                                            #f)
+    (fprintf (current-error-port) "[glaze-linux-webview] glaze scheme registered\n"))
   (define window (gtk_window_new 0)) ; GTK_WINDOW_TOPLEVEL = 0
   (gtk_window_set_title window title)
   (gtk_window_set_default_size window width height)
@@ -413,7 +413,11 @@
                       (native-message-callback _ucm js-result _user-data))
                     (_fun _pointer _pointer _pointer -> _void)))
     (set! callback-ptrs (cons msg-cptr callback-ptrs))
-    (g_signal_connect_data ucm "script-message-received::glz1" msg-cptr #f #f 0)
+    (define handler-id (g_signal_connect_data ucm "script-message-received::glz1" msg-cptr #f #f 0))
+    (fprintf (current-error-port)
+             "[glaze-linux-webview] glz1 signal connected, handler-id=~s ucm-bound?=~s\n"
+             handler-id
+             (and webkit_user_content_manager_register_script_message_handler #t))
     (native-transport-set-deliver!
      native-transport
      (lambda (js) (async-channel-put (lin:webview-deliver-queue wv) (cons webview js)))))
