@@ -167,7 +167,7 @@
 (define nt (start-native-transport #:api nt-routes #:public-dir nt-dir))
 (define nt-closed? (box #f))
 (define ntw
-  (open-webview "glaze://app/"
+  (open-webview (native-app-origin)
                 #:title "glaze e2e native"
                 #:width 640
                 #:height 480
@@ -175,8 +175,9 @@
                 #:on-close (lambda () (set-box! nt-closed? #t))))
 (check! "native window opens" (webview? ntw))
 (define nt-url-ok?
-  (wait-until (lambda () (and (webview-url ntw) (string-prefix? (webview-url ntw) "glaze://app/")))))
-(check! "native page committed from the glaze scheme" nt-url-ok?)
+  (wait-until (lambda ()
+                (and (webview-url ntw) (string-prefix? (webview-url ntw) (native-app-origin))))))
+(check! "native page committed from the controlled origin" nt-url-ok?)
 (define nt-roundtrip-ok? (wait-until (lambda () (unbox nt-recorded)) 30))
 (check! "native invoke round trip reached the backend" (and nt-roundtrip-ok? #t))
 (check! "native result carries the invoke value"
