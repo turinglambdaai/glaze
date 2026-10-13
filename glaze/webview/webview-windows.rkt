@@ -518,8 +518,9 @@
   (let loop ()
     (define v (and queue (async-channel-try-get queue)))
     (when v
-      (define cwv (unbox (car v)))
-      (log "deliver: cwv?=~s" (and cwv #t))
+      ;; The queue entry carries the ICoreWebView2 pointer directly (the
+      ;; struct's cwv-box field holds the interface, not a box).
+      (define cwv (car v))
       (when cwv
         (with-handlers ([exn:fail? (lambda (e) (log "deliver: EXN ~a" (exn-message e)))])
           (define post (cast (vtfn cwv 32) _fpointer (_fun _pointer _pointer -> _int32)))
