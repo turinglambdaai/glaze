@@ -519,10 +519,12 @@
     (define v (and queue (async-channel-try-get queue)))
     (when v
       (define cwv (unbox (car v)))
+      (log "deliver: cwv?=~s" (and cwv #t))
       (when cwv
-        (with-handlers ([exn:fail? (lambda (_) (void))])
+        (with-handlers ([exn:fail? (lambda (e) (log "deliver: EXN ~a" (exn-message e)))])
           (define post (cast (vtfn cwv 32) _fpointer (_fun _pointer _pointer -> _int32)))
-          (post cwv (wstr (cdr v)))))
+          (define hr (post cwv (wstr (cdr v))))
+          (log "deliver: post hr=0x~x" (bitwise-and hr #xffffffff))))
       (loop))))
 
 (define (open-webview url
