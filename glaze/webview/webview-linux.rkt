@@ -28,10 +28,13 @@
 ;; fallbacks + never-raise + reported reason). Keep the version candidates
 ;; explicit per library even when all families currently agree.
 (require ffi/unsafe
+         racket/async-channel
          racket/file
+         racket/list
          racket/path
          racket/string
          "../ffi-discovery.rkt"
+         "../native-transport.rkt"
          "../tray/tray-protocol.rkt")
 
 (provide open-webview
@@ -101,8 +104,65 @@
               "g_signal_connect_data"
               (_fun _pointer _string _fpointer _pointer _pointer _uint -> _uintptr)))
 
+;; ---- native transport (docs/architecture-1.0.md migration step 5) ----
+;; WebKitGTK shares WKWebView's window.webkit.messageHandlers JS API, so the
+;; bootstrap's webkit branch works unchanged; scheme resources go through
+;; webkit_web_context_register_uri_scheme on the default context (shared
+;; per process, so the callback dispatches per webview), and deliveries use
+;; webkit_web_view_evaluate_javascript from the window's pump thread.
+(define gio-lib (try-ffi-lib "gio-2.0" '("0")))
+(define jsc-lib
+  (or (try-ffi-lib "javascriptcoregtk-4.1" '("0")) (try-ffi-lib "javascriptcoregtk-4.0" '("37"))))
+(define webkit_web_view_new_with_user_content_manager
+  (maybe-bind webkit-lib "webkit_web_view_new_with_user_content_manager" (_fun _pointer -> _pointer)))
+(define webkit_user_content_manager_new
+  (maybe-bind webkit-lib "webkit_user_content_manager_new" (_fun -> _pointer)))
+(define webkit_user_content_manager_register_script_message_handler
+  (maybe-bind webkit-lib
+              "webkit_user_content_manager_register_script_message_handler"
+              (_fun _pointer _string -> _void)))
+(define webkit_user_script_new
+  (maybe-bind webkit-lib
+              "webkit_user_script_new"
+              (_fun _string _int _int _pointer _pointer -> _pointer)))
+(define webkit_user_content_manager_add_script
+  (maybe-bind webkit-lib "webkit_user_content_manager_add_script" (_fun _pointer _pointer -> _void)))
+(define webkit_user_script_unref
+  (maybe-bind webkit-lib "webkit_user_script_unref" (_fun _pointer -> _void)))
+(define webkit_web_context_get_default
+  (maybe-bind webkit-lib "webkit_web_context_get_default" (_fun -> _pointer)))
+(define webkit_web_context_register_uri_scheme
+  (maybe-bind webkit-lib
+              "webkit_web_context_register_uri_scheme"
+              (_fun _pointer _string _fpointer _pointer _pointer -> _void)))
+(define webkit_uri_scheme_request_get_uri
+  (maybe-bind webkit-lib "webkit_uri_scheme_request_get_uri" (_fun _pointer -> _string)))
+(define webkit_uri_scheme_request_get_web_view
+  (maybe-bind webkit-lib "webkit_uri_scheme_request_get_web_view" (_fun _pointer -> _pointer)))
+(define webkit_uri_scheme_request_finish
+  (maybe-bind webkit-lib
+              "webkit_uri_scheme_request_finish"
+              (_fun _pointer _pointer _int64 _string -> _void)))
+(define g_memory_input_stream_new_from_data
+  (maybe-bind gio-lib
+              "g_memory_input_stream_new_from_data"
+              (_fun _pointer _uintptr _pointer -> _pointer)))
+(define webkit_web_view_evaluate_javascript
+  (maybe-bind webkit-lib
+              "webkit_web_view_evaluate_javascript"
+              (_fun _pointer _string _intptr _string _string _pointer _pointer _pointer -> _void)))
+(define webkit_javascript_result_get_js_value
+  (maybe-bind webkit-lib "webkit_javascript_result_get_js_value" (_fun _pointer -> _pointer)))
+(define jsc_value_is_string (maybe-bind jsc-lib "jsc_value_is_string" (_fun _pointer -> _bool)))
+(define jsc_value_to_string (maybe-bind jsc-lib "jsc_value_to_string" (_fun _pointer -> _string)))
+
 (struct lin:webview
-        (window webview [url #:mutable] closed?-box normal-geometry-box [thread #:mutable])
+        (window webview
+                [url #:mutable]
+                closed?-box
+                normal-geometry-box
+                [thread #:mutable]
+                [deliver-queue #:mutable])
   #:transparent)
 
 (define (supported?)
@@ -153,12 +213,103 @@
                          (hash-set! close-callbacks (cast window _pointer _uintptr) on-close)))
   (g_signal_connect_data window "destroy" cptr #f #f 0))
 
+;; webview pointer -> wiring (scheme callback dispatch: the default web
+;; context is process-wide, so the per-window public dir is resolved from
+;; the requesting webview); ucm pointer -> wiring (script messages).
+(struct native-wiring (transport env) #:transparent)
+(define native-wirings (make-hasheq))
+(define native-wirings-sema (make-semaphore 1))
+
+(define (native-wiring-put! key wiring)
+  (call-with-semaphore native-wirings-sema (lambda () (hash-set! native-wirings key wiring))))
+
+(define (native-wiring-remove! key)
+  (call-with-semaphore native-wirings-sema (lambda () (hash-remove! native-wirings key))))
+
+(define (native-wiring-for-webview! view)
+  (call-with-semaphore native-wirings-sema
+                       (lambda () (hash-ref native-wirings (cast view _pointer _uintptr) #f))))
+
+;; URI-scheme callback: (request, user_data). Serves synchronously —
+;; webkit_uri_scheme_request_finish inside the callback is the documented
+;; pattern, and the resources are fast local files.
+(define (native-scheme-callback request _user-data)
+  (define view
+    (and webkit_uri_scheme_request_get_web_view (webkit_uri_scheme_request_get_web_view request)))
+  (define wiring (and view (native-wiring-for-webview! view)))
+  (define (finish-empty! mime)
+    (when (and webkit_uri_scheme_request_finish g_memory_input_stream_new_from_data)
+      (webkit_uri_scheme_request_finish request
+                                        (g_memory_input_stream_new_from_data #f 0 #f)
+                                        0
+                                        mime)))
+  (define (serve!)
+    (unless wiring
+      (error 'native-scheme-callback "no wiring registered for the requesting webview"))
+    (define transport (native-wiring-transport wiring))
+    (define segments (native-scheme-segments (webkit_uri_scheme_request_get_uri request)))
+    (define-values (mime data)
+      (cond
+        [(not segments) (values #"text/plain; charset=utf-8" #"Not found")]
+        [(equal? segments '("glaze" "api.js"))
+         (native-transport-count-resource! transport)
+         (values #"application/javascript; charset=utf-8"
+                 (string->bytes/utf-8 (native-api-client-js (native-transport-routes transport))))]
+        ;; The bridge surface (/glaze/*) is message-handler-only; never
+        ;; fall back to index.html for it.
+        [(and (pair? segments) (string=? (first segments) "glaze"))
+         (values #"text/plain; charset=utf-8" #"Not found")]
+        [else
+         (define-values (m d) (static-resource (native-transport-public-dir transport) segments))
+         (if m
+             (begin
+               (native-transport-count-resource! transport)
+               (values m d))
+             (values #"text/plain; charset=utf-8" #"Not found"))]))
+    (webkit_uri_scheme_request_finish
+     request
+     (g_memory_input_stream_new_from_data data (bytes-length data) #f)
+     (bytes-length data)
+     (bytes->string/utf-8 mime)))
+  (with-handlers ([exn:fail? (lambda (e)
+                               ((current-glaze-error-reporter) e "glz1:scheme")
+                               (finish-empty! "text/plain"))])
+    (serve!)))
+
+;; "script-message-received::glz1" callback: (ucm, js_result, user_data).
+(define (native-message-callback ucm js-result _user-data)
+  ;; The wiring lookup keys on the UCM pointer — the stable per-window
+  ;; identity this callback is connected to. (An earlier revision keyed on
+  ;; js-result, which is a fresh object per message and never matched.)
+  (define wiring
+    (call-with-semaphore native-wirings-sema
+                         (lambda () (hash-ref native-wirings (cast ucm _pointer _uintptr) #f))))
+  (when wiring
+    (with-handlers ([exn:fail? (lambda (e) ((current-glaze-error-reporter) e "glz1:linux"))])
+      (define value (webkit_javascript_result_get_js_value js-result))
+      (when (and value (jsc_value_is_string value))
+        (define text (jsc_value_to_string value))
+        (when (string? text)
+          (native-transport-message! (native-wiring-transport wiring) text))))))
+
+;; JavaScript snippets awaiting webkit_web_view_evaluate_javascript on the
+;; window's pump thread: (cons view js-string).
+(define (drain-deliveries! wv)
+  (define queue (lin:webview-deliver-queue wv))
+  (let loop ()
+    (define v (and queue (async-channel-try-get queue)))
+    (when v
+      (with-handlers ([exn:fail? (lambda (_) (void))])
+        (webkit_web_view_evaluate_javascript (car v) (native-delivery-js (cdr v)) -1 #f #f #f #f #f))
+      (loop))))
+
 (define (pump-loop wv)
   (let loop ()
     (unless (unbox (lin:webview-closed?-box wv))
       ;; Non-blocking iteration of the shared default main context (the one
       ;; gtk_init installed); FALSE = don't block waiting for events.
       (g_main_context_iteration #f #f)
+      (drain-deliveries! wv)
       (unless (and gtk_window_is_maximized (gtk_window_is_maximized (lin:webview-window wv)))
         (define current (raw-geometry wv))
         (when current
@@ -174,10 +325,29 @@
                       #:devtools? [devtools? #f]
                       #:native-transport [native-transport #f]
                       #:on-close [on-close (lambda () (void))])
-  ;; The native transport ships on macOS first (docs/architecture-1.0.md
-  ;; migration step 5 covers the ports).
+  (unless (supported?)
+    (error 'open-webview "Linux WebView backend not available"))
   (when native-transport
-    (error 'open-webview "the native transport is not supported on this platform yet"))
+    (unless (and native-transport? native-transport)
+      (raise-argument-error 'open-webview "native-transport?" native-transport))
+    ;; The native transport needs the scheme registration, the user content
+    ;; manager, and evaluate_javascript; fail before any window exists.
+    (unless (and webkit_web_view_new_with_user_content_manager
+                 webkit_user_content_manager_new
+                 webkit_user_content_manager_register_script_message_handler
+                 webkit_user_script_new
+                 webkit_user_content_manager_add_script
+                 webkit_web_context_get_default
+                 webkit_web_context_register_uri_scheme
+                 webkit_uri_scheme_request_get_uri
+                 webkit_uri_scheme_request_get_web_view
+                 webkit_uri_scheme_request_finish
+                 g_memory_input_stream_new_from_data
+                 webkit_web_view_evaluate_javascript
+                 webkit_javascript_result_get_js_value
+                 jsc_value_is_string
+                 jsc_value_to_string)
+      (error 'open-webview "the native transport needs WebKitGTK 2.40+ APIs which are unavailable")))
   (define (show-devtools-later!)
     ;; The inspector window needs the webview realized; retry briefly.
     (thread (lambda ()
@@ -190,15 +360,49 @@
                   [else
                    (sleep 0.1)
                    (retry deadline)])))))
-  (unless (supported?)
-    (error 'open-webview "Linux WebView backend not available"))
   (gtk_init #f #f)
+  ;; Native transport: the glaze:// scheme must be registered on the web
+  ;; context BEFORE the first webview that uses it spins up its web
+  ;; process. The callback dispatches per requesting webview, so the
+  ;; per-window wiring can be registered afterwards.
+  (when native-transport
+    (define scheme-cptr (function-ptr native-scheme-callback (_fun _pointer _pointer -> _void)))
+    (set! callback-ptrs (cons scheme-cptr callback-ptrs))
+    (webkit_web_context_register_uri_scheme (webkit_web_context_get_default)
+                                            "glaze"
+                                            scheme-cptr
+                                            #f
+                                            #f)
+    (fprintf (current-error-port) "[glaze-linux-webview] glaze scheme registered\n"))
   (define window (gtk_window_new 0)) ; GTK_WINDOW_TOPLEVEL = 0
   (gtk_window_set_title window title)
   (gtk_window_set_default_size window width height)
-  (define webview (webkit_web_view_new))
+  ;; Native transport: a dedicated user content manager carries the glz1
+  ;; script message handler, and the webview must be created WITH it
+  ;; (post-hoc attachment is not a WebKitGTK API).
+  (define ucm #f)
+  (define webview
+    (if native-transport
+        (let ()
+          (set! ucm (webkit_user_content_manager_new))
+          (webkit_user_content_manager_register_script_message_handler ucm "glz1")
+          ;; The bootstrap must be injected at document start (WKUserScript /
+          ;; AddScriptToExecuteOnDocumentCreated equivalents live here on
+          ;; this platform; without it __glz1 is missing and the page never
+          ;; posts a single message).
+          (define user-script
+            (webkit_user_script_new native-bootstrap-js
+                                    0 ; WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START
+                                    2 ; WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES
+                                    #f
+                                    #f))
+          (webkit_user_content_manager_add_script ucm user-script)
+          (when webkit_user_script_unref
+            (webkit_user_script_unref user-script))
+          (webkit_web_view_new_with_user_content_manager ucm))
+        (webkit_web_view_new)))
   (gtk_container_add window webview)
-  (webkit_web_view_load_uri webview url)
+  (webkit_web_view_load_uri webview (if native-transport "glaze://app/" url))
   (gtk_widget_show_all window)
   (when devtools?
     (show-devtools-later!))
@@ -207,10 +411,32 @@
   (connect-on-close! window
                      (lambda ()
                        (set-box! closed? #t)
+                       (when native-transport
+                         (with-handlers ([exn:fail? (lambda (_) (void))])
+                           (native-transport-shutdown! native-transport))
+                         (native-wiring-remove! (cast webview _pointer _uintptr))
+                         (native-wiring-remove! (cast ucm _pointer _uintptr)))
                        (on-close)))
 
-  (define wv (lin:webview window webview url closed? (box #f) #f))
+  (define wv (lin:webview window webview url closed? (box #f) #f (make-async-channel #f)))
   (set-box! (lin:webview-normal-geometry-box wv) (raw-geometry wv))
+  (when native-transport
+    (define wiring (native-wiring native-transport #f))
+    (native-wiring-put! (cast webview _pointer _uintptr) wiring)
+    (native-wiring-put! (cast ucm _pointer _uintptr) wiring)
+    (define msg-cptr
+      (function-ptr (lambda (_ucm js-result _user-data)
+                      (native-message-callback _ucm js-result _user-data))
+                    (_fun _pointer _pointer _pointer -> _void)))
+    (set! callback-ptrs (cons msg-cptr callback-ptrs))
+    (define handler-id (g_signal_connect_data ucm "script-message-received::glz1" msg-cptr #f #f 0))
+    (fprintf (current-error-port)
+             "[glaze-linux-webview] glz1 signal connected, handler-id=~s ucm-bound?=~s\n"
+             handler-id
+             (and webkit_user_content_manager_register_script_message_handler #t))
+    (native-transport-set-deliver!
+     native-transport
+     (lambda (js) (async-channel-put (lin:webview-deliver-queue wv) (cons webview js)))))
   (set-lin:webview-thread! wv (thread (lambda () (pump-loop wv))))
   wv)
 

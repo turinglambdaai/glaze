@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Windows and Linux native-transport ports (`run-app #:transport 'native`
+  now works on all three platforms): WebView2 carries GLZ1 envelopes
+  through `window.chrome.webview` and serves `glaze://app/*` via
+  `AddWebResourceRequestedFilter` with responses built through
+  `CreateWebResourceResponse`; WebKitGTK shares WKWebView's
+  message-handler JS API and registers the scheme on the default web
+  context, dispatching per requesting webview. The cross-platform e2e
+  script runs the full native round trip in a real window on all three.
+- Per-window capability on the native transport: every window is its own
+  identity — `open-app-window #:capability` mints a dedicated transport
+  with exactly that authority, so grants attach to the window instead of a
+  shared origin.
 - macOS vertical slice of the native host transport
   (`docs/architecture-1.0.md`, part of #53): with
   `run-app #:transport 'native`, the page loads from the controlled

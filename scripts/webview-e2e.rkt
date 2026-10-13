@@ -13,6 +13,8 @@
 (require racket/file
          racket/list
          racket/string
+         glaze/api
+         glaze/native-transport
          glaze/server
          glaze/webview/main)
 
@@ -131,6 +133,68 @@
 (delete-directory/files dir)
 (when (file-exists? state-path)
   (delete-file state-path))
+
+;; ---- native transport: controlled scheme + GLZ1 message handler ----
+;; The page loads from glaze://app/ (never a TCP port) and invokes the
+;; backend through the host's message handler; recording the result via a
+;; second invoke proves the FULL loop: bootstrap injected at document
+;; start, message reached the transport, dispatch ran the route, and the
+;; response was delivered back into the page's promise chain.
+(require glaze/api
+         glaze/native-transport)
+(define nt-dir (make-temporary-file "glaze-e2e-native-~a" 'directory))
+(define nt-page
+  (string-append
+   "<!DOCTYPE html><html><head><title>native-e2e</title>"
+   "<script src=\"/glaze/api.js\"></script></head><body>native</body>"
+   "<script>"
+   "glaze.invoke('api/ping')"
+   ".then(function (v) { return glaze.invoke('api/record', { pong: v.pong, href: location.href }); })"
+   ".catch(function (e) { window.__glz1Error = String(e); });"
+   "</script></html>"))
+(call-with-output-file (build-path nt-dir "index.html")
+                       (lambda (o) (display nt-page o))
+                       #:exists 'replace)
+(define nt-recorded (box #f))
+(define nt-done (make-semaphore 0))
+(define nt-routes
+  (list (GET "api/ping" (lambda (_req) (hasheq 'pong #t)))
+        (POST "api/record"
+              (lambda (req)
+                (set-box! nt-recorded (request-json-body req))
+                (semaphore-post nt-done)
+                (hasheq 'saved #t)))))
+(define nt (start-native-transport #:api nt-routes #:public-dir nt-dir))
+(define nt-closed? (box #f))
+(define ntw
+  (open-webview (native-app-origin)
+                #:title "glaze e2e native"
+                #:width 640
+                #:height 480
+                #:native-transport nt
+                #:on-close (lambda () (set-box! nt-closed? #t))))
+(check! "native window opens" (webview? ntw))
+(define nt-url-ok?
+  (wait-until (lambda ()
+                (and (webview-url ntw) (string-prefix? (webview-url ntw) (native-app-origin))))))
+(check! "native page committed from the controlled origin" nt-url-ok?)
+(define nt-roundtrip-ok? (wait-until (lambda () (unbox nt-recorded)) 30))
+(check! "native invoke round trip reached the backend" (and nt-roundtrip-ok? #t))
+(check! "native result carries the invoke value"
+        (equal? (and (hash? (unbox nt-recorded)) (hash-ref (unbox nt-recorded) 'pong)) #t))
+(check! "native page really runs on the controlled origin"
+        (string-prefix? (or (and (hash? (unbox nt-recorded)) (hash-ref (unbox nt-recorded) 'href #f))
+                            "")
+                        (native-app-origin)))
+(define nt-stats (native-transport-stats nt))
+(log (format "native stats: ~s" nt-stats))
+(check! "scheme served the page resources" (>= (hash-ref nt-stats 'resources-served 0) 1))
+(check! "message handler carried both invokes" (>= (hash-ref nt-stats 'messages-received 0) 2))
+(webview-close ntw)
+(sleep 0.5)
+(check! "native window on-close fired" (unbox nt-closed?))
+(native-transport-shutdown! nt)
+(delete-directory/files nt-dir)
 
 (if (null? failures)
     (begin

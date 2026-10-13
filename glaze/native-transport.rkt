@@ -54,6 +54,9 @@
          glz1-error-envelope
          native-transport?
          native-transport-routes
+         native-delivery
+         native-delivery-js
+         native-delivery-json
          start-native-transport
          native-transport-message!
          native-transport-set-deliver!
@@ -61,6 +64,8 @@
          native-transport-stats
          native-transport-count-resource!
          native-transport-shutdown!
+         native-scheme-segments
+         native-app-origin
          native-api-client-js
          native-bootstrap-js)
 
@@ -328,6 +333,13 @@
   (define box (native-transport-stats-box t))
   (set-box! box (hash-update (unbox box) key add1 0)))
 
+;; One delivery to the page, in both carriers: `js` is a self-contained
+;; JavaScript snippet for evaluateJavaScript-style hosts (WKWebView,
+;; WebKitGTK); `json` is the bare JSON text for PostWebMessageAsJson-style
+;; hosts (WebView2 delivers it as a parsed object on the message event).
+;; Host wiring picks its carrier and hops it to the UI thread.
+(struct native-delivery (js json) #:transparent)
+
 ;; JS snippet that resolves one pending invoke: the response travels as a
 ;; JSON text inside a JSON string literal, so no hand-rolled escaping is
 ;; needed and the page does one JSON.parse.
@@ -408,7 +420,8 @@
                        (native-transport-table t)
                        route->js-name)))
   (bump-stat! t 'responses-delivered)
-  ((unbox (native-transport-deliver-box t)) (deliver-response-js response)))
+  ((unbox (native-transport-deliver-box t)) (native-delivery (deliver-response-js response)
+                                                             (jsexpr->string response))))
 
 (define (event-loop t ch)
   (define bus (native-transport-bus t))
@@ -419,7 +432,13 @@
       [else
        (match-define (list seq name data) v)
        (bump-stat! t 'events-delivered)
-       ((unbox (native-transport-deliver-box t)) (events-deliver-js seq name data))
+       ((unbox (native-transport-deliver-box t))
+        (native-delivery (events-deliver-js seq name data)
+                         (jsexpr->string (list seq
+                                               (if (symbol? name)
+                                                   (symbol->string name)
+                                                   name)
+                                               data))))
        (loop)])))
 
 ;; Called by the host's message handler (on the UI thread); never blocks.
@@ -456,13 +475,41 @@
         (kill-thread th)))
     (set-box! (native-transport-threads-box t) '())))
 
+;; ---- scheme URL parsing (shared by every platform's scheme handler) ----
+
+;; "glaze://app/sub/x.js?query#frag" -> '("sub" "x.js"), percent-decoded.
+;; The host scheme handlers route on this, so a hostile or malformed URL
+;; simply produces #f / non-"glaze" segments and falls to the 404 path.
+(require (only-in net/uri-codec uri-decode))
+;; WKWebView/WebKitGTK load the controlled scheme directly
+;; (glaze://app/...). WebView2 refuses top-level navigation to custom
+;; schemes — the exact reason Tauri uses http://tauri.localhost on
+;; Windows — so the Windows host serves http://glaze.localhost/... and the
+;; parser accepts both shapes.
+(define (native-scheme-segments url-str)
+  (define m
+    (or (regexp-match #rx"^glaze://app/(.*)$" (or url-str ""))
+        (regexp-match #rx"^https?://glaze[.]localhost/(.*)$" (or url-str ""))))
+  (and m
+       (let* ([rest (second m)]
+              [path (car (regexp-split #rx"[?#]" rest))])
+         (filter non-empty-string? (map uri-decode (string-split path "/"))))))
+;; The origin the page runs on, per platform (for e2e assertions).
+(define (native-app-origin)
+  (if (eq? (system-type 'os) 'windows) "http://glaze.localhost/" "glaze://app/"))
+
 ;; ---- page-side bindings ----
 
 ;; Injected at document start by the host (WKUserScript and equivalents).
 ;; Defines the delivery plumbing and a transport-level client:
-;; __glz1.invoke / cancel / hello / on. The generated native api.js (served
-;; by the scheme handler at /glaze/api.js) binds glaze.call / glaze.api on
-;; top of this, so app HTML needs no changes between adapters.
+;; __glz1.invoke / cancel / hello / on. Host API differences are confined
+;; to the `sink` selection (see the heredoc): WKWebView (macOS) and
+;; WebKitGTK (Linux) share the webkit message-handler API, WebView2
+;; (Windows) posts through window.chrome.webview and delivers
+;; PostWebMessageAsJson back on the message event. The generated native
+;; api.js (served by the scheme handler at /glaze/api.js) binds
+;; glaze.call / glaze.api on top of this, so app HTML needs no changes
+;; between adapters or platforms.
 (define native-bootstrap-js
   #<<JS
 (function () {
@@ -470,10 +517,23 @@
   var pending = {};
   var seq = 0;
   var listeners = [];
+  var sink = null;
+  // WKWebView (macOS) and WebKitGTK (Linux) share the webkit
+  // message-handler API; WebView2 (Windows) posts through
+  // window.chrome.webview and delivers PostWebMessageAsJson back on the
+  // message event.
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glz1) {
+    sink = { send: function (text) { window.webkit.messageHandlers.glz1.postMessage(text); } };
+  } else if (window.chrome && window.chrome.webview) {
+    sink = { send: function (text) { window.chrome.webview.postMessage(text); } };
+    window.chrome.webview.addEventListener("message", function (e) {
+      var d = e.data;
+      if (d && d.glz === 1 && d.id) { window.__glz1Deliver(d.id, JSON.stringify(d)); }
+    });
+  }
   function send(envelope) {
-    var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glz1;
-    if (!h) { throw new Error("native bridge unavailable"); }
-    h.postMessage(JSON.stringify(envelope));
+    if (!sink) { throw new Error("native bridge unavailable"); }
+    sink.send(JSON.stringify(envelope));
   }
   window.__glz1Deliver = function (id, text) {
     var p = pending[id];

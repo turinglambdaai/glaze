@@ -41,10 +41,13 @@
 ;; WebView2 Evergreen Runtime is preinstalled on Windows 11.
 
 (require ffi/unsafe
+         racket/async-channel
          racket/file
+         racket/list
          racket/string
          racket/system
          racket/runtime-path
+         "../native-transport.rkt"
          "../tray/tray-protocol.rkt")
 
 (provide open-webview
@@ -91,6 +94,12 @@
 ;; ICoreWebView2CreateCoreWebView2ControllerCompletedHandler
 (define IID-CtrlHandler
   (bytes #xE0 #xA7 #xC1 #x63 #x68 #xCB #x3B #x44 #x8B #xA8 #x4D #x08 #xCF #x11 #xF0 #xAE))
+;; ICoreWebView2WebMessageReceivedEventHandler
+(define IID-WebMessageHandler
+  (bytes #x19 #x3F #x21 #x57 #xE6 #x00 #xFA #x49 #x8E #x07 #x89 #x8E #xA0 #x1E #xCB #xD2))
+;; ICoreWebView2WebResourceRequestedEventHandler
+(define IID-WebResourceHandler
+  (bytes #x4C #xB7 #x00 #xAB #xF1 #x15 #x46 #x46 #x80 #xE8 #xE7 #x63 #x41 #xD2 #x5D #x71))
 
 (define (log fmt . args)
   (apply fprintf (current-error-port) (string-append "[glaze-win-webview] " fmt "\n") args))
@@ -159,6 +168,52 @@
   (ptr-set! obj _pointer 0 vt)
   (hash-set! handler-table obj (list fn-qi fn-add fn-rel fn-inv))
   obj)
+
+;; Event handlers have a different Invoke signature than the init
+;; callbacks: Invoke(self, sender, args) with TWO pointers. The init
+;; handler's _int32 second-argument annotation would truncate a 64-bit
+;; pointer, so event handlers get their own constructor.
+(define (make-com-event-handler iid on-event)
+  (define (qi self in-iid out)
+    (define incoming (ptr->bytes in-iid 16))
+    (cond
+      ;; WebView2 queries the handler (at least for IUnknown) when the
+      ;; listener is registered; answering S_OK without writing the out
+      ;; pointer hands it a garbage pointer.
+      [(or (bytes=? incoming iid) (bytes=? incoming IID-IUnknown))
+       (ptr-set! out _pointer 0 self)
+       S_OK]
+      [else
+       (ptr-set! out _pointer 0 #f)
+       E_NOINTERFACE]))
+  (define (addref self)
+    2)
+  (define (release self)
+    1)
+  (define (invoke self sender args)
+    (on-event sender args)
+    S_OK)
+  (define fn-qi (function-ptr qi (_fun _pointer _pointer _pointer -> _int32)))
+  (define fn-add (function-ptr addref (_fun _pointer -> _uint32)))
+  (define fn-rel (function-ptr release (_fun _pointer -> _uint32)))
+  (define fn-inv (function-ptr invoke (_fun _pointer _pointer _pointer -> _int32)))
+  (define vt (malloc (* 4 (ctype-sizeof _pointer)) _pointer 'raw))
+  (ptr-set! vt _pointer 0 fn-qi)
+  (ptr-set! vt _pointer 1 fn-add)
+  (ptr-set! vt _pointer 2 fn-rel)
+  (ptr-set! vt _pointer 3 fn-inv)
+  (define obj (malloc (ctype-sizeof _pointer) _pointer 'raw))
+  (ptr-set! obj _pointer 0 vt)
+  (hash-set! handler-table obj (list fn-qi fn-add fn-rel fn-inv))
+  obj)
+
+;; Memory IStream for CreateWebResourceResponse (shcore, Windows 8+).
+(define shcore
+  (with-handlers ([exn:fail? (lambda (e) #f)])
+    (ffi-lib "shcore")))
+(define SHCreateMemStream
+  (and shcore
+       (get-ffi-obj "SHCreateMemStream" shcore (_fun _pointer _uint -> _pointer) (lambda () #f))))
 
 ;; ---- Win32 / WebView2 bindings ----
 (define CreateCoreWebView2EnvironmentWithOptions
@@ -293,6 +348,7 @@
                   error-box
                   closed?-box
                   [thread #:mutable]
+                  [deliver-queue #:mutable]
                   on-close)
   #:transparent)
 
@@ -363,6 +419,118 @@
            (define-values (hr p) (fn cwv))
            (and (= hr S_OK) (wstr->string p))))))
 
+;; ---- native transport (docs/architecture-1.0.md migration step 5) ----
+;; vtable indices verified against the official WebView2.h (Microsoft.Web.
+;; WebView2 nupkg): ICoreWebView2 PostWebMessageAsJson = 32,
+;; add_WebMessageReceived = 34, add_WebResourceRequested = 55,
+;; AddWebResourceRequestedFilter = 57; WebMessageReceivedEventArgs
+;; TryGetWebMessageAsString = 5; WebResourceRequestedEventArgs get_Request
+;; = 3 / put_Response = 5; WebResourceRequest get_Uri = 3; Environment
+;; CreateWebResourceResponse = 4.
+;;
+;; The resource filter and both event handlers are registered in the
+;; controller callback BEFORE the first navigation; the page then loads
+;; from glaze://app/ and never sees the loopback server. Deliveries
+;; (GLZ1 responses, event batches) are queued and posted from the window's
+;; own pump thread via PostWebMessageAsJson.
+
+(define (win-scheme-url args)
+  (define-values (hr req) (call-with-out args 3)) ; get_Request
+  (and (= hr S_OK) req ((cwv-getter 3) req))) ; get_Uri
+
+(define (win-scheme-serve! wiring args)
+  (log "scheme: enter")
+  (define transport (native-wiring-transport wiring))
+  (define env (native-wiring-env wiring))
+  (log "scheme: wiring ok, env=~s" (and env #t))
+  (define (respond! mime data)
+    (log "scheme: respond mime=~a len=~a" (bytes->string/latin-1 mime) (bytes-length data))
+    (define stream (and SHCreateMemStream (SHCreateMemStream data (bytes-length data))))
+    (define make-resp
+      (cast (vtfn env 4)
+            _fpointer
+            (_fun _pointer
+                  _pointer
+                  _int
+                  _pointer
+                  _pointer
+                  (p : (_ptr o _pointer))
+                  ->
+                  (r : _int32)
+                  ->
+                  (values r p))))
+    (define bare-mime (car (regexp-split #rx";" (bytes->string/latin-1 mime))))
+    (define headers
+      (wstr (string-append "Content-Type: " bare-mime "\r\nX-Content-Type-Options: nosniff")))
+    (define-values (hr resp) (make-resp env stream 200 (wstr "OK") headers))
+    (unless (= hr S_OK)
+      (error 'win-scheme-serve! "CreateWebResourceResponse failed: 0x~x" (bitwise-and hr #xffffffff)))
+    (define put (cast (vtfn args 5) _fpointer (_fun _pointer _pointer -> _int32)))
+    (put args resp))
+  (define (respond-status! code)
+    (respond! #"text/plain" (string->bytes/utf-8 (format "~a" code))))
+  (with-handlers ([exn:fail? (lambda (e)
+                               (log "scheme: EXN ~a" (exn-message e))
+                               ((current-glaze-error-reporter) e "glz1:scheme")
+                               (respond-status! 404))])
+    (define url (win-scheme-url args))
+    (log "scheme: url=~s" url)
+    (define segments (native-scheme-segments url))
+    (cond
+      [(not segments) (respond-status! 404)]
+      [(equal? segments '("glaze" "api.js"))
+       (native-transport-count-resource! transport)
+       (respond! #"application/javascript; charset=utf-8"
+                 (string->bytes/utf-8 (native-api-client-js (native-transport-routes transport))))]
+      ;; The bridge surface (/glaze/*) is message-handler-only here; never
+      ;; fall back to index.html for it.
+      [(and (pair? segments) (string=? (first segments) "glaze")) (respond-status! 404)]
+      [else
+       (define-values (mime data) (static-resource (native-transport-public-dir transport) segments))
+       (if mime
+           (begin
+             (native-transport-count-resource! transport)
+             (respond! mime data))
+           (respond-status! 404))])))
+
+(define (win-handle-message! wiring args)
+  (log "message: enter")
+  (define transport (native-wiring-transport wiring))
+  (define fn
+    (cast (vtfn args 5) ; TryGetWebMessageAsString
+          _fpointer
+          (_fun _pointer (p : (_ptr o _pointer)) -> (r : _int32) -> (values r p))))
+  (define-values (hr p) (fn args))
+  (log "message: hr=0x~x" (bitwise-and hr #xffffffff))
+  (when (= hr S_OK)
+    (define text (wstr->string p))
+    (when (string? text)
+      (log "message: envelope received")
+      (native-transport-message! transport text))))
+
+(struct native-wiring (transport env) #:transparent)
+
+;; JavaScript snippets awaiting PostWebMessageAsJson on the window's pump
+;; thread: (cons cwv-box js-string). The box indirection is safe against a
+;; late delivery after close (the box just still holds the old interface).
+(define (drain-deliveries! wv)
+  (define queue (win:webview-deliver-queue wv))
+  (let loop ()
+    (define v (and queue (async-channel-try-get queue)))
+    (when v
+      ;; The queue entry carries the ICoreWebView2 pointer directly (the
+      ;; struct's cwv-box field holds the interface, not a box). WebView2's
+      ;; PostWebMessageAsJson wants the BARE JSON carrier, not the JS
+      ;; snippet; the page's message-event bridge turns it into
+      ;; __glz1Deliver.
+      (define cwv (car v))
+      (when cwv
+        (with-handlers ([exn:fail? (lambda (e) (log "deliver: EXN ~a" (exn-message e)))])
+          (define post (cast (vtfn cwv 32) _fpointer (_fun _pointer _pointer -> _int32)))
+          (define hr (post cwv (wstr (native-delivery-json (cdr v)))))
+          (log "deliver: post hr=0x~x" (bitwise-and hr #xffffffff))))
+      (loop))))
+
 (define (open-webview url
                       #:title [title "Glaze"]
                       #:width [width 1024]
@@ -370,21 +538,24 @@
                       #:devtools? [devtools? #f]
                       #:native-transport [native-transport #f]
                       #:on-close [on-close (lambda () (void))])
-  ;; The native transport ships on macOS first (docs/architecture-1.0.md
-  ;; migration step 5 covers the ports).
-  (when native-transport
-    (error 'open-webview "the native transport is not supported on this platform yet"))
   (unless (supported?)
     (error 'open-webview "WebView2 backend unavailable"))
+  (when native-transport
+    (unless (native-transport? native-transport)
+      (raise-argument-error 'open-webview "native-transport?" native-transport)))
   (when CoInitialize
     (CoInitialize #f))
 
-  (define wv (win:webview (box #f) #f #f url (box #f) (box #f) (box #f) #f on-close))
+  (define wv
+    (win:webview (box #f) #f #f url (box #f) (box #f) (box #f) #f (make-async-channel #f) on-close))
   (define instance (GetModuleHandleW #f))
 
   ;; controller callback: AddRef both interfaces into the handle, Navigate,
-  ;; signal ready.
-  (define url-ptr (wstr url))
+  ;; signal ready. WebView2 refuses top-level navigation to custom schemes
+  ;; (the reason Tauri uses http://tauri.localhost on Windows), so the page
+  ;; loads from http://glaze.localhost/ and the resource filter intercepts
+  ;; it before any network access.
+  (define url-ptr (wstr (if native-transport "http://glaze.localhost/" url)))
   (define ctrl-handler
     (make-com-handler
      IID-CtrlHandler
@@ -418,6 +589,60 @@
                    (define put-bounds
                      (cast (vtfn controller 6) _fpointer (_fun _pointer _RECT -> _int32)))
                    (put-bounds controller (make-RECT 0 0 (RECT-right rc) (RECT-bottom rc)))
+                   ;; Native transport: bootstrap + scheme filter + both
+                   ;; event handlers must be in place BEFORE the first
+                   ;; navigation, so the page never touches a TCP port.
+                   (when native-transport
+                     (log "native: registering handlers")
+                     (define wiring (native-wiring native-transport (unbox env-box)))
+                     ;; AddScriptToExecuteOnDocumentCreated(script,
+                     ;; handler) — the completion handler is a third [in]
+                     ;; parameter (nullable); omitting it made WebView2 read
+                     ;; a garbage stack value and call it later: segfault.
+                     (define add-script
+                       (cast (vtfn cwv 27) _fpointer (_fun _pointer _pointer _pointer -> _int32)))
+                     (add-script cwv (wstr native-bootstrap-js) #f)
+                     (define add-filter
+                       (cast (vtfn cwv 57) _fpointer (_fun _pointer _pointer _int -> _int32)))
+                     (add-filter cwv (wstr "http://glaze.localhost/*") 0) ; WEB_RESOURCE_CONTEXT_ALL
+                     (define wrr-handler
+                       (make-com-event-handler IID-WebResourceHandler
+                                               (lambda (_sender args)
+                                                 (win-scheme-serve! wiring args))))
+                     (log "native: script+filter done")
+                     (define add-wrr
+                       (cast (vtfn cwv 55)
+                             _fpointer
+                             (_fun _pointer
+                                   _pointer
+                                   (t : (_ptr o _uintptr))
+                                   ->
+                                   (r : _int32)
+                                   ->
+                                   (values r t))))
+                     (log "native: wrr added")
+                     (add-wrr cwv wrr-handler)
+                     (log "native: wmr registering")
+                     (define wmr-handler
+                       (make-com-event-handler IID-WebMessageHandler
+                                               (lambda (_sender args)
+                                                 (win-handle-message! wiring args))))
+                     (define add-wmr
+                       (cast (vtfn cwv 34)
+                             _fpointer
+                             (_fun _pointer
+                                   _pointer
+                                   (t : (_ptr o _uintptr))
+                                   ->
+                                   (r : _int32)
+                                   ->
+                                   (values r t))))
+                     (add-wmr cwv wmr-handler)
+                     (native-transport-set-deliver!
+                      native-transport
+                      (lambda (js)
+                        (async-channel-put (win:webview-deliver-queue wv)
+                                           (cons (win:webview-cwv-box wv) js)))))
                    (define nav (cast (vtfn cwv 5) _fpointer (_fun _pointer _pointer -> _int32)))
                    (define nav-hr (nav cwv url-ptr))
                    (log "Navigate hr=0x~x" (bitwise-and nav-hr #xffffffff))
@@ -426,7 +651,10 @@
                      (od cwv))
                    (set-box! (win:webview-ready?-box wv) #t))))))))
 
-  ;; env handler: immediately CreateController.
+  ;; env handler: immediately CreateController. The environment is AddRef'd
+  ;; and shared with the controller callback (CreateWebResourceResponse
+  ;; needs it to build scheme responses).
+  (define env-box (box #f))
   (define env-handler
     (make-com-handler
      IID-EnvHandler
@@ -439,6 +667,9 @@
                               "CreateEnvironment failed: 0x~x"
                               (bitwise-and errcode #xffffffff))))
            (let ()
+             (define addref (cast (vtfn env 1) _fpointer (_fun _pointer -> _uint32)))
+             (addref env)
+             (set-box! env-box env)
              (define create-ctrl
                (cast (vtfn env 3) _fpointer (_fun _pointer _pointer _pointer -> _int32)))
              (create-ctrl env (unbox (win:webview-hwnd-box wv)) ctrl-handler))))))
@@ -497,13 +728,15 @@
   (when (unbox (win:webview-error-box wv))
     (raise (unbox (win:webview-error-box wv))))
 
-  ;; Spawn a thread for the ongoing message pump.
+  ;; Spawn a thread for the ongoing message pump. Deliveries ride the same
+  ;; loop: PostWebMessageAsJson from the thread that services this window.
   (define (pump-loop)
     (unless (unbox (win:webview-closed?-box wv))
       (define msg (malloc (ctype-sizeof _MSG) 'atomic))
       (when (PeekMessageW msg #f 0 0 PM_REMOVE)
         (TranslateMessage msg)
         (DispatchMessageW msg))
+      (drain-deliveries! wv)
       (sleep 0.01)
       (pump-loop)))
   (set-win:webview-thread! wv (thread pump-loop))

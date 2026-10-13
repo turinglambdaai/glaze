@@ -58,7 +58,6 @@
          racket/file
          racket/list
          racket/string
-         (only-in net/uri-codec uri-decode)
          "../native-transport.rkt"
          "../tray/tray-protocol.rkt")
 
@@ -216,13 +215,7 @@
 (define (native-wiring-remove! key)
   (call-with-semaphore native-wirings-sema (lambda () (hash-remove! native-wirings key))))
 
-;; "glaze://app/sub/x.js?query#frag" -> '("sub" "x.js"), percent-decoded.
-(define (glaze-scheme-segments url-str)
-  (define m (regexp-match #rx"^glaze://app/(.*)$" (or url-str "")))
-  (and m
-       (let* ([rest (second m)]
-              [path (car (regexp-split #rx"[?#]" rest))])
-         (filter non-empty-string? (map uri-decode (string-split path "/"))))))
+(define glaze-scheme-segments native-scheme-segments)
 
 ;; The task's NSURL object — for building responses.
 (define (scheme-task-url task)
@@ -364,7 +357,12 @@
     (define v (async-channel-try-get deliver-queue))
     (when v
       (with-handlers ([exn:fail? (lambda (_) (void))])
-        (tellv (car v) evaluateJavaScript: (->nsstring (cdr v)) completionHandler: #:type _id #f))
+        (tellv (car v)
+               evaluateJavaScript:
+               (->nsstring (native-delivery-js (cdr v)))
+               completionHandler:
+               #:type _id
+               #f))
       (loop))))
 
 (define (drain-scheme-responses!)
