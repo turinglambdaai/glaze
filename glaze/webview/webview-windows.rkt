@@ -519,12 +519,15 @@
     (define v (and queue (async-channel-try-get queue)))
     (when v
       ;; The queue entry carries the ICoreWebView2 pointer directly (the
-      ;; struct's cwv-box field holds the interface, not a box).
+      ;; struct's cwv-box field holds the interface, not a box). WebView2's
+      ;; PostWebMessageAsJson wants the BARE JSON carrier, not the JS
+      ;; snippet; the page's message-event bridge turns it into
+      ;; __glz1Deliver.
       (define cwv (car v))
       (when cwv
         (with-handlers ([exn:fail? (lambda (e) (log "deliver: EXN ~a" (exn-message e)))])
           (define post (cast (vtfn cwv 32) _fpointer (_fun _pointer _pointer -> _int32)))
-          (define hr (post cwv (wstr (cdr v))))
+          (define hr (post cwv (wstr (native-delivery-json (cdr v)))))
           (log "deliver: post hr=0x~x" (bitwise-and hr #xffffffff))))
       (loop))))
 

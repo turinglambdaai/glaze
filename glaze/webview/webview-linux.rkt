@@ -300,7 +300,7 @@
     (define v (and queue (async-channel-try-get queue)))
     (when v
       (with-handlers ([exn:fail? (lambda (_) (void))])
-        (webkit_web_view_evaluate_javascript (car v) (cdr v) -1 #f #f #f #f #f))
+        (webkit_web_view_evaluate_javascript (car v) (native-delivery-js (cdr v)) -1 #f #f #f #f #f))
       (loop))))
 
 (define (pump-loop wv)

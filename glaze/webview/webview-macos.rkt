@@ -357,7 +357,12 @@
     (define v (async-channel-try-get deliver-queue))
     (when v
       (with-handlers ([exn:fail? (lambda (_) (void))])
-        (tellv (car v) evaluateJavaScript: (->nsstring (cdr v)) completionHandler: #:type _id #f))
+        (tellv (car v)
+               evaluateJavaScript:
+               (->nsstring (native-delivery-js (cdr v)))
+               completionHandler:
+               #:type _id
+               #f))
       (loop))))
 
 (define (drain-scheme-responses!)

@@ -54,6 +54,9 @@
          glz1-error-envelope
          native-transport?
          native-transport-routes
+         native-delivery
+         native-delivery-js
+         native-delivery-json
          start-native-transport
          native-transport-message!
          native-transport-set-deliver!
@@ -330,6 +333,13 @@
   (define box (native-transport-stats-box t))
   (set-box! box (hash-update (unbox box) key add1 0)))
 
+;; One delivery to the page, in both carriers: `js` is a self-contained
+;; JavaScript snippet for evaluateJavaScript-style hosts (WKWebView,
+;; WebKitGTK); `json` is the bare JSON text for PostWebMessageAsJson-style
+;; hosts (WebView2 delivers it as a parsed object on the message event).
+;; Host wiring picks its carrier and hops it to the UI thread.
+(struct native-delivery (js json) #:transparent)
+
 ;; JS snippet that resolves one pending invoke: the response travels as a
 ;; JSON text inside a JSON string literal, so no hand-rolled escaping is
 ;; needed and the page does one JSON.parse.
@@ -410,7 +420,8 @@
                        (native-transport-table t)
                        route->js-name)))
   (bump-stat! t 'responses-delivered)
-  ((unbox (native-transport-deliver-box t)) (deliver-response-js response)))
+  ((unbox (native-transport-deliver-box t)) (native-delivery (deliver-response-js response)
+                                                             (jsexpr->string response))))
 
 (define (event-loop t ch)
   (define bus (native-transport-bus t))
@@ -421,7 +432,13 @@
       [else
        (match-define (list seq name data) v)
        (bump-stat! t 'events-delivered)
-       ((unbox (native-transport-deliver-box t)) (events-deliver-js seq name data))
+       ((unbox (native-transport-deliver-box t))
+        (native-delivery (events-deliver-js seq name data)
+                         (jsexpr->string (list seq
+                                               (if (symbol? name)
+                                                   (symbol->string name)
+                                                   name)
+                                               data))))
        (loop)])))
 
 ;; Called by the host's message handler (on the UI thread); never blocks.
