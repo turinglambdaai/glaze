@@ -61,6 +61,12 @@
 ;; ---- app record: the lifecycle kernel ----
 
 ;; start -> ready -> running -> stopping -> stopped (see module docs).
+;; Native-mode bookkeeping for the running app: open-app-window needs the
+;; route surface, the public dir, and the bus to mint per-window transports
+;; (each window is its own identity; a window opened with #:capability gets
+;; its own transport with exactly that authority).
+(struct app-native (routes public-dir authority bus default-transport) #:transparent)
+
 (struct glaze-app
         (id ; string identity (#:app-id or generated)
          state-box ; box of symbol
@@ -72,12 +78,16 @@
          quit-on-last-window?
          exit-sema ; posted by app-quit! / last-window close
          once-sema ; serializes teardown
-         shut-down?-box) ; teardown happens once
+         shut-down?-box ; teardown happens once
+         [native-info #:mutable]) ; #f or app-native? — set in native mode
   #:transparent)
 
 (define current-app (make-parameter #f))
 
-(define (make-app #:app-id app-id #:event-bus event-bus #:quit-on-last-window? quit-on-last-window?)
+(define (make-app #:app-id app-id
+                  #:event-bus event-bus
+                  #:quit-on-last-window? quit-on-last-window?
+                  #:native-info [native-info #f])
   (glaze-app (or app-id (format "glaze-app-~a" (make-api-token)))
              (box 'starting)
              (make-semaphore 1)
@@ -88,7 +98,8 @@
              quit-on-last-window?
              (make-semaphore 0)
              (make-semaphore 1)
-             (box #f)))
+             (box #f)
+             native-info))
 
 ;; State reader: (app-state) reads the current app, (app-state app) an
 ;; explicit one.
@@ -173,6 +184,7 @@
                          #:height [height 768]
                          #:window-state [state-path #f]
                          #:native-transport [native-transport #f]
+                         #:capability [capability #f]
                          #:on-close [user-on-close (lambda () (void))])
   (define app (current-app))
   (unless (glaze-app? app)
@@ -185,14 +197,37 @@
          "none")))
   (when (memq (app-state app) '(stopping stopped))
     (raise-arguments-error 'open-app-window "the app has already quit" "state" (app-state app)))
+  (when (and capability (not (capability? capability)))
+    (raise-argument-error 'open-app-window "(or/c #f capability?)" capability))
+  (when (and capability (not (glaze-app-native-info app)))
+    (raise-arguments-error 'open-app-window
+                           "#:capability applies to native-mode apps"
+                           "app transport"
+                           "http"))
   (define reporter (current-glaze-error-reporter))
+  ;; On the native transport every window is its own identity: a window
+  ;; opened with #:capability gets its own transport with exactly that
+  ;; authority (the host's per-window message handler already isolates its
+  ;; page), while the default is the app-wide transport.
+  (define window-transport
+    (cond
+      [native-transport native-transport]
+      [capability
+       (define info (glaze-app-native-info app))
+       (parameterize ([current-custodian (glaze-app-custodian app)])
+         (start-native-transport #:api (app-native-routes info)
+                                 #:authority capability
+                                 #:events (app-native-bus info)
+                                 #:public-dir (app-native-public-dir info)))]
+      [(glaze-app-native-info app) (app-native-default-transport (glaze-app-native-info app))]
+      [else #f]))
   (define wv
     (open-window url
                  #:title title
                  #:width width
                  #:height height
                  #:window-state state-path
-                 #:native-transport native-transport
+                 #:native-transport window-transport
                  #:on-close (lambda ()
                               (with-handlers ([exn:fail? (lambda (e) (reporter e "app:on-close"))])
                                 (user-on-close))
@@ -285,19 +320,27 @@
       ;; it, so #f under authority still mints one (historical contract).
       [(or authority (eq? api-token #t)) (make-api-token)]
       [else #f]))
-  (define app
-    (make-app #:app-id app-id #:event-bus event-bus #:quit-on-last-window? quit-on-last-window?))
   ;; Native transport: dispatch threads live under the app custodian and the
   ;; error reporter matches run-app's, so handler failures surface the same
-  ;; way on both transports.
+  ;; way on both transports. The transport and its parameters are recorded
+  ;; on the app so open-app-window can mint per-window identities.
+  (define app
+    (make-app #:app-id app-id #:event-bus event-bus #:quit-on-last-window? quit-on-last-window?))
   (define native-transport-handle
     (and native?
          (parameterize ([current-custodian (glaze-app-custodian app)]
-                        [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))])
-           (start-native-transport #:api api-routes
-                                   #:authority authority
-                                   #:events event-bus
-                                   #:public-dir public-dir))))
+                        [current-glaze-error-reporter (or on-error (current-glaze-error-reporter))]
+                        ;; Route handlers run on transport worker threads;
+                        ;; binding current-app here lets them open windows
+                        ;; (open-app-window) for the running app.
+                        [current-app app])
+           (define nt
+             (start-native-transport #:api api-routes
+                                     #:authority authority
+                                     #:events event-bus
+                                     #:public-dir public-dir))
+           (set-glaze-app-native-info! app (app-native api-routes public-dir authority event-bus nt))
+           nt)))
   (define-values (actual-port raw-shutdown)
     (if native?
         (values #f void)

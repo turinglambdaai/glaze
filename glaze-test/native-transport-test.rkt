@@ -211,12 +211,16 @@
 (check-true (string-contains? bs "__glz1Deliver") "bootstrap installs the delivery hook")
 (check-true (string-contains? bs "__glz1Events") "bootstrap installs the event hook")
 (check-true (string-contains? bs "messageHandlers.glz1") "bootstrap posts to the glz1 handler")
+(check-true (string-contains? bs "chrome.webview") "bootstrap covers the WebView2 bridge")
+(check-true (string-contains? bs "addEventListener")
+            "bootstrap subscribes the WebView2 delivery event")
 (check-true (string-contains? bs "timeout_ms") "bootstrap forwards timeout_ms")
 
 (define api-js (native-api-client-js routes))
 (check-true (string-contains? api-js "ping: function") "generated client has the ping entry")
 (check-true (string-contains? api-js "echoId: function") "generated client camel-cases path params")
 (check-false (string-contains? api-js "fetch(") "native client never uses fetch")
+(check-false (string-contains? api-js "window.webkit") "generated client is platform-neutral")
 (check-true (string-contains? api-js "__glz1") "native client binds through __glz1")
 
 ;; ---- transport round trip (no WebView) ----

@@ -61,6 +61,7 @@
          native-transport-stats
          native-transport-count-resource!
          native-transport-shutdown!
+         native-scheme-segments
          native-api-client-js
          native-bootstrap-js)
 
@@ -456,13 +457,31 @@
         (kill-thread th)))
     (set-box! (native-transport-threads-box t) '())))
 
+;; ---- scheme URL parsing (shared by every platform's scheme handler) ----
+
+;; "glaze://app/sub/x.js?query#frag" -> '("sub" "x.js"), percent-decoded.
+;; The host scheme handlers route on this, so a hostile or malformed URL
+;; simply produces #f / non-"glaze" segments and falls to the 404 path.
+(require (only-in net/uri-codec uri-decode))
+(define (native-scheme-segments url-str)
+  (define m (regexp-match #rx"^glaze://app/(.*)$" (or url-str "")))
+  (and m
+       (let* ([rest (second m)]
+              [path (car (regexp-split #rx"[?#]" rest))])
+         (filter non-empty-string? (map uri-decode (string-split path "/"))))))
+
 ;; ---- page-side bindings ----
 
 ;; Injected at document start by the host (WKUserScript and equivalents).
 ;; Defines the delivery plumbing and a transport-level client:
-;; __glz1.invoke / cancel / hello / on. The generated native api.js (served
-;; by the scheme handler at /glaze/api.js) binds glaze.call / glaze.api on
-;; top of this, so app HTML needs no changes between adapters.
+;; __glz1.invoke / cancel / hello / on. Host API differences are confined
+;; to the `sink` selection (see the heredoc): WKWebView (macOS) and
+;; WebKitGTK (Linux) share the webkit message-handler API, WebView2
+;; (Windows) posts through window.chrome.webview and delivers
+;; PostWebMessageAsJson back on the message event. The generated native
+;; api.js (served by the scheme handler at /glaze/api.js) binds
+;; glaze.call / glaze.api on top of this, so app HTML needs no changes
+;; between adapters or platforms.
 (define native-bootstrap-js
   #<<JS
 (function () {
@@ -470,10 +489,23 @@
   var pending = {};
   var seq = 0;
   var listeners = [];
+  var sink = null;
+  // WKWebView (macOS) and WebKitGTK (Linux) share the webkit
+  // message-handler API; WebView2 (Windows) posts through
+  // window.chrome.webview and delivers PostWebMessageAsJson back on the
+  // message event.
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glz1) {
+    sink = { send: function (text) { window.webkit.messageHandlers.glz1.postMessage(text); } };
+  } else if (window.chrome && window.chrome.webview) {
+    sink = { send: function (text) { window.chrome.webview.postMessage(text); } };
+    window.chrome.webview.addEventListener("message", function (e) {
+      var d = e.data;
+      if (d && d.glz === 1 && d.id) { window.__glz1Deliver(d.id, JSON.stringify(d)); }
+    });
+  }
   function send(envelope) {
-    var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glz1;
-    if (!h) { throw new Error("native bridge unavailable"); }
-    h.postMessage(JSON.stringify(envelope));
+    if (!sink) { throw new Error("native bridge unavailable"); }
+    sink.send(JSON.stringify(envelope));
   }
   window.__glz1Deliver = function (id, text) {
     var p = pending[id];

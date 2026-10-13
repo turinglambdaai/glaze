@@ -12,6 +12,7 @@
          racket/string
          glaze/api
          glaze/app
+         glaze/capability
          glaze/events
          glaze/native-transport
          glaze/server
@@ -272,4 +273,71 @@
   (check-equal? (and (hash? (unbox ra-recorded)) (hash-ref (unbox ra-recorded) 'pong))
                 #t
                 "run-app native round trip recorded the invoke")
-  (delete-directory/files ra-dir))
+  (delete-directory/files ra-dir)
+
+  ;; ---- per-window capability on the native transport ----
+  ;; Every window is its own identity: the app runs with the full
+  ;; authority, but a second window opened with #:capability gets its own
+  ;; transport carrying only that authority. Its page invokes a protected
+  ;; route, catches the typed denial, and reports the code through an
+  ;; allowed route — proving grants attach to the window, not a shared
+  ;; origin.
+  (define pw-dir (make-temporary-file "glaze-pw-~a" 'directory))
+  (define (pw-page invoke-js)
+    (string-append "<!DOCTYPE html><html><head><title>pw</title>"
+                   "<script src=\"/glaze/api.js\"></script></head><body>pw</body>"
+                   "<script>"
+                   invoke-js
+                   "</script></html>"))
+  (call-with-output-file
+   (build-path pw-dir "index.html")
+   (lambda (o)
+     (display
+      (pw-page
+       "glaze.invoke('api/ping').then(function () { return glaze.invoke('api/open-second-window'); })")
+      o)))
+  (call-with-output-file
+   (build-path pw-dir "restricted.html")
+   (lambda (o)
+     (display
+      (pw-page
+       "glaze.invoke('api/secret').catch(function (e) { return glaze.invoke('api/report-denied', { code: e.code }); })")
+      o)))
+  (define pw-denied (box #f))
+  (define pw-sema (make-semaphore 0))
+  (define pw-routes
+    (list (GET "api/ping" (lambda (_req) (hasheq 'pong #t)))
+          (GET "api/secret" #:permission 'secret:read (lambda (_req) (hasheq 'classified #t)))
+          (POST "api/report-denied"
+                (lambda (req)
+                  (set-box! pw-denied (request-json-body req))
+                  (semaphore-post pw-sema)
+                  (hasheq 'saved #t)))
+          (POST "api/open-second-window"
+                (lambda (_req)
+                  (open-app-window "glaze://app/restricted.html"
+                                   #:title "restricted"
+                                   #:capability (make-capability "pw-limited" '(other:thing)))
+                  (hasheq 'opened #t)))))
+  (define pw-thread
+    (thread (lambda ()
+              (with-handlers ([exn:fail? (lambda (e)
+                                           (fprintf (current-error-port)
+                                                    "pw run-app exn: ~a\n"
+                                                    (exn-message e)))])
+                (run-app #:public-dir pw-dir
+                         #:api pw-routes
+                         #:transport 'native
+                         #:api-token #f
+                         #:capability (make-capability "pw-full" '(secret:read other:thing))
+                         #:title "per-window"
+                         #:on-ready (lambda (wv u)
+                                      (thread (lambda ()
+                                                (sync/timeout 30 pw-sema)
+                                                (sleep 0.5)
+                                                (app-quit!)))))))))
+  (check-not-false (sync/timeout 45 (thread-dead-evt pw-thread)) "per-window app completed")
+  (check-equal? (and (hash? (unbox pw-denied)) (hash-ref (unbox pw-denied) 'code))
+                "capability-denied"
+                "the restricted window's invoke is denied by its own capability")
+  (delete-directory/files pw-dir))

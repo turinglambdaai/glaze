@@ -90,7 +90,37 @@ HTTP/SSE 降级为开发适配器。关键契约：
 
 `glaze-test/native-transport-test.rkt` 覆盖传输核心（无窗口，全平台 CI）；
 `glaze-test/webview-test.rkt` 的 macOS 段覆盖 scheme + 消息处理器 + run-app
-native 真窗口 e2e。
+native + per-window capability 真窗口 e2e；`scripts/webview-e2e.rkt` 的
+native 段在三平台 CI 真窗口跑（Windows=WebView2 / Linux=WebKitGTK / mac=WKWebView）。
+
+## 原生传输 Windows 端口（WebView2）
+
+vtable 槽位全部对照官方 WebView2.h（Microsoft.Web.WebView2 nupkg）核实：
+`PostWebMessageAsJson=32`、`add_WebMessageReceived=34`、
+`add_WebResourceRequested=55`、`AddWebResourceRequestedFilter=57`、
+`WebMessageReceivedEventArgs.TryGetWebMessageAsString=5`、
+`WebResourceRequestedEventArgs.get_Request=3/put_Response=5`、
+`WebResourceRequest.get_Uri=3`、`Environment.CreateWebResourceResponse=4`。
+要点：事件回调是双指针 Invoke（self,sender,args）——init 回调构造器的
+`_int32` 第二参会截断 64 位指针，必须用 `make-com-event-handler`；
+资源响应体走 `SHCreateMemStream`（shcore.dll）+ `CreateWebResourceResponse`；
+bootstrap 经 `AddScriptToExecuteOnDocumentCreated`(27) 注入；GLZ1 响应由
+窗口泵线程 `PostWebMessageAsJson` 回灌（页面 message 事件里转
+`__glz1Deliver`）。**改槽位前重新下载 nupkg 核对，勿凭相邻接口猜**（见上文
+get_CoreWebView2 事故）。
+
+## 原生传输 Linux 端口（WebKitGTK）
+
+WebKitGTK 与 WKWebView 共享 `window.webkit.messageHandlers` JS API，bootstrap
+的 webkit 分支原样可用。要点：`webkit_web_view_new_with_user_content_manager`
+携带专用 UCM（`register_script_message_handler "glz1"` + 信号
+`script-message-received::glz1`，js_result 经 jsc_value_is_string/to_string
+取文本）；scheme 走默认 WebContext 的 `register_uri_scheme`（进程级共享，
+回调用 `webkit_uri_scheme_request_get_web_view` 按请求方 webview 分发——
+多窗口/多 app 各自的 public-dir 不串）；响应体 `g_memory_input_stream_
+new_from_data` + `webkit_uri_scheme_request_finish`（回调内同步 finish 是
+文档模式）；交付用 `webkit_web_view_evaluate_javascript`（WebKitGTK 2.40+，
+pump 线程）；jsc 绑定在 libjavascriptcoregtk-4.1。
 
 三平台 e2e 应至少覆盖：open、页面加载、title/url、截图、navigate、close、on-close。
 

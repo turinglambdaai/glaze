@@ -192,7 +192,13 @@ A 1.0 freeze requires, in order:
    message handler; the dispatch core lives in `glaze/native-transport.rkt`
    and is shared with the HTTP adapter.)
 5. Windows/Linux native-transport ports and per-window capability authority;
-   HTTP/SSE kept for the development loop.
+   HTTP/SSE kept for the development loop. (landed: WebView2 posts GLZ1
+   envelopes through `window.chrome.webview` and serves `glaze://app/*` via
+   `AddWebResourceRequestedFilter`; the WebKitGTK port shares WKWebView's
+   message-handler JS API and registers the scheme on the default web
+   context with per-requesting-webview dispatch; every window is its own
+   identity — `open-app-window #:capability` mints a per-window transport
+   with exactly that authority.)
 6. Typed command declarations, compatibility checks, JS/TypeScript client
    generation, and facade curation
    (`core/bridge/window/services/distribution/devtools`, `experimental/`).
