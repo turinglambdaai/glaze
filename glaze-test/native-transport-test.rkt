@@ -233,21 +233,28 @@
 (native-transport-set-deliver! t (lambda (js) (async-channel-put delivered js)))
 
 (native-transport-message! t (jsexpr->string (hasheq 'glz 1 'op "hello" 'id "rt-hello")))
-(define hello-js (sync/timeout 5 delivered))
-(check-not-false hello-js "hello delivery arrives")
-(check-true (string-contains? (or hello-js "") "__glz1Deliver")
+(define hello-d (sync/timeout 5 delivered))
+(check-not-false hello-d "hello delivery arrives")
+(define hello-js (and hello-d (native-delivery-js hello-d)))
+(check-true (and hello-js (string-contains? hello-js "__glz1Deliver"))
             "hello delivery targets the page hook")
-(check-true (string-contains? (or hello-js "") "rt-hello") "hello delivery carries the request id")
+(check-true (and hello-js (string-contains? hello-js "rt-hello"))
+            "hello delivery carries the request id")
 
 (native-transport-message! t "{\"glz\":1,\"id\":\"rt-ping\",\"path\":\"api/ping\"}")
-(define ping-js (sync/timeout 5 delivered))
-(check-not-false ping-js "invoke delivery arrives")
-;; The response travels as a JSON text inside a JSON string literal (the
-;; page does one JSON.parse), so the value appears with escaped quotes.
-(check-true (string-contains? (or ping-js "") "rt-ping") "invoke delivery carries the request id")
-(check-true (string-contains? (or ping-js "") "succeeded") "invoke delivery carries the outcome")
-(check-true (string-contains? (or ping-js "") "{\\\"pong\\\":true}")
-            "invoke delivery carries the double-encoded result")
+(define ping-d (sync/timeout 5 delivered))
+(check-not-false ping-d "invoke delivery arrives")
+(define ping-js (and ping-d (native-delivery-js ping-d)))
+(define ping-json (and ping-d (native-delivery-json ping-d)))
+;; The JS carrier wraps the response as a JSON text inside a JSON string
+;; literal (the page does one JSON.parse); the JSON carrier is the bare
+;; response for PostWebMessageAsJson-style hosts.
+(check-true (and ping-js (string-contains? ping-js "rt-ping"))
+            "invoke delivery carries the request id")
+(check-true (and ping-js (string-contains? ping-js "succeeded"))
+            "invoke delivery carries the outcome")
+(check-true (and ping-json (string-contains? ping-json "\"pong\":true"))
+            "json carrier carries the result for WebView2 hosts")
 
 ;; events flow through the delivery hook with sequence numbers
 (define bus (make-event-bus))
@@ -255,11 +262,15 @@
 (define delivered2 (make-async-channel))
 (native-transport-set-deliver! t2 (lambda (js) (async-channel-put delivered2 js)))
 (bus-broadcast! bus 'counter-changed (hasheq 'value 7))
-(define event-js (sync/timeout 5 delivered2))
-(check-not-false event-js "event delivery arrives")
-(check-true (string-contains? (or event-js "") "__glz1Events") "event delivery targets the page hook")
-(check-true (string-contains? (or event-js "") "counter-changed") "event delivery carries the name")
-(check-true (string-contains? (or event-js "") "\"value\":7") "event delivery carries the payload")
+(define event-d (sync/timeout 5 delivered2))
+(check-not-false event-d "event delivery arrives")
+(define event-js (and event-d (native-delivery-js event-d)))
+(check-true (and event-js (string-contains? event-js "__glz1Events"))
+            "event delivery targets the page hook")
+(check-true (and event-js (string-contains? event-js "counter-changed"))
+            "event delivery carries the name")
+(check-true (and event-js (string-contains? event-js "\"value\":7"))
+            "event delivery carries the payload")
 
 ;; shutdown stops deliveries without raising
 (check-not-exn (lambda () (native-transport-shutdown! t)))
