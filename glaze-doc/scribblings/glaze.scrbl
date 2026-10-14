@@ -862,6 +862,39 @@ self-contained JavaScript snippet for evaluateJavaScript-style hosts
 (WKWebView, WebKitGTK), and a @tt|{{glz, stream, id[, text]}}| JSON object
 for PostWebMessageAsJson-style hosts (WebView2).
 
+@section[#:tag "layers"]{Layer Modules}
+
+Beyond the curated @racket[glaze/core] face, every facade name is
+reachable through its aggregation layer. Applications that want one
+surface without the full @racket[glaze] facade require the layer
+directly; each layer's export set is guarded by CI, so drift fails
+instead of widening silently.
+
+@defmodule[glaze/window]{Windows, webview handles, and window state
+(@racketmodname[glaze/webview/main] and @racketmodname[glaze/window-state]
+re-exported).}
+
+@defmodule[glaze/services]{The capability services: filesystem scopes,
+the key-value store, SQL, shell, the HTTP proxy, logging, dialogs, tray,
+system commands, global shortcuts, hotkeys, system information, and the
+browser opener.}
+
+@defmodule[glaze/distribution]{Packaging, signing, updates, and bundled
+assets — everything that carries an application from a source tree to an
+installed, self-updating product.}
+
+@defmodule[glaze/devtools]{Development-time tooling: the loopback dev
+server (the HTTP adapter for hot reload and curl) and FFI discovery
+diagnostics.}
+
+@defmodule[glaze/experimental]{Capabilities that are shipped but NOT
+frozen: @racketmodname[glaze/deeplink] (OS URL-scheme handover),
+@racketmodname[glaze/autolaunch] (login items), and
+@racketmodname[glaze/license] (commercial licensing). The surface may
+change in any release without a compat baseline; a module graduates into
+its layer after surviving a release cycle unchanged under real product
+usage.}
+
 @section[#:tag "native-transport"]{Native Transport}
 
 @defmodule[glaze/native-transport]
