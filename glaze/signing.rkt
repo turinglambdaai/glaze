@@ -53,9 +53,21 @@
                                (unless (zero? (system*/exit-code executable "version"))
                                  (error 'signing "version probe exited non-zero")))))
     (define match (regexp-match openssl-version-regexp out))
-    (and match (version-at-least? (map string->number (cdr match)) min-openssl-version))))
+    (define version (and match (map string->number (cdr match))))
+    (when version
+      (set-box! openssl-version-cache version))
+    (and version (version-at-least? version min-openssl-version))))
 
 (define openssl-cache (box #f))
+;; (list major minor patch) of the accepted CLI, cached by the probe:
+;; pkeyutl's Ed25519 syntax differs across the 1.1.1 / 3.x line (-rawin
+;; is mandatory on 3.x and does not exist on 1.1.1).
+(define openssl-version-cache (box #f))
+
+;; OpenSSL 3 requires -rawin for raw-data algorithms like Ed25519; 1.1.1
+;; feeds the raw input without the flag and rejects it as unknown.
+(define (use-rawin?)
+  (version-at-least? (or (unbox openssl-version-cache) '(3 0 0)) '(3 0 0)))
 
 (define (candidate-executable candidate)
   (cond
@@ -261,7 +273,11 @@
        (write-content-file password-file password))
      (openssl-run
       "Ed25519 signing"
-      (append (list "pkeyutl" "-sign" "-rawin" "-inkey" (path->string private-key))
+      (append (list "pkeyutl" "-sign")
+              (if (use-rawin?)
+                  (list "-rawin")
+                  '())
+              (list "-inkey" (path->string private-key))
               (if password-file
                   (list "-passin" (string-append "file:" (path->string password-file)))
                   '())
@@ -300,16 +316,17 @@
                          (with-handlers ([exn:fail? (lambda (_) #"")])
                            (base64-decode (string->bytes/utf-8 (string-trim signature-base64)))))
      (define-values (exit-code _detail)
-       (call-openssl (list "pkeyutl"
-                           "-verify"
-                           "-rawin"
-                           "-pubin"
-                           "-inkey"
-                           (path->string public-key)
-                           "-sigfile"
-                           (path->string signature-file)
-                           "-in"
-                           (path->string payload-file))))
+       (call-openssl (append (list "pkeyutl" "-verify")
+                             (if (use-rawin?)
+                                 (list "-rawin")
+                                 '())
+                             (list "-pubin"
+                                   "-inkey"
+                                   (path->string public-key)
+                                   "-sigfile"
+                                   (path->string signature-file)
+                                   "-in"
+                                   (path->string payload-file)))))
      (zero? exit-code))
    (lambda ()
      (delete-if-present payload-file)
