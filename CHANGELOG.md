@@ -39,6 +39,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-14
+
+### Added
+
+- GLZ1 streaming over the native channel: a handler answering
+  `streaming-response`/`event-stream-response` delivers open/chunk/end
+  frames with UTF-8-safe chunk boundaries; every frame travels in both
+  carriers (js snippet and WebView2 JSON); mid-stream cancellation closes
+  the stream's pipe through the cancel op. The page client gains
+  `glaze.invokeStream` (per-chunk `onDelta`, AbortSignal support, no
+  timeout — streams settle when the writer finishes).
+- `run-app #:transport 'native` ships on all three platforms — the
+  macOS-only gate is gone (the native e2e segment runs in CI on all).
+- A Native Transport documentation chapter (the module previously had
+  none) and a GLZ1 streaming section; `run-app` documents
+  `#:transport`.
+
+### Fixed
+
+- The macOS pump thread runs the main run loop, so WebKit callbacks
+  reenter Racket on the pump thread's FFI stack, where a yielding
+  scheduler operation (an `async-channel-put` racing the dispatcher) is
+  fatal — "attempt to deschedule the current thread in atomic mode"
+  killed the process under a real app's invoke burst. Script-message
+  callbacks and scheme-resource serving now stash their work on boxes the
+  pump loop drains from full Racket context, and the pump loop reports
+  instead of dying silently.
+- The native event loop no longer dies on a non-serializable event
+  payload (reported and skipped), and the HTTP SSE endpoint closes that
+  connection instead of escaping into the server's exception path.
+- `app-state` event payloads carry the lifecycle state as a string; a
+  symbol is not a jsexpr and poisoned every subscriber's first delivery.
+
 ### Added
 
 - `glaze/core`: the stable facade — the 48 entry points real apps touch
