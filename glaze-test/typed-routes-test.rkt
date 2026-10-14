@@ -32,6 +32,9 @@
          glaze/server
          glaze/types)
 
+;; Negative-path tests intentionally raise handler errors; keep them off
+;; stderr so drdr's non-empty-stderr check stays clean.
+(current-glaze-error-reporter (lambda (_exn _uri) (void)))
 ;; ---- declarations ----
 
 (define Item (grecord 'Item "id" GInt64 "name" GString "tags" (glist GString)))

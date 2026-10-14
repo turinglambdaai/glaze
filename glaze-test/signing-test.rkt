@@ -2,9 +2,29 @@
 
 (require rackunit
          racket/file
+         racket/port
          racket/string
          racket/system
          glaze/signing)
+
+;; The CLI's progress messages go to stderr by design, but drdr treats a
+;; non-empty stderr as a failure: run `raco glaze ...` with both streams
+;; discarded and return the exit code.
+(define (raco-quiet raco . args)
+  (define out-file (make-temporary-file "glaze-cli-out~a"))
+  (define err-file (make-temporary-file "glaze-cli-err~a"))
+  (dynamic-wind void
+                (lambda ()
+                  (define out (open-output-file out-file #:exists 'replace))
+                  (define err (open-output-file err-file #:exists 'replace))
+                  (define-values (proc _a _b _c) (apply subprocess out #f err raco args))
+                  (close-output-port out)
+                  (close-output-port err)
+                  (subprocess-wait proc)
+                  (subprocess-status proc))
+                (lambda ()
+                  (delete-file out-file)
+                  (delete-file err-file))))
 
 (define directory (make-temporary-file "glaze-signing-test~a" 'directory))
 
@@ -78,27 +98,26 @@
        (define raco (find-executable-path "raco"))
        (define cli-keys (build-path directory "cli-keys"))
        (define cli-signature (build-path directory "artifact.sig"))
-       (check-equal? (system*/exit-code raco "glaze" "updater-keygen" "--out" (path->string cli-keys))
+       (check-equal? (raco-quiet raco "glaze" "updater-keygen" "--out" (path->string cli-keys)) 0)
+       (check-equal? (raco-quiet raco
+                                 "glaze"
+                                 "update-sign"
+                                 (path->string artifact)
+                                 "--key"
+                                 (path->string (build-path cli-keys "private.pem"))
+                                 "--out"
+                                 (path->string cli-signature))
                      0)
-       (check-equal? (system*/exit-code raco
-                                        "glaze"
-                                        "update-sign"
-                                        (path->string artifact)
-                                        "--key"
-                                        (path->string (build-path cli-keys "private.pem"))
-                                        "--out"
-                                        (path->string cli-signature))
-                     0)
-       (check-equal? (system*/exit-code raco
-                                        "glaze"
-                                        "update-verify"
-                                        (path->string artifact)
-                                        "--pub"
-                                        (path->string (build-path cli-keys "public.pem"))
-                                        "--signature"
-                                        (path->string cli-signature)
-                                        "--sha256"
-                                        (sha256-file artifact))
+       (check-equal? (raco-quiet raco
+                                 "glaze"
+                                 "update-verify"
+                                 (path->string artifact)
+                                 "--pub"
+                                 (path->string (build-path cli-keys "public.pem"))
+                                 "--signature"
+                                 (path->string cli-signature)
+                                 "--sha256"
+                                 (sha256-file artifact))
                      0))
      (lambda () (delete-directory/files directory)))
     (begin

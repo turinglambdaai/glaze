@@ -22,7 +22,7 @@
 
 ;; ---- filtering, history, sinks ----
 
-(define quiet (make-glaze-logger #:min-level 'info #:history 3))
+(define quiet (make-glaze-logger #:min-level 'info #:history 3 #:stderr? #f))
 (log-trace quiet "dropped")
 (log-debug quiet "dropped too")
 (check-equal? (length (glaze-logger-history quiet)) 0 "records below min-level are dropped")
@@ -48,7 +48,7 @@
 ;; per-sink minimum levels
 (define received '())
 (define tap (lambda (r) (set! received (append received (list r)))))
-(define loud (make-glaze-logger #:min-level 'trace #:sinks (list (log-sink 'error tap))))
+(define loud (make-glaze-logger #:min-level 'trace #:sinks (list (log-sink 'error tap)) #:stderr? #f))
 (log-info loud "not seen by sink")
 (check-equal? received '() "sink filters below its own level")
 (log-error loud "seen")
@@ -57,7 +57,8 @@
 (define tapped-any '())
 (define loud2
   (make-glaze-logger #:min-level 'trace
-                     #:sinks (list (lambda (r) (set! tapped-any (append tapped-any (list r)))))))
+                     #:sinks (list (lambda (r) (set! tapped-any (append tapped-any (list r)))))
+                     #:stderr? #f))
 (log-trace loud2 "raw sink sees everything")
 (check-equal? (map log-record-message tapped-any) (list "raw sink sees everything"))
 
@@ -96,7 +97,7 @@
 
 (define bus (make-event-bus))
 (define bus-ch (bus-subscribe! bus))
-(define pushed (make-glaze-logger #:min-level 'info #:events bus))
+(define pushed (make-glaze-logger #:min-level 'info #:events bus #:stderr? #f))
 (log-warn pushed "push me")
 (define event (bus-wait bus-ch 5))
 (check-not-eq? event 'timeout "records above min-level push to the bus")
@@ -110,7 +111,7 @@
 (define authority (make-capability "main" (list 'log:write 'log:read 'glaze:events)))
 (define token "log-token")
 (define port 18984)
-(define logger (make-glaze-logger #:min-level 'info #:history 10))
+(define logger (make-glaze-logger #:min-level 'info #:history 10 #:stderr? #f))
 (define-values (_port shutdown)
   (start-server #:port port
                 #:public-dir root
