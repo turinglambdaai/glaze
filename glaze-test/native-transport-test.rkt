@@ -26,6 +26,9 @@
          glaze/events
          glaze/native-transport)
 
+;; Negative-path tests intentionally raise handler errors; keep them off
+;; stderr so drdr's non-empty-stderr check stays clean.
+(current-glaze-error-reporter (lambda (_exn _uri) (void)))
 (define (envelope-error resp)
   (hash-ref resp 'error #f))
 

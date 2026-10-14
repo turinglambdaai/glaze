@@ -108,10 +108,40 @@
   (when (and path (file-exists? path))
     (delete-file path)))
 
+;; Run the openssl CLI with its streams redirected to scratch files:
+;; openssl writes to stdout AND stderr on success and failure alike
+;; ("Signature Verified Successfully"), and inheriting the process's
+;; streams would pollute clean-test / drdr runs. Returns
+;; (values exit-code stderr-text).
+(define (call-openssl arguments)
+  (define out-file (make-temporary-file "glaze-ssl-out~a"))
+  (define err-file (make-temporary-file "glaze-ssl-err~a"))
+  (dynamic-wind void
+                (lambda ()
+                  (define out (open-output-file out-file #:exists 'replace))
+                  (define err (open-output-file err-file #:exists 'replace))
+                  ;; subprocess returns fewer values when the streams are ports
+                  ;; rather than pipes; only the process handle matters here.
+                  (define-values (proc _a _b _c)
+                    (apply subprocess out #f err (require-openssl) arguments))
+                  (close-output-port out)
+                  (close-output-port err)
+                  (subprocess-wait proc)
+                  (values (subprocess-status proc) (string-trim (file->string err-file))))
+                (lambda ()
+                  (delete-if-present out-file)
+                  (delete-if-present err-file))))
+
 (define (openssl-run operation arguments)
-  (define exit-code (apply system*/exit-code (require-openssl) arguments))
+  (define-values (exit-code detail) (call-openssl arguments))
   (unless (zero? exit-code)
-    (error 'signing "~a failed (openssl exit ~a)" operation exit-code)))
+    (error 'signing
+           "~a failed (openssl exit ~a)~a"
+           operation
+           exit-code
+           (if (string=? detail "")
+               ""
+               (string-append ": " detail)))))
 
 (define (write-content-file path content)
   (call-with-output-file path
@@ -269,17 +299,18 @@
      (write-content-file signature-file
                          (with-handlers ([exn:fail? (lambda (_) #"")])
                            (base64-decode (string->bytes/utf-8 (string-trim signature-base64)))))
-     (zero? (system*/exit-code (require-openssl)
-                               "pkeyutl"
-                               "-verify"
-                               "-rawin"
-                               "-pubin"
-                               "-inkey"
-                               (path->string public-key)
-                               "-sigfile"
-                               (path->string signature-file)
-                               "-in"
-                               (path->string payload-file))))
+     (define-values (exit-code _detail)
+       (call-openssl (list "pkeyutl"
+                           "-verify"
+                           "-rawin"
+                           "-pubin"
+                           "-inkey"
+                           (path->string public-key)
+                           "-sigfile"
+                           (path->string signature-file)
+                           "-in"
+                           (path->string payload-file))))
+     (zero? exit-code))
    (lambda ()
      (delete-if-present payload-file)
      (delete-if-present signature-file))))

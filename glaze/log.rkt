@@ -190,7 +190,8 @@
                            #:sinks [sinks '()]
                            #:file-root [file-root #f]
                            #:events [event-bus #f]
-                           #:history [history-limit history-default])
+                           #:history [history-limit history-default]
+                           #:stderr? [stderr? #t])
   (check-level 'make-glaze-logger min-level)
   (unless (and (list? sinks) (andmap (lambda (s) (or (log-sink? s) (procedure? s))) sinks))
     (raise-argument-error 'make-glaze-logger "list of sinks or procedures" sinks))
@@ -201,7 +202,9 @@
   (unless (or (not history-limit) (exact-positive-integer? history-limit))
     (raise-argument-error 'make-glaze-logger "(or/c #f exact-positive-integer?)" history-limit))
   (define built
-    (append (list (make-stderr-log-sink))
+    (append (if stderr?
+                (list (make-stderr-log-sink))
+                '())
             (if file-root
                 (list (make-file-log-sink file-root))
                 '())
