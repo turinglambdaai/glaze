@@ -27,19 +27,30 @@
          racket/list
          racket/string
          net/url
+         (only-in keel schema-command schema-command? schema-parameter Value)
          web-server/http/request-structs
-         web-server/http/response-structs)
+         web-server/http/response-structs
+         (only-in "types.rkt"
+                  type-descriptor?
+                  type-descriptor-keel
+                  grecord?
+                  grecord-name
+                  genum-name
+                  collect-named-types))
 
 (provide GET
          POST
          PUT
          DELETE
+         make-route-method
          route?
          route-handler
          route-method
          route-segments
          route-permission
          route-resource
+         route-schema
+         route-named-types
          param?
          param-id
          (struct-out exn:fail:glaze:bad-param)
@@ -52,7 +63,7 @@
          route-match
          path->segments)
 
-(struct route (method segments handler permission resource) #:transparent)
+(struct route (method segments handler permission resource schema named-types) #:transparent)
 (struct param (id) #:transparent)
 
 ;; Raised by define-api-routes argument checking; the server maps it to a
@@ -71,14 +82,63 @@
 (define ((make-route-method method) path
                                     handler
                                     #:permission [permission #f]
-                                    #:resource [resource #f])
+                                    #:resource [resource #f]
+                                    ;; Typed contract: name/descriptor pairs for
+                                    ;; the JSON body keys ("delta" GInt64), the result
+                                    ;; descriptor, and the route's declared error
+                                    ;; codes. Path params stay Strings on the wire
+                                    ;; (URL segments are text); they type via the
+                                    ;; macro layer's parameter predicates.
+                                    #:body-types [body-types '()]
+                                    #:returns [result-type #f]
+                                    #:errors [error-codes '()])
   (unless (procedure? handler)
     (raise-argument-error 'api-route "procedure?" handler))
   (when (and permission (not (or (symbol? permission) (string? permission))))
     (raise-argument-error 'api-route "(or/c #f symbol? string?)" permission))
   (when (and resource (not (procedure? resource)))
     (raise-argument-error 'api-route "(or/c #f procedure?)" resource))
-  (route method (parse-path path) handler permission resource))
+  ;; At runtime body-types entries are (cons name descriptor): a descriptor
+  ;; contributes a typed schema parameter; anything else (e.g. a plain
+  ;; predicate from the macro layer, which validates in check-param) is
+  ;; permissive and stays out of the schema.
+  (define typed-body-params
+    (for/list ([bt (in-list body-types)]
+               #:when (type-descriptor? (cdr bt)))
+      (schema-parameter (car bt) (type-descriptor-keel (cdr bt)))))
+  (define named-types
+    (remove-duplicates (apply append
+                              (append (for/list ([bt (in-list body-types)]
+                                                 #:when (type-descriptor? (cdr bt)))
+                                        (collect-named-types (cdr bt)))
+                                      (if result-type
+                                          (list (collect-named-types result-type))
+                                          '())))
+                       #:key (lambda (d)
+                               (if (grecord? d)
+                                   (grecord-name d)
+                                   (genum-name d)))))
+  (define schema
+    (if (and (null? typed-body-params) (not result-type))
+        #f
+        (schema-command (route-command-name path method)
+                        typed-body-params
+                        (if result-type
+                            (type-descriptor-keel result-type)
+                            Value)
+                        error-codes)))
+  (route method (parse-path path) handler permission resource schema named-types))
+
+;; "api/items/:id" + GET -> "api-items-id-get" (the GLZ1 command name the
+;; generated clients and /glaze/hello already use) — :x segments
+;; contribute their bare id.
+(define (route-command-name path method)
+  (string-join (append (for/list ([seg (in-list (parse-path path))])
+                         (if (param? seg)
+                             (param-id seg)
+                             seg))
+                       (list (string-downcase (symbol->string method))))
+               "-"))
 
 (define GET (make-route-method 'GET))
 (define POST (make-route-method 'POST))
