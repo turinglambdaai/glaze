@@ -206,5 +206,7 @@ A 1.0 freeze requires, in order:
    and results declared in routes drive wire validation on both transports,
    `/glaze/hello` carries real keel types, `/glaze/api.d.ts` serves
    generated TypeScript, and `glaze/schema-compat` classifies breaking
-   evolutions. Remaining in this step: facade curation.)
+   evolutions. Also landed: `glaze/core`, the curated 48-entry stable
+   facade with a CI guard that fails on face drift. Remaining in this
+   step: `experimental/` curation and the full-layer module split.)
 7. The 1.0 gate above.
