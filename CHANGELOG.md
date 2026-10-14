@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `glaze/core`: the stable facade — the 48 entry points real apps touch
+  daily (app lifecycle, define-api-routes/GET/POST/PUT/DELETE, webview
+  windows, events, logging, storage, paths, capabilities, dialogs, system
+  info, dev server, typed declarations). `glaze` (main) remains the full
+  surface; `glaze/core` is the reviewed, guard-tested contract that stays
+  stable at 1.0. A core-face guard test fails CI on accidental widening.
 - Typed command declarations (`glaze/types` + route `schema`): declare
   parameters and results with typed descriptors (`Int64`, `String`,
   `(glist Item)`, grecords/genums) in route declarations — the same
