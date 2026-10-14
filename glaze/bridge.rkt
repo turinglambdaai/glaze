@@ -111,7 +111,10 @@
 (define (parse-invoke-envelope body)
   (define (bad what [data #f])
     (raise-bridge-error 'bad-envelope what data))
-  (unless (hash-eq? body)
+  ;; hash-eq? carries a hash? contract, so a hostile non-hash would
+  ;; escape as a contract violation instead of a typed bad-envelope error;
+  ;; hash? is the safe predicate.
+  (unless (hash? body)
     (bad "envelope must be a JSON object"))
   (define version (hash-ref body 'glz #f))
   (unless (eq? version glz1-version)
