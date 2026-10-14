@@ -50,6 +50,7 @@ guidance. Glaze never substitutes a system-browser tab for the desktop window.
           [#:current-version current-version string? "0.0.0"]
           [#:app-id app-id (or/c #f string?) #f]
           [#:window-state window-state (or/c #f #t path-string?) #f]
+          [#:transport transport (or/c 'http 'native) 'http]
           [#:on-ready on-ready procedure? (lambda (wv url) (void))])
          (values 'webview procedure?)]{
 The one-call application entry point. It selects a free loopback port unless
@@ -71,6 +72,14 @@ explicit string to choose the token, or @racket[#:api-token #f] to opt out
 body the server will buffer (413 above the limit). @racket[#:on-error] receives
 API handler failures. @racket[#:check-update] wires an update manifest into the
 application lifecycle.
+
+@racket[#:transport 'native] serves the page and API entirely inside the
+WebView's process boundary (@secref["native-transport"]): the page loads
+from the controlled @tt{glaze://app/} origin, invokes ride the WebView's
+message handler, no TCP port is bound, and no token is minted — the message
+handler is the trust boundary. @racket[#:port] is an error in this mode.
+The default @racket['http] transport keeps the loopback server and is the
+development vehicle.
 
 The lifecycle is exception-safe: an @racket[#:on-ready] callback that raises
 tears the window and the server down before propagating, and an
@@ -793,7 +802,8 @@ registered routes. The HTTP endpoints are @tt{GET /glaze/hello},
 @tt{POST /glaze/invoke}, and @tt{POST /glaze/cancel}; the generated api.js
 exposes @tt{glaze.hello()} / @tt{glaze.invoke(path, args, opts)} /
 @tt{glaze.cancel(id)}. The envelope layer is transport-agnostic — the native
-message-handler transport planned for 1.0 adopts it unchanged.
+message-handler transport (@secref["native-transport"]) dispatches the same
+envelopes through the WebView's message handler, with no TCP port.
 
 The protocol is aligned with @hyperlink["https://github.com/turinglambdaai/keel"]{keel},
 the transport-neutral application contract shared with Rivet: every invoke
@@ -823,6 +833,137 @@ raise @racket[(raise-bridge-error 'cancelled "request cancelled")] so its
 invoke response owns the @racket["cancelled"] terminal outcome. Returning a
 normal value remains a successful completion even if cancellation was
 observed.
+}
+
+@subsection[#:tag "glz1-streaming"]{Streaming responses}
+
+A streaming handler (@racket[streaming-response] /
+@racket[event-stream-response]) cannot be one invoke envelope — its bytes
+arrive over time. GLZ1 delivers it as a frame sequence on the same channel:
+an open frame marks the request id as a stream, one chunk frame carries each
+piece of decoded text (@tt{window.__glz1Chunk(id, text)}), and a terminal
+frame (@tt{window.__glz1End(id)}) settles the invoking promise with the
+full joined text. A handler that fails @emph{before} returning the
+streaming response still answers a normal typed-error envelope, so both
+terminal shapes resolve the same page-side promise.
+
+The page client exposes @tt{glaze.invokeStream(path, args, opts)}:
+@tt{opts.onDelta} fires per chunk as it arrives, and @tt{opts.signal} (an
+AbortSignal) rejects the promise immediately and sends the cancel op, which
+closes the stream's pipe server side. Streams carry no timeout — they
+settle when the writer finishes. Chunk boundaries respect UTF-8: a
+multi-byte character split across internal reads is held back until it
+completes rather than delivered corrupted. A writer exception truncates the
+stream (the terminal frame still arrives), mirroring the HTTP adapter's
+connection close.
+
+Every frame travels in both carriers like a full response: a
+self-contained JavaScript snippet for evaluateJavaScript-style hosts
+(WKWebView, WebKitGTK), and a @tt|{{glz, stream, id[, text]}}| JSON object
+for PostWebMessageAsJson-style hosts (WebView2).
+
+@section[#:tag "native-transport"]{Native Transport}
+
+@defmodule[glaze/native-transport]
+
+The native transport serves the app's page and API entirely inside the
+WebView's process boundary: the page loads from a controlled origin
+(@tt{glaze://app/} on macOS and Linux, @tt{http://glaze.localhost/} on
+Windows, because WebView2 refuses top-level navigation to custom schemes)
+and invokes the backend through the WebView's message handler — production
+binds no TCP port. GLZ1 envelopes ride the message handler in both
+directions, so typed errors, timeouts, cancellation, capability checks, and
+streaming work identically on both transports; the HTTP adapter remains the
+development vehicle, and an app's existing @tt{<script src="/glaze/api.js">}
+works unchanged because the scheme handler serves the native client at the
+same path.
+
+@defproc[(start-native-transport [#:api routes (listof route?)]
+                                 [#:authority authority (or/c #f capability?) #f]
+                                 [#:events bus (or/c #f event-bus?) #f]
+                                 [#:public-dir public-dir path-string? "public"])
+         native-transport?]{
+Starts one transport. @racket[#:api] routes dispatch through the GLZ1
+envelope layer exactly as over HTTP. @racket[#:events] subscribes the bus so
+broadcasts reach the page as sequenced batches. @racket[#:public-dir] backs
+the controlled scheme's static resources with the same symlink containment
+and @tt{index.html} fallback as the HTTP adapter. The dispatcher inherits
+the caller's parameterization (custodian, error reporter) and spawns one
+thread per message, so a slow or timing-out invoke never blocks other
+invokes or cancels.
+}
+
+@defproc[(native-transport-message! [t native-transport?] [raw string?]) void?]{
+Entry point the platform wiring calls with each message-handler payload,
+from the UI thread; never blocks. Payloads queue on an async channel and
+each dispatches on its own thread.
+}
+
+@defstruct*[native-delivery ([js string?] [json string?])]{
+One delivery to the page in both carriers: @racket[native-delivery-js] is a
+self-contained JavaScript snippet for evaluateJavaScript-style hosts
+(WKWebView, WebKitGTK); @racket[native-delivery-json] is the bare JSON text
+for PostWebMessageAsJson-style hosts (WebView2). Host wiring picks its
+carrier and hops it to the UI thread.
+}
+
+@defproc[(native-transport-set-deliver! [t native-transport?]
+                                        [deliver! (-> native-delivery? any)]) void?]{
+Installs the host's delivery hook once a WebView handle exists.
+@racket[deliver!] runs on transport threads and must hop to the UI thread.
+}
+
+@defproc[(native-transport-stats [t native-transport?])
+         (hash/c symbol? exact-nonnegative-integer?)]{
+Counters: @tt{resources-served}, @tt{messages-received},
+@tt{responses-delivered}, @tt{events-delivered}.
+}
+
+@defproc[(native-transport-count-resource! [t native-transport?]) void?]{
+Called by the host's scheme handler for each served resource, so tests can
+observe that the page really loaded through the controlled origin.
+}
+
+@defproc[(native-transport-shutdown! [t native-transport?]) void?]{
+Stops the dispatcher and event threads. Idempotent.
+}
+
+@defproc[(native-app-origin) string?]{
+The controlled origin the page runs on, per platform — for tests and
+assertions.
+}
+
+@defproc[(native-scheme-segments [url-str string?])
+         (or/c #f (listof string?))]{
+Parses a controlled-scheme URL
+(@tt{glaze://app/sub/x.js?query#frag}) into percent-decoded path segments,
+accepting the Windows @tt{http://glaze.localhost/...} shape as well. A
+hostile or malformed URL produces @racket[#f], which hosts map to their 404
+path.
+}
+
+@defthing[native-bootstrap-js string?]{
+The page-side bootstrap, injected at document start by every platform's
+wiring. Defines the delivery plumbing (@tt{__glz1Deliver}, the streaming
+hooks) and a transport-level client (@tt{__glz1.invoke} /
+@tt{invokeStream} / @tt{cancel} / @tt{hello} / @tt{on}); platform
+differences are confined to the sink selection (WebKit message handlers
+versus WebView2 postMessage).
+}
+
+@defproc[(native-api-client-js [routes (listof route?)]) string?]{
+The native twin of the HTTP api.js, served by the scheme handler at
+@tt{/glaze/api.js}: binds @tt{glaze.call} / @tt{glaze.invoke} /
+@tt{glaze.invokeStream} / @tt{glaze.cancel} / @tt{glaze.hello} /
+@tt{glaze.on} and one generated function per route over the transport
+bindings.
+}
+
+@defproc[(generate-api-declarations [routes (listof route?)]) string?]{
+Renders the TypeScript declarations for the app's typed routes (routes that
+declare @tt{#:body-types}/@tt{#:returns}/@tt{#:errors} schemas and their
+@racket[glaze/types] descriptors), served by the scheme handler at
+@tt{/glaze/api.d.ts}. Function names match the generated client.
 }
 
 @section{Native WebView}

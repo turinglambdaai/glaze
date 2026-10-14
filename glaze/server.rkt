@@ -363,10 +363,16 @@
                       ;; payload = (list seq name data); the seq
                       ;; goes out as the standard SSE id: line so
                       ;; consumers can detect dropped events by
-                      ;; the gap.
+                      ;; the gap. A non-serializable payload ends
+                      ;; this SSE connection (the EventSource
+                      ;; reconnects) instead of escaping into the
+                      ;; server's exception path.
                       (match-define (list seq name data) v)
-                      (fprintf out "id: ~a\nevent: ~a\ndata: ~a\n\n" seq name (jsexpr->string data))
-                      (flush-output out)
+                      (with-handlers ([exn:fail? (lambda (e)
+                                                   ((current-glaze-error-reporter) e "glaze/events")
+                                                   (bus-unsubscribe! bus ch))])
+                        (fprintf out "id: ~a\nevent: ~a\ndata: ~a\n\n" seq name (jsexpr->string data))
+                        (flush-output out))
                       (loop)])))
                (lambda () (bus-unsubscribe! bus ch))))))
 

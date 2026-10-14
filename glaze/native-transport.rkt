@@ -39,7 +39,7 @@
          racket/string
          net/url
          (only-in web-server/http/request-structs make-request)
-         (only-in web-server/http/response-structs response?)
+         (only-in web-server/http/response-structs response? response-output)
          (only-in keel
                   schema-command
                   schema-command-error-codes
@@ -67,6 +67,8 @@
          native-delivery-json
          start-native-transport
          native-transport-message!
+         native-transport-message-deferred!
+         native-transport-take-deferred!
          native-transport-set-deliver!
          native-transport-public-dir
          native-transport-stats
@@ -273,7 +275,12 @@
 ;; field ("hello" / "cancel"); anything with a path is an invoke. HTTP keeps
 ;; its own GET /glaze/hello and POST /glaze/cancel endpoints (same wire
 ;; shapes), and routes its invoke bodies through here as well.
-(define (dispatch-bridge body routes authority table name-fn)
+;; `streams` (the transport's active-stream registry, id -> output-port) is
+;; optional so the HTTP-side callers and the tests keep the 5-arg shape.
+;; Cancelling an id that is mid-stream closes its pipe: the writer ends,
+;; EOF delivers the terminal frame, and the page's aborted promise was
+;; already settled by the page-side cancel.
+(define (dispatch-bridge body routes authority table name-fn [streams #f])
   (cond
     [(not (hash? body)) (glz1-error-envelope #f 'bad-envelope "message must be a JSON object" 'null)]
     [(equal? (hash-ref body 'op #f) "hello")
@@ -285,6 +292,10 @@
      (define id (hash-ref body 'id #f))
      (if (and (eq? (hash-ref body 'glz #f) glz1-version) (string? id) (not (string=? id "")))
          (begin
+           (when (and streams (hash? streams))
+             (define pout (hash-ref streams id #f))
+             (when (output-port? pout)
+               (close-output-port pout)))
            (request-table-cancel! table id)
            (hasheq 'glz glz1-version 'id id 'ok #t 'value "cancel-signalled"))
          (glz1-error-envelope #f 'bad-envelope "cancel needs {glz:1, id}" 'null))]
@@ -361,11 +372,13 @@
          bus ; #f or event-bus?
          public-dir ; path-string? — scheme resources are served from here
          table ; request table (cancellation), per transport
-         inbox ; async channel of raw message strings
+         inbox ; box of (listof string) — FFI-safe message inbox, see message!
          control ; async channel for the event thread's shutdown
          deliver-box ; box of (string? js) -> void — set by the host wiring
          stats-box ; box of immutable hash — served/delivered counters
-         threads-box) ; box of (listof thread?) — dispatcher + event thread
+         threads-box ; box of (listof thread?) — dispatcher + event thread
+         streams-box ; box of (hash id -> output-port) — active streams
+         deferred-box) ; box of (listof string) — FFI-stack message stash
   #:transparent)
 
 (define (bump-stat! t key)
@@ -389,6 +402,45 @@
                  ","
                  (jsexpr->string (jsexpr->string response))
                  ");"))
+
+;; ---- streaming responses over the native channel ----
+;;
+;; A handler that answers a streaming-response cannot be delivered as one
+;; envelope (the bytes arrive over time). The wire sequence is:
+;;   envelope {glz,id,ok:true,outcome:"succeeded",stream:true}  (open frame)
+;;   window.__glz1Chunk(id, text)                               (per chunk)
+;;   window.__glz1End(id)                                       (terminal)
+;; The page's bootstrap routes the open frame to a per-id stream object and
+;; resolves the invoking promise on the terminal frame.
+
+(define (stream-open-js id)
+  (string-append "window.__glz1StreamOpen && window.__glz1StreamOpen(" (jsexpr->string id) ");"))
+
+(define (stream-chunk-js id chunk)
+  (string-append "window.__glz1Chunk && window.__glz1Chunk("
+                 (jsexpr->string id)
+                 ","
+                 (jsexpr->string chunk)
+                 ");"))
+
+(define (stream-end-js id)
+  (string-append "window.__glz1End && window.__glz1End(" (jsexpr->string id) ");"))
+
+;; Every stream frame travels in both carriers like a full response: the
+;; js snippet for evaluateJavaScript hosts, and a {glz,stream,id[,text]}
+;; JSON object for PostWebMessageAsJson hosts — the WebView2 message
+;; listener routes stream frames to the same page hooks.
+(define (stream-open-delivery id)
+  (native-delivery (stream-open-js id)
+                   (jsexpr->string (hasheq 'glz glz1-version 'stream "open" 'id id))))
+
+(define (stream-chunk-delivery id text)
+  (native-delivery (stream-chunk-js id text)
+                   (jsexpr->string (hasheq 'glz glz1-version 'stream "chunk" 'id id 'text text))))
+
+(define (stream-end-delivery id)
+  (native-delivery (stream-end-js id)
+                   (jsexpr->string (hasheq 'glz glz1-version 'stream "end" 'id id))))
 
 ;; (list seq name data) from the event bus becomes one sequenced batch frame.
 (define (events-deliver-js seq name data)
@@ -420,6 +472,8 @@
      (box void)
      (box
       (hasheq 'resources-served 0 'messages-received 0 'responses-delivered 0 'events-delivered 0))
+     (box '())
+     (box (make-hash))
      (box '())))
   ;; The dispatcher inherits the caller's parameterization (custodian, error
   ;; reporter) and spawns one thread per message, so a slow or timing-out
@@ -439,6 +493,27 @@
     (thread (lambda () (handle-raw-message! t raw)))
     (loop)))
 
+;; Script-message callbacks arrive while the host's thread is inside a
+;; foreign call (macOS runs the main run loop on the pump thread, so the
+;; WebKit callbacks reenter Racket on the pump thread's FFI stack). A
+;; scheduler operation that has to yield there — async-channel-put racing
+;; the dispatcher's get — raises "attempt to deschedule the current thread
+;; in atomic mode" and kills the process. So a callback may only stash the
+;; payload in this box, and the host's pump loop hands the stash to the
+;; dispatcher from full Racket context. The writer and the drainer are the
+;; same thread on every platform (the pump thread owns the run loop /
+;; event pump that reenters), so plain pointer swaps are race-free.
+(define (native-transport-message-deferred! t raw)
+  (define b (native-transport-deferred-box t))
+  (set-box! b (cons raw (unbox b))))
+
+(define (native-transport-take-deferred! t)
+  (define b (native-transport-deferred-box t))
+  (define batch (reverse (unbox b)))
+  (unless (null? batch)
+    (set-box! b '()))
+  batch)
+
 ;; Parse a raw message-handler payload (a JSON text from the page) and answer
 ;; through the host's deliver! hook. Parse failures become typed envelopes,
 ;; never host-side exceptions.
@@ -457,10 +532,66 @@
                        (native-transport-routes t)
                        (native-transport-authority t)
                        (native-transport-table t)
-                       route->js-name)))
-  (bump-stat! t 'responses-delivered)
-  ((unbox (native-transport-deliver-box t)) (native-delivery (deliver-response-js response)
-                                                             (jsexpr->string response))))
+                       route->js-name
+                       (unbox (native-transport-streams-box t)))))
+  (cond
+    ;; A streaming-response handler (web-server response struct) cannot be
+    ;; one envelope: the writer runs on its own thread, this dispatcher
+    ;; worker drains the pipe and forwards chunk frames, and per-message
+    ;; threads keep other invokes flowing meanwhile.
+    [(response? response)
+     (bump-stat! t 'responses-delivered)
+     (define id (and (hash? body) (let ([v (hash-ref body 'id #f)]) (and (string? v) v))))
+     (define out (response-output response))
+     (define deliver! (unbox (native-transport-deliver-box t)))
+     (define-values (pin pout) (make-pipe))
+     (define streams (unbox (native-transport-streams-box t)))
+     (hash-set! streams id pout)
+     (thread (lambda ()
+               ;; A writer exception truncates the stream (the HTTP adapter closes
+               ;; the connection the same way); the pipe still hits EOF so the
+               ;; terminal frame settles the page's promise.
+               (with-handlers ([exn:fail? void])
+                 (out pout))
+               (close-output-port pout)))
+     (deliver! (stream-open-delivery id))
+     ;; Chunk boundaries can split a multi-byte UTF-8 sequence: deliver
+     ;; only the longest valid prefix and hold the incomplete tail for the
+     ;; next read. A byte that can never complete becomes the replacement
+     ;; character (bytes->string/utf-8's default) instead of stalling.
+     (let drain ([pending #""])
+       (define buf (make-bytes 4096))
+       (define n (read-bytes-avail! buf pin))
+       (cond
+         [(eof-object? n)
+          (hash-remove! streams id)
+          (unless (zero? (bytes-length pending))
+            (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending))))
+          (deliver! (stream-end-delivery id))]
+         [(and (exact-nonnegative-integer? n) (> n 0))
+          (define all (bytes-append pending (subbytes buf 0 n)))
+          (let split ([len (bytes-length all)])
+            (cond
+              [(zero? len) (drain #"")]
+              [else
+               (define-values (text rest)
+                 (with-handlers ([exn:fail? (lambda (_) (values #f #f))])
+                   (values (bytes->string/utf-8 (subbytes all 0 len)) (subbytes all len))))
+               (cond
+                 [text
+                  (deliver! (stream-chunk-delivery id text))
+                  (drain rest)]
+                 [(= len 1)
+                  (deliver! (stream-chunk-delivery id (bytes->string/utf-8 (subbytes all 0 1))))
+                  (drain (subbytes all 1))]
+                 [else (split (sub1 len))])]))]
+         [else (deliver! (stream-end-delivery id))]))
+     (void)]
+    ;; Everything else is a full envelope jsexpr: one frame.
+    [else
+     (bump-stat! t 'responses-delivered)
+     ((unbox (native-transport-deliver-box t)) (native-delivery (deliver-response-js response)
+                                                                (jsexpr->string response)))]))
 
 (define (event-loop t ch)
   (define bus (native-transport-bus t))
@@ -471,16 +602,24 @@
       [else
        (match-define (list seq name data) v)
        (bump-stat! t 'events-delivered)
-       ((unbox (native-transport-deliver-box t))
-        (native-delivery (events-deliver-js seq name data)
-                         (jsexpr->string (list seq
-                                               (if (symbol? name)
-                                                   (symbol->string name)
-                                                   name)
-                                               data))))
+       ;; One non-serializable payload must not kill the event thread (it
+       ;; would silently stop every future delivery): report and skip.
+       (with-handlers ([exn:fail? (lambda (e)
+                                    ((current-glaze-error-reporter) e "glz1:native:event"))])
+         ((unbox (native-transport-deliver-box t))
+          (native-delivery (events-deliver-js seq name data)
+                           (jsexpr->string (list seq
+                                                 (if (symbol? name)
+                                                     (symbol->string name)
+                                                     name)
+                                                 data)))))
        (loop)])))
 
-;; Called by the host's message handler (on the UI thread); never blocks.
+;; Called by the host's message handler when it runs on a full Racket
+;; thread (Windows' window procedure and Linux's GTK callbacks execute on
+;; the host's pump thread, outside any foreign stack). macOS callbacks
+;; reenter on the pump thread's FFI stack instead and must use
+;; native-transport-message-deferred!.
 (define (native-transport-message! t raw)
   (async-channel-put (native-transport-inbox t) raw))
 
@@ -588,7 +727,10 @@
     sink = { send: function (text) { window.chrome.webview.postMessage(text); } };
     window.chrome.webview.addEventListener("message", function (e) {
       var d = e.data;
-      if (d && d.glz === 1 && d.id) { window.__glz1Deliver(d.id, JSON.stringify(d)); }
+      if (d && d.glz === 1 && d.stream === "open") { window.__glz1StreamOpen(d.id); }
+      else if (d && d.glz === 1 && d.stream === "chunk") { window.__glz1Chunk(d.id, d.text); }
+      else if (d && d.glz === 1 && d.stream === "end") { window.__glz1End(d.id); }
+      else if (d && d.glz === 1 && d.id) { window.__glz1Deliver(d.id, JSON.stringify(d)); }
     });
   }
   function send(envelope) {
@@ -612,6 +754,29 @@
       err.outcome = out.outcome;
       err.requestId = id;
       p.reject(err);
+    }
+  };
+  // Streaming responses: the backend opens with __glz1StreamOpen, sends
+  // __glz1Chunk per piece of text, and settles the promise on __glz1End.
+  // An invoke that errors before the stream opens still arrives through
+  // __glz1Deliver as a normal envelope, so both terminal shapes resolve
+  // the same pending entry.
+  window.__glz1StreamOpen = function (id) {
+    var p = pending[id];
+    if (p && !p.stream) { p.stream = { text: "" }; }
+  };
+  window.__glz1Chunk = function (id, text) {
+    var p = pending[id];
+    if (p && p.stream) {
+      p.stream.text += text;
+      if (p.onDelta) { try { p.onDelta(text); } catch (e) {} }
+    }
+  };
+  window.__glz1End = function (id) {
+    var p = pending[id];
+    if (p && p.stream) {
+      delete pending[id];
+      p.resolve(p.stream.text);
     }
   };
   window.__glz1Events = function (batch) {
@@ -639,7 +804,37 @@
         var env = { glz: 1, id: id, path: path, args: args || {} };
         if (opts.method) { env.method = opts.method; }
         if (opts.timeoutMs) { env.timeout_ms = opts.timeoutMs; }
-        pending[id] = { resolve: resolve, reject: reject };
+        pending[id] = { resolve: resolve, reject: reject, onDelta: opts.onDelta };
+        send(env);
+      });
+    },
+    // Streaming invoke: the promise settles with the full text on the
+    // terminal frame; opts.onDelta fires per chunk as it arrives. No
+    // timeout_ms — a stream settles when the writer finishes. opts.signal
+    // (an AbortSignal) rejects the promise at once and sends the cancel
+    // op, which closes the stream's pipe server side.
+    invokeStream: function (path, args, opts) {
+      opts = opts || {};
+      return new Promise(function (resolve, reject) {
+        var id = "r" + (++seq) + "-" + Date.now();
+        var env = { glz: 1, id: id, path: path, args: args || {} };
+        if (opts.method) { env.method = opts.method; }
+        pending[id] = { resolve: resolve, reject: reject, onDelta: opts.onDelta };
+        if (opts.signal) {
+          if (opts.signal.aborted) {
+            delete pending[id];
+            reject(new Error("aborted"));
+            return;
+          }
+          opts.signal.addEventListener("abort", function () {
+            var p = pending[id];
+            if (p) {
+              delete pending[id];
+              p.reject(new Error("aborted"));
+            }
+            send({ glz: 1, op: "cancel", id: id });
+          });
+        }
         send(env);
       });
     },
@@ -666,6 +861,7 @@ JS
                  "  };\n"
                  "  glaze.on = function (name, fn) { g.on(name, fn); };\n"
                  "  glaze.invoke = g.invoke;\n"
+                 "  glaze.invokeStream = g.invokeStream;\n"
                  "  glaze.cancel = g.cancel;\n"
                  "  glaze.hello = g.hello;\n"
                  "})();\n"

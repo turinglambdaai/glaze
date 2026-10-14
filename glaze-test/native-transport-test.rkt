@@ -10,11 +10,14 @@
 ;;     MIME table parity with the HTTP adapter;
 ;;   - the native page bindings: bootstrap + generated client invariants;
 ;;   - a full transport round trip through native-transport-message! with
-;;     the deliver! hook captured on a channel (no WebView involved).
+;;     the deliver! hook captured on a channel (no WebView involved);
+;;   - streaming-response delivery: open/chunk/end frames, UTF-8 chunk
+;;     boundaries, writer failures, mid-stream cancellation.
 
 (require rackunit
          racket/async-channel
          racket/file
+         racket/list
          racket/string
          json
          glaze/api
@@ -282,3 +285,108 @@
 (check-true (>= (hash-ref stats 'responses-delivered 0) 2) "responses were counted")
 
 (delete-directory/files capture-dir)
+
+;; ---- streaming responses over the native channel ----
+;; A handler that returns streaming-response delivers an open frame, one
+;; chunk frame per drained piece of text, and a terminal frame; the page's
+;; invokeStream joins them into the invoke's full value. Also covers UTF-8
+;; chunk boundaries, writer failures, and mid-stream cancellation.
+
+(define (collect-stream-frames ch)
+  ;; deliveries until the terminal frame, as their js snippets
+  (let loop ([acc '()])
+    (define d (sync/timeout 10 ch))
+    (unless d
+      (error 'collect-stream-frames "no delivery within 10s"))
+    (define js (native-delivery-js d))
+    (if (string-contains? js "__glz1End")
+        (reverse (cons js acc))
+        (loop (cons js acc)))))
+
+(define (chunk-texts frames)
+  (for/list ([js (in-list frames)]
+             #:when (string-contains? js "__glz1Chunk"))
+    (define m (regexp-match #rx"__glz1Chunk\\(\"[^\"]*\",\"(.*)\"\\);" js))
+    (and m (read-json (open-input-string (string-append "\"" (cadr m) "\""))))))
+
+(define stream-dir (make-temporary-file "glaze-native-stream-~a" 'directory))
+(call-with-output-file (build-path stream-dir "index.html")
+                       (lambda (o) (display "<html>stream</html>" o)))
+(define stream-routes
+  (list (POST "api/llm/chat"
+              (lambda (_req)
+                (streaming-response (lambda (out)
+                                      (display "Hel" out)
+                                      (flush-output out)
+                                      (display "lo" out)
+                                      (flush-output out)
+                                      ;; "水" is three UTF-8 bytes split across two writes:
+                                      ;; the transport must hold the incomplete tail
+                                      (write-byte 230 out)
+                                      (flush-output out)
+                                      (sleep 0.05)
+                                      (write-byte 176 out)
+                                      (write-byte 180 out)
+                                      (flush-output out)
+                                      (display "!" out)
+                                      (flush-output out)))))
+        (GET "api/stream-boom"
+             (lambda (_req)
+               (streaming-response (lambda (out)
+                                     (display "partial" out)
+                                     (flush-output out)
+                                     (error 'writer "mid-stream failure")))))
+        (GET "api/stream-forever"
+             (lambda (_req)
+               (streaming-response (lambda (out)
+                                     (let loop ()
+                                       (display "tick " out)
+                                       (flush-output out)
+                                       (sleep 0.05)
+                                       (loop))))))))
+(define t3 (start-native-transport #:api stream-routes #:public-dir stream-dir))
+(define delivered3 (make-async-channel))
+(native-transport-set-deliver! t3 (lambda (js) (async-channel-put delivered3 js)))
+
+;; happy path: open frame, chunk frames, terminal frame, joined text
+(native-transport-message!
+ t3
+ (jsexpr->string (hasheq 'glz 1 'id "s1" 'path "api/llm/chat" 'method "POST")))
+(define frames (collect-stream-frames delivered3))
+(check-true (string-contains? (first frames) "__glz1StreamOpen") "stream opens with the open frame")
+(check-true (string-contains? (first frames) "s1") "open frame carries the request id")
+(check-true (string-contains? (last frames) "__glz1End") "stream closes with the terminal frame")
+(check-true (andmap (lambda (js) (string-contains? js "__glz1Chunk")) (drop-right (rest frames) 1))
+            "middle frames are chunk frames")
+(check-equal? (apply string-append (chunk-texts frames))
+              "Hello水!"
+              "chunk texts join across a UTF-8 boundary")
+
+;; a writer failure mid-stream still delivers the terminal frame
+(native-transport-message! t3 (jsexpr->string (hasheq 'glz 1 'id "s2" 'path "api/stream-boom")))
+(define boom-frames (collect-stream-frames delivered3))
+(check-true (string-contains? (first boom-frames) "__glz1StreamOpen") "booming stream opens")
+(check-equal? (chunk-texts boom-frames) (list "partial") "chunks before the failure arrive")
+(check-true (string-contains? (last boom-frames) "__glz1End")
+            "a writer failure still terminates the stream")
+
+;; mid-stream cancel closes the pipe and settles the stream
+(native-transport-message! t3 (jsexpr->string (hasheq 'glz 1 'id "s3" 'path "api/stream-forever")))
+(define open-d (sync/timeout 5 delivered3))
+(check-true (and open-d (string-contains? (native-delivery-js open-d) "__glz1StreamOpen"))
+            "endless stream opens")
+(check-not-false (sync/timeout 5 delivered3) "endless stream produces at least one chunk")
+(native-transport-message! t3 (jsexpr->string (hasheq 'glz 1 'op "cancel" 'id "s3")))
+(check-not-exn (lambda () (collect-stream-frames delivered3))
+               "cancel settles the stream with the terminal frame")
+
+;; the page bindings expose the streaming client
+(check-true (string-contains? native-bootstrap-js "__glz1StreamOpen") "bootstrap handles stream open")
+(check-true (string-contains? native-bootstrap-js "__glz1Chunk") "bootstrap handles stream chunks")
+(check-true (string-contains? native-bootstrap-js "__glz1End") "bootstrap handles stream end")
+(check-true (string-contains? native-bootstrap-js "invokeStream") "bootstrap exposes invokeStream")
+(check-true (string-contains? (native-api-client-js stream-routes) "glaze.invokeStream")
+            "generated client exposes invokeStream")
+
+(check-not-exn (lambda () (native-transport-shutdown! t3)))
+(delete-directory/files stream-dir)
