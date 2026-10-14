@@ -5,6 +5,38 @@ All notable changes to Glaze will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] - 2026-10-14
+
+### Added
+
+- Native host transport on all three platforms (`run-app #:transport 'native`):
+  the page loads from the controlled `glaze://app/` scheme (macOS/Linux) or
+  `http://glaze.localhost/` (Windows) and calls the backend through the
+  WebView's GLZ1 message handler — the web content never touches a TCP port.
+  The loopback HTTP server remains as the development adapter.
+- Per-window capability on the native transport (`open-app-window
+  #:capability`).
+- Typed command declarations (`glaze/types`): typed descriptors in route
+  declarations drive wire validation on both transports; `/glaze/hello`
+  carries real keel types; `/glaze/api.d.ts` serves generated TypeScript.
+- `glaze/core`: the curated 48-entry stable facade with a CI face-drift
+  guard.
+- `glaze/schema-compat`: compatibility baseline for declared schemas.
+- 1.0-gate slices: GLZ1 protocol fuzzing (11.5k hostile inputs/run),
+  resource-leak soak, Racket 9.0 minimum-version matrix on all platforms.
+
+### Fixed
+
+- `parse-invoke-envelope` used `hash-eq?`, whose `hash?` contract let a
+  hostile non-hash escape as a raw contract violation instead of the typed
+  `bad-envelope` error.
+- macOS WKURLSchemeHandler responses: `NSURLResponse MIMEType:` with a
+  `; charset=` parameter made WebKit drop the response bytes silently.
+- Windows: WebView2 event handlers needed a real QueryInterface and
+  `AddScriptToExecuteOnDocumentCreated` takes a nullable completion handler;
+  top-level navigation to custom schemes is refused (page loads from
+  `http://glaze.localhost/` instead).
+
 ## [Unreleased]
 
 ### Added
