@@ -199,6 +199,13 @@ A 1.0 freeze requires, in order:
    context with per-requesting-webview dispatch; every window is its own
    identity — `open-app-window #:capability` mints a per-window transport
    with exactly that authority.)
+   (also landed: GLZ1 streaming — a handler answering `streaming-response`
+   delivers open/chunk/end frames over the native channel with UTF-8-safe
+   chunk boundaries, both delivery carriers, and mid-stream cancel through
+   the cancel op; the page client exposes `glaze.invokeStream` with
+   per-chunk `onDelta` and AbortSignal support. `run-app #:transport
+   'native` no longer gate-checks macOS — the transport ships on all three
+   platforms.)
 6. Typed command declarations, compatibility checks, JS/TypeScript client
    generation, and facade curation
    (`core/bridge/window/services/distribution/devtools`, `experimental/`).

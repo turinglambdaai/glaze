@@ -288,13 +288,6 @@
     (raise-argument-error 'run-app "(or/c #f capability?)" authority))
   (unless (memq transport '(http native))
     (raise-argument-error 'run-app "(or/c 'http 'native)" transport))
-  ;; The native transport ships on macOS first; the Windows/Linux message
-  ;; handler + scheme ports are migration step 5 (docs/architecture-1.0.md).
-  (when (and (eq? transport 'native) (not (eq? (system-type 'os) 'macosx)))
-    (raise-arguments-error 'run-app
-                           "the native transport currently ships on macOS only"
-                           "platform"
-                           (system-type 'os)))
   (define native? (eq? transport 'native))
   ;; The native transport has no listener to protect: the message handler is
   ;; the trust boundary, so no token is minted and #:port is meaningless.
