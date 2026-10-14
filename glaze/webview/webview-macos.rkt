@@ -299,6 +299,13 @@
                                #"application/javascript; charset=utf-8"
                                (string->bytes/utf-8 (native-api-client-js (native-transport-routes
                                                                            transport)))))]
+      [(equal? segments '("glaze" "api.d.ts"))
+       (lambda ()
+         (native-transport-count-resource! transport)
+         (respond-scheme-data! task
+                               #"application/typescript; charset=utf-8"
+                               (string->bytes/utf-8 (generate-api-declarations
+                                                     (native-transport-routes transport)))))]
       ;; The bridge surface (/glaze/*) is message-handler-only here; never
       ;; fall back to index.html for it.
       [(and (pair? segments) (string=? (first segments) "glaze"))

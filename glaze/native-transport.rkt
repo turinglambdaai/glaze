@@ -40,10 +40,18 @@
          net/url
          (only-in web-server/http/request-structs make-request)
          (only-in web-server/http/response-structs response?)
+         (only-in keel
+                  schema-command
+                  schema-command-error-codes
+                  schema-command-parameters
+                  schema-command-result
+                  schema-parameter-name
+                  schema-parameter-type)
          "api.rkt"
          "bridge.rkt"
          "capability.rkt"
-         "events.rkt")
+         "events.rkt"
+         "types.rkt")
 
 (provide dispatch-bridge
          dispatch-invoke
@@ -66,6 +74,8 @@
          native-transport-shutdown!
          native-scheme-segments
          native-app-origin
+         generate-api-declarations
+         route-named-types
          native-api-client-js
          native-bootstrap-js)
 
@@ -104,7 +114,7 @@
     (and captured (list r captured))))
 
 ;; A minimal web-server request for handlers invoked through the native
-;; transport. Handlers receive the envelope's args as their JSON body, like
+;; transport. Handlers receive the envelope's args as their JSON bo)dy, like
 ;; the HTTP adapter's rewritten request.
 (define (synthetic-request method path body-bytes)
   (make-request (string->bytes/latin-1 (symbol->string (or method 'GET)))
@@ -176,59 +186,88 @@
        [else
         (define route (first match))
         (define captured (second match))
-        (define timeout-secs
-          (let ([ms (and (hash? body) (hash-ref body 'timeout_ms #f))])
-            (and (exact-positive-integer? ms) (/ ms 1000.0))))
-        (call-with-bridge-request
-         table
-         id
-         (lambda ()
-           ;; A timed-out caller stops receiving. A bounded async channel lets
-           ;; the handler publish its eventual result and terminate instead
-           ;; of leaking forever in a synchronous channel-put.
-           (define result-ch (make-async-channel 1))
-           (thread
+        ;; Typed contract: declared body parameters are validated against
+        ;; their keel types before the handler runs. dispatch-invoke is
+        ;; callable standalone (direct dispatch callers), so violations
+        ;; RETURN a typed envelope instead of raising.
+        (define arg-violation
+          (and (route-schema route)
+               (for/or ([p (in-list (schema-command-parameters (route-schema route)))])
+                 (define key (schema-parameter-name p))
+                 (define-values (ok? why)
+                   (validate-jsexpr (schema-parameter-type p)
+                                    (hash-ref args (string->symbol key) 'null)))
+                 (and (not ok?) (cons 'invalid-args (format "~a: ~a" key why))))))
+        (cond
+          [arg-violation (glz1-error-envelope id (car arg-violation) (cdr arg-violation) 'null)]
+          [else
+           (define timeout-secs
+             (let ([ms (and (hash? body) (hash-ref body 'timeout_ms #f))])
+               (and (exact-positive-integer? ms) (/ ms 1000.0))))
+           (call-with-bridge-request
+            table
+            id
             (lambda ()
-              (async-channel-put
-               result-ch
-               (with-handlers
-                   ([exn:fail:glaze:bridge? (lambda (e)
-                                              (glz1-error-envelope id
-                                                                   (exn:fail:glaze:bridge-code e)
-                                                                   (exn-message e)
-                                                                   (exn:fail:glaze:bridge-data e)))]
-                    [exn:fail:glaze:bad-param?
-                     (lambda (e) (glz1-error-envelope id 'invalid-args (exn-message e) 'null))]
-                    [exn:fail? (lambda (e)
-                                 ((current-glaze-error-reporter) e (string-append "glz1:" path))
-                                 (glz1-error-envelope id 'internal "internal error" 'null))])
-                 (define result
-                   (parameterize ([current-capability-id (and authority (capability-id authority))]
-                                  [current-capability-authorizer
-                                   (and authority
-                                        (lambda (permission resource)
-                                          (capability-authorized? authority permission resource)))])
-                     (apply (route-handler route)
-                            (make-handler-request (or method-sym (route-method route))
-                                                  path
-                                                  (string->bytes/utf-8 (jsexpr->string args)))
-                            captured)))
-                 ;; Streaming and full-response handlers bypass
-                 ;; the envelope: the wire is already committed.
-                 (if (response? result)
-                     result
-                     (build-invoke-response id result))))))
-           (define maybe-result
-             (if timeout-secs
-                 (sync/timeout timeout-secs result-ch)
-                 (sync result-ch)))
-           (cond
-             [(not maybe-result)
-              (glz1-error-envelope id
-                                   'timed-out
-                                   (format "handler exceeded ~ams" (hash-ref body 'timeout_ms))
-                                   'null)]
-             [else maybe-result])))])]))
+              ;; A timed-out caller stops receiving. A bounded async channel
+              ;; lets the handler publish its eventual result and terminate
+              ;; instead of leaking forever in a synchronous channel-put.
+              (define result-ch (make-async-channel 1))
+              (thread
+               (lambda ()
+                 (async-channel-put
+                  result-ch
+                  (with-handlers
+                      ([exn:fail:glaze:bridge? (lambda (e)
+                                                 (glz1-error-envelope id
+                                                                      (exn:fail:glaze:bridge-code e)
+                                                                      (exn-message e)
+                                                                      (exn:fail:glaze:bridge-data
+                                                                       e)))]
+                       [exn:fail:glaze:bad-param?
+                        (lambda (e) (glz1-error-envelope id 'invalid-args (exn-message e) 'null))]
+                       [exn:fail? (lambda (e)
+                                    ((current-glaze-error-reporter) e (string-append "glz1:" path))
+                                    (glz1-error-envelope id 'internal "internal error" 'null))])
+                    (define result
+                      (parameterize ([current-capability-id (and authority (capability-id authority))]
+                                     [current-capability-authorizer
+                                      (and
+                                       authority
+                                       (lambda (permission resource)
+                                         (capability-authorized? authority permission resource)))])
+                        (apply (route-handler route)
+                               (make-handler-request (or method-sym (route-method route))
+                                                     path
+                                                     (string->bytes/utf-8 (jsexpr->string args)))
+                               captured)))
+                    ;; Typed contract: a handler result violating its
+                    ;; declared type is a server bug — full detail to the
+                    ;; error reporter, typed internal error to the page.
+                    (when (and (route-schema route) (not (response? result)))
+                      (define-values (rok? rwhy)
+                        (validate-jsexpr (schema-command-result (route-schema route)) result))
+                      (unless rok?
+                        ((current-glaze-error-reporter)
+                         (exn:fail (format "result schema violation on ~a: ~a" path rwhy)
+                                   (current-continuation-marks))
+                         (string-append "glz1:" path))
+                        (raise-bridge-error 'internal "internal error")))
+                    ;; Streaming and full-response handlers bypass
+                    ;; the envelope: the wire is already committed.
+                    (if (response? result)
+                        result
+                        (build-invoke-response id result))))))
+              (define maybe-result
+                (if timeout-secs
+                    (sync/timeout timeout-secs result-ch)
+                    (sync result-ch)))
+              (cond
+                [(not maybe-result)
+                 (glz1-error-envelope id
+                                      'timed-out
+                                      (format "handler exceeded ~ams" (hash-ref body 'timeout_ms))
+                                      'null)]
+                [else maybe-result])))])])]))
 
 ;; The op-routed entry both transports share. Native messages carry an "op"
 ;; field ("hello" / "cancel"); anything with a path is an invoke. HTTP keeps
@@ -474,6 +513,27 @@
       (with-handlers ([exn:fail? (lambda (_) (void))])
         (kill-thread th)))
     (set-box! (native-transport-threads-box t) '())))
+
+;; ---- typed client declarations (/glaze/api.d.ts) ----
+
+;; Renders the .d.ts for the app's TYPED routes (routes without a declared
+;; schema keep their JS entry from api.js and are not typed yet). Function
+;; names match the generated JS client (route->js-name).
+(define (generate-api-declarations routes)
+  (define typed (filter route-schema routes))
+  (define commands
+    (for/list ([r (in-list typed)])
+      (schema-command (route->js-name (route-segments r))
+                      (schema-command-parameters (route-schema r))
+                      (schema-command-result (route-schema r))
+                      (schema-command-error-codes (route-schema r)))))
+  (define named
+    (remove-duplicates (append* (map route-named-types typed))
+                       #:key (lambda (d)
+                               (if (grecord? d)
+                                   (grecord-name d)
+                                   (genum-name d)))))
+  (generate-ts-declarations commands named))
 
 ;; ---- scheme URL parsing (shared by every platform's scheme handler) ----
 

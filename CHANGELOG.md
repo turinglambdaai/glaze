@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Typed command declarations (`glaze/types` + route `schema`): declare
+  parameters and results with typed descriptors (`Int64`, `String`,
+  `(glist Item)`, grecords/genums) in route declarations — the same
+  expression types the parameter and validates it. Both transports validate
+  handler results against the declared type (violations answer typed
+  internal errors; args violate as invalid-args), `/glaze/hello` carries
+  real keel types and named records, and `/glaze/api.d.ts` serves generated
+  TypeScript declarations (`export interface Item`, typed command
+  signatures) on every transport.
+- `glaze/schema-compat`: compatibility baseline for declared schemas —
+  command add/remove, parameter add/remove/type-change, and result-type
+  change are classified as compatible or breaking.
 - Windows and Linux native-transport ports (`run-app #:transport 'native`
   now works on all three platforms): WebView2 carries GLZ1 envelopes
   through `window.chrome.webview` and serves `glaze://app/*` via

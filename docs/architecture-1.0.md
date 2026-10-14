@@ -202,4 +202,9 @@ A 1.0 freeze requires, in order:
 6. Typed command declarations, compatibility checks, JS/TypeScript client
    generation, and facade curation
    (`core/bridge/window/services/distribution/devtools`, `experimental/`).
+   (landed: typed declarations via `glaze/types` descriptors — parameters
+   and results declared in routes drive wire validation on both transports,
+   `/glaze/hello` carries real keel types, `/glaze/api.d.ts` serves
+   generated TypeScript, and `glaze/schema-compat` classifies breaking
+   evolutions. Remaining in this step: facade curation.)
 7. The 1.0 gate above.

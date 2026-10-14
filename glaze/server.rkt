@@ -36,13 +36,16 @@
          "bridge.rkt"
          "capability.rkt"
          "events.rkt"
-         "native-transport.rkt")
+         "native-transport.rkt"
+         (only-in keel schema-command-result)
+         "types.rkt")
 
 (provide start-dev-server
          start-server
          stop-server
          path->mime-type
-         current-glaze-error-reporter)
+         current-glaze-error-reporter
+         generate-api-declarations)
 
 ;; Exception reporter for API-handler failures (the 500 path): the parameter
 ;; lives in native-transport.rkt so both transports report through it. Default
@@ -250,6 +253,7 @@
         [events-request? (sse-response event-bus)]
         [(and serve-client? (api-client-request? req))
          (api-client-response api-routes api-token authority)]
+        [(and serve-client? (api-declarations-request? req)) (api-declarations-response api-routes)]
         [(directory-exists? public-dir) (serve-static-file public-dir req)]
         [else (make-404-response)]))
     (output-response conn resp)))
@@ -302,6 +306,23 @@
 (define (api-client-request? req)
   (and (bytes=? (request-method req) #"GET")
        (equal? (url-path-string (request-uri req)) api-client-path)))
+
+;; GET /glaze/api.d.ts — TypeScript declarations for the app's TYPED
+;; routes (keel-schema routes); untyped routes are simply absent from the
+;; declaration file. Served on the same token terms as api.js.
+(define declarations-path "glaze/api.d.ts")
+
+(define (api-declarations-request? req)
+  (and (bytes=? (request-method req) #"GET")
+       (equal? (url-path-string (request-uri req)) declarations-path)))
+
+(define (api-declarations-response api-routes)
+  (response/full 200
+                 #"OK"
+                 (current-seconds)
+                 #"application/typescript; charset=utf-8"
+                 '()
+                 (list (string->bytes/utf-8 (generate-api-declarations api-routes)))))
 
 ;; url-path-string is called on every request before the static-file guard,
 ;; so a raw "../" in the request line (parsed as path/param 'up symbols)
@@ -607,13 +628,31 @@
                   [exn:fail? (lambda (e)
                                ((current-glaze-error-reporter) e (url-path-string (request-uri req)))
                                (error-response 500 "internal error"))])
-    (define result
+    (define raw-result
       (parameterize ([current-capability-id (and authority (capability-id authority))]
                      [current-capability-authorizer
                       (and authority
                            (lambda (permission resource)
                              (capability-authorized? authority permission resource)))])
         (apply (route-handler route) req captured)))
+    ;; Typed contract: a handler result violating its declared type is a
+    ;; server bug — full detail to the error reporter, generic 500 to the
+    ;; page.
+    (define result
+      (if (and (route-schema route) (not (response? raw-result)))
+          (let-values ([(ok? why) (validate-jsexpr (schema-command-result (route-schema route))
+                                                   raw-result)])
+            (if ok?
+                raw-result
+                (begin
+                  ((current-glaze-error-reporter)
+                   (exn:fail (format "result schema violation on ~a: ~a"
+                                     (url-path-string (request-uri req))
+                                     why)
+                             (current-continuation-marks))
+                   (url-path-string (request-uri req)))
+                  (error-response 500 "internal error"))))
+          raw-result))
     (cond
       [(response? result) result]
       [else (api-response result)])))

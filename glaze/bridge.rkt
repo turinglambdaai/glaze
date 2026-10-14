@@ -30,13 +30,17 @@
          (only-in keel app-error-code app-error-data app-error-message app-null make-app-error)
          (only-in keel
                   schema-command
+                  schema-command-error-codes
+                  schema-command-parameters
+                  schema-command-result
                   schema-parameter
                   schema-record
                   Value
                   String
                   make-app-schema
                   app-schema->app-value)
-         "api.rkt")
+         "api.rkt"
+         "types.rkt")
 
 (provide glz1-version
          bridge-error-code?
@@ -208,17 +212,43 @@
       (if (= (hash-ref qualified-counts name) 1)
           name
           (format "~a-~a" name ordinal))))
+  ;; Typed routes contribute their declared keel command (real parameter
+  ;; and result types, declared error codes); untyped routes keep the
+  ;; permissive String/Value projection. Named types referenced by typed
+  ;; commands are collected so records/enums render too.
+  (define typed-commands
+    (for/list ([r (in-list routes)]
+               [command-name (in-list command-names)]
+               #:when (route-schema r))
+      (schema-command command-name
+                      (schema-command-parameters (route-schema r))
+                      (schema-command-result (route-schema r))
+                      (schema-command-error-codes (route-schema r)))))
+  (define named-types
+    (remove-duplicates (append* (map route-named-types routes))
+                       #:key (lambda (d)
+                               (if (grecord? d)
+                                   (grecord-name d)
+                                   (genum-name d)))))
   (define schema
     (make-app-schema "glaze-routes"
                      1
-                     #:commands (for/list ([r (in-list routes)]
-                                           [command-name (in-list command-names)])
-                                  (schema-command command-name
-                                                  (for/list ([seg (in-list (route-segments r))]
-                                                             #:when (param? seg))
-                                                    (schema-parameter (param-id seg) String))
-                                                  Value
-                                                  invoke-error-codes))))
+                     #:records (map grecord-keel-record (filter grecord? named-types))
+                     #:enums (map genum-keel-enum (filter genum? named-types))
+                     #:commands
+                     (for/list ([r (in-list routes)]
+                                [command-name (in-list command-names)])
+                       (or (and (route-schema r)
+                                (schema-command command-name
+                                                (schema-command-parameters (route-schema r))
+                                                (schema-command-result (route-schema r))
+                                                (schema-command-error-codes (route-schema r))))
+                           (schema-command command-name
+                                           (for/list ([seg (in-list (route-segments r))]
+                                                      #:when (param? seg))
+                                             (schema-parameter (param-id seg) String))
+                                           Value
+                                           invoke-error-codes)))))
   (hasheq 'glz
           glz1-version
           'name
