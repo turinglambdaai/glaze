@@ -214,6 +214,12 @@ A 1.0 freeze requires, in order:
    `/glaze/hello` carries real keel types, `/glaze/api.d.ts` serves
    generated TypeScript, and `glaze/schema-compat` classifies breaking
    evolutions. Also landed: `glaze/core`, the curated 48-entry stable
-   facade with a CI guard that fails on face drift. Remaining in this
-   step: `experimental/` curation and the full-layer module split.)
+   facade with a CI guard that fails on face drift. Also landed: the
+   aggregation layers `glaze/window`, `glaze/services`,
+   `glaze/distribution`, `glaze/devtools`, and `glaze/experimental` —
+   every facade name is now reachable through its layer, with a CI guard
+   per layer; `experimental` holds deeplink/autolaunch/license as
+   explicitly unfrozen (graduation requires a release cycle unchanged
+   under real product usage). Remaining in this step: narrowing `glaze`
+   (main) to the core face plus layers at 1.0.)
 7. The 1.0 gate above.
