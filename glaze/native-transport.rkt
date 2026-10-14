@@ -67,6 +67,8 @@
          native-delivery-json
          start-native-transport
          native-transport-message!
+         native-transport-message-deferred!
+         native-transport-take-deferred!
          native-transport-set-deliver!
          native-transport-public-dir
          native-transport-stats
@@ -370,12 +372,13 @@
          bus ; #f or event-bus?
          public-dir ; path-string? — scheme resources are served from here
          table ; request table (cancellation), per transport
-         inbox ; async channel of raw message strings
+         inbox ; box of (listof string) — FFI-safe message inbox, see message!
          control ; async channel for the event thread's shutdown
          deliver-box ; box of (string? js) -> void — set by the host wiring
          stats-box ; box of immutable hash — served/delivered counters
          threads-box ; box of (listof thread?) — dispatcher + event thread
-         streams-box) ; box of (hash id -> output-port) — active streams
+         streams-box ; box of (hash id -> output-port) — active streams
+         deferred-box) ; box of (listof string) — FFI-stack message stash
   #:transparent)
 
 (define (bump-stat! t key)
@@ -470,7 +473,8 @@
      (box
       (hasheq 'resources-served 0 'messages-received 0 'responses-delivered 0 'events-delivered 0))
      (box '())
-     (box (make-hash))))
+     (box (make-hash))
+     (box '())))
   ;; The dispatcher inherits the caller's parameterization (custodian, error
   ;; reporter) and spawns one thread per message, so a slow or timing-out
   ;; invoke never blocks other invokes or cancels.
@@ -488,6 +492,27 @@
     (define raw (async-channel-get (native-transport-inbox t)))
     (thread (lambda () (handle-raw-message! t raw)))
     (loop)))
+
+;; Script-message callbacks arrive while the host's thread is inside a
+;; foreign call (macOS runs the main run loop on the pump thread, so the
+;; WebKit callbacks reenter Racket on the pump thread's FFI stack). A
+;; scheduler operation that has to yield there — async-channel-put racing
+;; the dispatcher's get — raises "attempt to deschedule the current thread
+;; in atomic mode" and kills the process. So a callback may only stash the
+;; payload in this box, and the host's pump loop hands the stash to the
+;; dispatcher from full Racket context. The writer and the drainer are the
+;; same thread on every platform (the pump thread owns the run loop /
+;; event pump that reenters), so plain pointer swaps are race-free.
+(define (native-transport-message-deferred! t raw)
+  (define b (native-transport-deferred-box t))
+  (set-box! b (cons raw (unbox b))))
+
+(define (native-transport-take-deferred! t)
+  (define b (native-transport-deferred-box t))
+  (define batch (reverse (unbox b)))
+  (unless (null? batch)
+    (set-box! b '()))
+  batch)
 
 ;; Parse a raw message-handler payload (a JSON text from the page) and answer
 ;; through the host's deliver! hook. Parse failures become typed envelopes,
@@ -577,16 +602,24 @@
       [else
        (match-define (list seq name data) v)
        (bump-stat! t 'events-delivered)
-       ((unbox (native-transport-deliver-box t))
-        (native-delivery (events-deliver-js seq name data)
-                         (jsexpr->string (list seq
-                                               (if (symbol? name)
-                                                   (symbol->string name)
-                                                   name)
-                                               data))))
+       ;; One non-serializable payload must not kill the event thread (it
+       ;; would silently stop every future delivery): report and skip.
+       (with-handlers ([exn:fail? (lambda (e)
+                                    ((current-glaze-error-reporter) e "glz1:native:event"))])
+         ((unbox (native-transport-deliver-box t))
+          (native-delivery (events-deliver-js seq name data)
+                           (jsexpr->string (list seq
+                                                 (if (symbol? name)
+                                                     (symbol->string name)
+                                                     name)
+                                                 data)))))
        (loop)])))
 
-;; Called by the host's message handler (on the UI thread); never blocks.
+;; Called by the host's message handler when it runs on a full Racket
+;; thread (Windows' window procedure and Linux's GTK callbacks execute on
+;; the host's pump thread, outside any foreign stack). macOS callbacks
+;; reenter on the pump thread's FFI stack instead and must use
+;; native-transport-message-deferred!.
 (define (native-transport-message! t raw)
   (async-channel-put (native-transport-inbox t) raw))
 

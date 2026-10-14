@@ -134,7 +134,9 @@
        [else
         (set-box! (glaze-app-state-box app) next)
         (when (glaze-app-event-bus app)
-          (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state next)))
+          ;; Event payloads are jsexprs; the lifecycle state goes over the
+          ;; wire as its string form.
+          (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state (symbol->string next))))
         #t]))))
 
 (define (transition-app-to-stopping! app)
@@ -154,7 +156,7 @@
                                  'stopping))
         (set-box! (glaze-app-state-box app) 'stopping)
         (when (glaze-app-event-bus app)
-          (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state 'stopping)))
+          (bus-broadcast! (glaze-app-event-bus app) 'app-state (hasheq 'state "stopping")))
         #t]))))
 
 (define (app-quit! [app (current-app)])

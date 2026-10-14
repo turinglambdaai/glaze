@@ -192,8 +192,12 @@
 ;;     generated api.js; glaze/* bridge paths 404 instead of falling back —
 ;;     on the native transport the bridge surface is message-handler-only;
 ;;   - GlazeScriptHandler receives GLZ1 envelopes posted to the "glz1"
-;;     message handler and feeds them to the transport (non-blocking: the
-;;     transport dispatches on its own threads);
+;;     message handler and stashes them on the transport's deferred box:
+;;     the callback reenters Racket on the pump thread's FFI stack (the
+;;     main run loop runs there), where a yielding scheduler operation —
+;;     an async-channel-put racing the dispatcher — raises "deschedule in
+;;     atomic mode" and kills the process. The pump loop hands the stash
+;;     to the transport from full Racket context each pass;
 ;;   - responses and event batches return as JavaScript snippets on a
 ;;     delivery queue drained by the shared pump thread — evaluateJavaScript
 ;;     must run on the thread that pumps the WebView, and ours is the pump.
@@ -286,6 +290,17 @@
 ;; iteration through this queue of thunks.
 (define scheme-response-queue (make-async-channel #f))
 
+;; The startURLSchemeTask callback runs on the pump thread's FFI stack,
+;; where serving would run file IO and scheduler operations that can
+;; yield — fatal there (see native-transport-message-deferred!). The
+;; callback only stashes the task; the pump loop serves it from full
+;; Racket context. Stasher and drainer are both the pump thread, so plain
+;; pointer swaps are race-free.
+(define scheme-task-stash (box '()))
+
+(define (stash-scheme-task! wiring task)
+  (set-box! scheme-task-stash (cons (cons wiring task) (unbox scheme-task-stash))))
+
 (define (serve-scheme-task! wiring task)
   (define transport (native-wiring-transport wiring))
   (define segments (glaze-scheme-segments (scheme-task-url-string task)))
@@ -325,12 +340,9 @@
                    (- _void
                       (webView: [_id sender] startURLSchemeTask: [_id task])
                       (define wiring (native-wiring-ref (cast self _id _uintptr)))
+                      ;; FFI-stack discipline: stash only; the pump serves.
                       (when wiring
-                        (with-handlers ([exn:fail? (lambda (e)
-                                                     ((current-glaze-error-reporter) e "glz1:scheme")
-                                                     (with-handlers ([exn:fail? (lambda (_) (void))])
-                                                       (respond-scheme-status! task 404)))])
-                          (serve-scheme-task! wiring task))))
+                        (stash-scheme-task! wiring task)))
                    (- _void
                       (webView: [_id sender] stopURLSchemeTask: [_id task])
                       ;; Resources are served synchronously inside start...;
@@ -353,7 +365,10 @@
       (when (and (cast body _id _pointer) (tell #:type _bool body isKindOfClass: #:type _id NSString))
         (define text (tell #:type _string body UTF8String))
         (when (string? text)
-          (native-transport-message! (native-wiring-transport wiring) text))))))
+          ;; Deferred stash only: this callback runs on the pump thread's
+          ;; FFI stack, where a yielding scheduler operation is fatal. The
+          ;; pump loop forwards the stash on its next pass.
+          (native-transport-message-deferred! (native-wiring-transport wiring) text))))))
 
 ;; JavaScript snippets awaiting evaluateJavaScript on the pump thread:
 ;; (cons webview js-string), FIFO so per-window delivery order is stable.
@@ -659,12 +674,39 @@
   (let loop ()
     (define keep-going? (call-with-semaphore pump-lock (lambda () (> open-windows 0))))
     (when keep-going?
-      (pump-once)
-      ;; Deliver pending native-transport JavaScript (responses, event
-      ;; batches) and deferred scheme-task responses while the pump thread
-      ;; owns the WebView.
-      (drain-deliveries!)
-      (drain-scheme-responses!)
+      ;; A dying pump thread is silent by default (no window left, no
+      ;; exception surface): report, keep the loop alive, and let the
+      ;; open-count check decide when to actually stop.
+      (with-handlers ([exn:fail? (lambda (e) ((current-glaze-error-reporter) e "glaze:pump"))])
+        (pump-once)
+        ;; Forward messages the run-loop callbacks stashed on their FFI
+        ;; stack (see native-transport-message-deferred!), deliver pending
+        ;; native-transport JavaScript (responses, event batches), and
+        ;; deferred scheme-task responses while the pump thread owns the
+        ;; WebView.
+        (define wirings
+          (call-with-semaphore native-wirings-sema
+                               (lambda ()
+                                 (for/list ([w (hash-values native-wirings)])
+                                   (native-wiring-transport w)))))
+        (for ([t (in-list wirings)])
+          (for ([raw (in-list (native-transport-take-deferred! t))])
+            (native-transport-message! t raw)))
+        ;; Serve resources stashed by the scheme callbacks, from full
+        ;; Racket context.
+        (define tasks (unbox scheme-task-stash))
+        (unless (null? tasks)
+          (set-box! scheme-task-stash '()))
+        (for ([wt (in-list tasks)])
+          (define wiring (car wt))
+          (define task (cdr wt))
+          (with-handlers ([exn:fail? (lambda (e)
+                                       ((current-glaze-error-reporter) e "glz1:scheme")
+                                       (with-handlers ([exn:fail? (lambda (_) (void))])
+                                         (respond-scheme-status! task 404)))])
+            (serve-scheme-task! wiring task)))
+        (drain-deliveries!)
+        (drain-scheme-responses!))
       ;; Mandatory scheduler yield: when an event or runloop source is always
       ;; ready, the native calls return immediately and a yield-less loop would
       ;; monopolize the OS thread, starving every other Racket thread.
