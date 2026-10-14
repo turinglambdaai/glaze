@@ -119,8 +119,11 @@
   (call-with-output-file (build-path dist "lib" "data.txt")
                          (lambda (out) (display "payload" out))
                          #:exists 'replace)
+  ;; make-linux-installer announces the artifact on stderr by design;
+  ;; drdr treats non-empty stderr as failure, so discard it here.
   (define artifact
-    (make-linux-installer dist "pkgtest" "0.4.2" "Turing Lambda" "TuringLambda.Glaze.PkgTest"))
+    (parameterize ([current-error-port (open-output-nowhere)])
+      (make-linux-installer dist "pkgtest" "0.4.2" "Turing Lambda" "TuringLambda.Glaze.PkgTest")))
   (check-not-false artifact "packaging produced an artifact")
   (define deb-path (build-path dist "pkgtest.deb"))
   (check-true (file-exists? deb-path) "the deb artifact exists")
@@ -151,7 +154,8 @@
                          #:exists 'replace)
   (file-or-directory-permissions (build-path dist "bin" "rpmtest") #o755)
   (define artifact
-    (make-linux-installer dist "rpmtest" "0.4.2" "Turing Lambda" "TuringLambda.Glaze.RpmTest"))
+    (parameterize ([current-error-port (open-output-nowhere)])
+      (make-linux-installer dist "rpmtest" "0.4.2" "Turing Lambda" "TuringLambda.Glaze.RpmTest")))
   (define rpm-path (build-path dist "rpmtest.rpm"))
   (check-true (file-exists? rpm-path) "the rpm artifact exists")
   (when (file-exists? rpm-path)

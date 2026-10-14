@@ -165,7 +165,10 @@
                 [deliver-queue #:mutable])
   #:transparent)
 
-(define (supported?)
+(define (unsupported-reason)
+  ;; Human-readable diagnostics for a failed probe: the missing component
+  ;; list plus why dlopen refused the first missing library (dependency
+  ;; resolution failures otherwise stay invisible).
   (define components
     `((os . ,(eq? (system-type 'os) 'unix))
       (gtk-lib . ,(and gtk-lib #t))
@@ -176,22 +179,25 @@
       (webkit_web_view_load_uri . ,(and webkit_web_view_load_uri #t))
       (g_main_context_iteration . ,(and g_main_context_iteration #t))
       (g_signal_connect_data . ,(and g_signal_connect_data #t))))
-  (unless (andmap cdr components)
-    (fprintf (current-error-port)
-             "[glaze-linux-webview] unsupported; missing: ~a\n"
-             (string-join (for/list ([c (in-list components)]
-                                     #:unless (cdr c))
-                            (symbol->string (car c)))
-                          ", "))
-    ;; Surface why dlopen refused the first missing library — dependency
-    ;; resolution failures otherwise stay invisible.
-    (unless gtk-lib
-      (fprintf (current-error-port)
-               "[glaze-linux-webview] gtk-3 load error: ~a\n"
-               (with-handlers ([exn:fail? exn-message])
-                 (ffi-lib "/lib/x86_64-linux-gnu/libgtk-3.so.0")
-                 "loaded"))))
-  (andmap cdr components))
+  (cond
+    [(andmap cdr components) #f]
+    [else
+     (string-append "missing: "
+                    (string-join (for/list ([c (in-list components)]
+                                            #:unless (cdr c))
+                                   (symbol->string (car c)))
+                                 ", ")
+                    (if gtk-lib
+                        ""
+                        (format "; gtk-3 load error: ~a"
+                                (with-handlers ([exn:fail? exn-message])
+                                  (ffi-lib "/lib/x86_64-linux-gnu/libgtk-3.so.0")
+                                  "loaded"))))]))
+
+;; A pure probe: tests and callers may poll freely; the diagnostics ride
+;; open-webview's failure path instead of this function's stderr.
+(define (supported?)
+  (not (unsupported-reason)))
 
 ;; window-pointer -> on-close thunk registry (GTK "destroy" callback side).
 (define close-callbacks (make-hasheq))
@@ -331,6 +337,7 @@
                       #:native-transport [native-transport #f]
                       #:on-close [on-close (lambda () (void))])
   (unless (supported?)
+    (fprintf (current-error-port) "[glaze-linux-webview] ~a\n" (unsupported-reason))
     (error 'open-webview "Linux WebView backend not available"))
   (when native-transport
     (unless (and native-transport? native-transport)

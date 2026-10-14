@@ -6,6 +6,7 @@
          racket/path
          racket/port
          racket/string
+         racket/system
          rackunit
          glaze/capability
          glaze/path
@@ -44,7 +45,11 @@
                             (lambda (out) (display "XDG_DOWNLOAD_DIR=\"$HOME/GlazeDownloads\"\n" out))
                             #:exists 'truncate/replace))
    (lambda () (check-equal? (download-dir) (build-path (home-dir) "GlazeDownloads")))
-   (lambda () (putenv "XDG_CONFIG_HOME" previous-xdg-config))))
+   ;; A clean environment has no XDG_CONFIG_HOME to restore, and putenv
+   ;; rejects #f — restore only what was there.
+   (lambda ()
+     (when previous-xdg-config
+       (putenv "XDG_CONFIG_HOME" previous-xdg-config)))))
 
 (define default-resolver (make-path-resolver "com.example.glaze" #:resource-root resources))
 (for ([directory (in-list (list (app-config-dir default-resolver)
