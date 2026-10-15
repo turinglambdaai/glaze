@@ -69,7 +69,7 @@ Current physical owners are:
 The CLI is the first completed physical boundary. `glaze-cli/cli.rkt` is a
 small executable dispatcher; implementations live under `glaze-cli/private/`
 and separately own scaffold generation, native run/verification, distribution
-options, licensing, update signing, project metadata, and schema governance.
+options, update signing, project metadata, and schema governance.
 Private command modules may depend on framework capabilities and narrower
 private helpers, but a boundary test rejects imports back into the dispatcher,
 `inspect`, or `pkg` aggregators.

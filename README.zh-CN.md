@@ -183,6 +183,10 @@ raco glaze build --name myapp --sign 40HEXCHARS --installer
 
 签名失败会中止构建；缺失签名工具链时会明确告警。
 
+### 产品权益授权
+
+产品许可证有意放在 Glaze 框架边界之外。需要离线可验证商业权益的应用可以将 Glaze 与 [Permit](https://github.com/turinglambdaai/permit) 或其他独立权益库组合使用；Glaze 本身不依赖它。产品权益签名与 Glaze 的更新制品签名始终是两套独立职责和密钥。
+
 ## 项目结构
 
 一个新的 Glaze 项目结构如下：

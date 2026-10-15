@@ -111,7 +111,6 @@
 
 ;; ---- experimental (presence only — the surface is unfrozen by charter) ----
 (check-not-exn (lambda () (dynamic-require 'glaze/experimental 0)) "experimental layer missing")
-(for ([n (in-list '(ensure-url-scheme! auto-launch-set!
-                                       auto-launch-enabled?))])
+(for ([n (in-list '(ensure-url-scheme! auto-launch-set! auto-launch-enabled?))])
   (check-not-exn (lambda () (dynamic-require 'glaze/experimental n))
                  (format "experimental layer missing: ~a" n)))

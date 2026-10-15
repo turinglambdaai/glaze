@@ -200,6 +200,10 @@ raco glaze build --name myapp --sign 40HEXCHARS --installer
 
 Details: `--sign` takes a codesign identity (macOS) or a SHA-1 thumbprint / subject name for `signtool` (Windows). Hardened runtime is applied automatically on macOS unless `--no-hardened-runtime` is passed (and is skipped for ad-hoc, where its library validation would reject the app's own framework). `--notarize <keychain-profile>` submits the built dmg via `notarytool`, waits, and staples the ticket. `--entitlements <file>`, `--timestamp-url <url>` round it out. Signing failures abort the build; a *missing toolchain* degrades with a loud warning.
 
+### Product entitlements
+
+Product licensing is intentionally outside Glaze's framework boundary. Applications that need offline-verifiable commercial entitlements can compose Glaze with [Permit](https://github.com/turinglambdaai/permit) or another independent entitlement library; Glaze does not depend on it. Product entitlements and Glaze's update-artifact signatures remain separate concerns and keys.
+
 ### Update integrity
 
 `check-update` remains the small, backward-compatible notification helper. For installed applications, the full updater validates a signed manifest, selects the platform/architecture and release channel, enforces staged-rollout and download-size limits, verifies SHA-256 plus an optional artifact signature, and executes an install plan with rollback:
