@@ -88,6 +88,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   entitlement library instead of framework-owned business policy. Glaze does
   not depend on Permit.
 
+### Added
+
+- Aggregation layer modules completing the 1.0 layout skeleton:
+  `glaze/window`, `glaze/services`, `glaze/distribution`, `glaze/devtools`,
+  and `glaze/experimental`. Every facade name is reachable through its
+  layer, each layer's headline exports are CI-guarded, and `experimental`
+  carries deeplink/autolaunch as explicitly unfrozen (graduation requires
+  a release cycle unchanged under real product usage). `glaze` (main)
+  keeps the full surface until the 1.0 narrowing.
+
+### Fixed
+
+- The package-catalog build service (drdr) treats any non-empty stderr as
+  a failure; intentional negative-path output no longer leaks there. The
+  handler-error reporter is silenced inside the negative-path suites,
+  `make-glaze-logger` gained `#:stderr?` (default unchanged), every
+  openssl invocation runs through a stream-capturing helper whose stderr
+  detail rides the error message, and the CLI end-to-end test legs discard
+  their progress output.
+- The openssl capability floor for Ed25519 CLI signing is OpenSSL 3:
+  pkeyutl cannot sign Ed25519 on 1.1.x at all (EVP rejects the key type),
+  and 3.0 makes the algorithm available with the mandatory `-rawin` flag.
+  The update-test signature leg gates on `openssl-available?`, and the
+  glaze-cli dev/verify helpers fall back to the running Racket's own
+  executable when PATH has no racket (package-build sandboxes).
+
 ## [0.15.0] - 2026-10-14
 
 ### Added
