@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Glaze — Racket backend, web UI, native desktop</title>
-    <meta name="description" content="Build desktop apps with a Racket backend and a web frontend. A Tauri-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.">
+    <meta name="description" content="Build desktop apps with a Racket backend and a web frontend — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.">
     <link rel="stylesheet" href="styles.css">
     <link rel="preload" href="fonts/newsreader-latin-var.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="fonts/newsreader-latin-var-italic.woff2" as="font" type="font/woff2" crossorigin>
@@ -76,9 +76,9 @@
                 <span class="accent" data-en="Web for UI. One native window." data-zh="Web 画界面，一个原生窗口。">Web for UI. One native window.</span>
             </h1>
             <p class="lead animate-on-scroll"
-                data-en="Glaze is a Tauri-like framework for Racket: your app logic runs in Racket, your UI is HTML/CSS/JS, and everything ships inside a native desktop window backed by the OS WebView — WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux. The page calls Racket with plain fetch(&quot;/api/...&quot;)."
-                data-zh="Glaze 是 Racket 的 Tauri 式框架：应用逻辑跑在 Racket 里，界面用 HTML/CSS/JS 写，最终装进一个由系统 WebView 驱动的原生桌面窗口——Windows 用 WebView2，macOS 用 WKWebView，Linux 用 WebKitGTK。页面里一句 fetch(&quot;/api/...&quot;) 就能调用 Racket。">
-                Glaze is a Tauri-like framework for Racket: your app logic runs in Racket, your UI is HTML/CSS/JS, and everything ships inside a native desktop window backed by the OS WebView.
+                data-en="Glaze is a desktop application framework for Racket: your app logic runs in Racket, your UI is HTML/CSS/JS, and everything ships inside a native desktop window backed by the OS WebView — WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux. The page calls Racket with plain fetch(&quot;/api/...&quot;)."
+                data-zh="Glaze 是面向 Racket 的桌面应用框架：应用逻辑跑在 Racket 里，界面用 HTML/CSS/JS 写，最终装进一个由系统 WebView 驱动的原生桌面窗口——Windows 用 WebView2，macOS 用 WKWebView，Linux 用 WebKitGTK。页面里一句 fetch(&quot;/api/...&quot;) 就能调用 Racket。">
+                Glaze is a desktop application framework for Racket: your app logic runs in Racket, your UI is HTML/CSS/JS, and everything ships inside a native desktop window backed by the OS WebView.
             </p>
 
             <div class="hero-buttons animate-on-scroll">
@@ -158,11 +158,11 @@
     <section id="compare">
         <div class="container">
             <span class="eyebrow animate-on-scroll" data-en="How it compares" data-zh="横向对比">How it compares</span>
-            <h2 class="section-title animate-on-scroll" data-en="A Tauri-shaped idea," data-zh="Tauri 形的思路，">A Tauri-shaped idea,</h2>
+            <h2 class="section-title animate-on-scroll" data-en="One product shape, different native stories" data-zh="产品形态相通，原生路线不同">One product shape, different native stories</h2>
             <p class="section-lead animate-on-scroll" style="margin-bottom: 0;"
-               data-en="with a different native story: pure FFI, no Rust toolchain, tiny binaries, HTTP-JSON instead of invoke() IPC."
-               data-zh="但原生实现路线不同：纯 FFI、无需 Rust 工具链、二进制极小、以 HTTP-JSON 取代 invoke() 式 IPC。">
-                with a different native story: pure FFI, no Rust toolchain, tiny binaries, HTTP-JSON instead of invoke() IPC.
+               data-en="Pure FFI, no native toolchain, tiny binaries, HTTP-JSON instead of invoke()-style IPC."
+               data-zh="纯 FFI、无需原生工具链、二进制极小、以 HTTP-JSON 取代 invoke() 式 IPC。">
+                Pure FFI, no native toolchain, tiny binaries, HTTP-JSON instead of invoke()-style IPC.
             </p>
 
             <div class="compare-table-wrap animate-on-scroll">
@@ -290,11 +290,11 @@
         var pageMetadata = {
             en: {
                 title: 'Glaze — Racket backend, web UI, native desktop',
-                description: 'Build desktop apps with a Racket backend and a web frontend. A Tauri-like framework for Racket — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.'
+                description: 'Build desktop apps with a Racket backend and a web frontend — write your app logic in Racket, build your UI with HTML/CSS/JS, and ship a desktop application.'
             },
             zh: {
                 title: 'Glaze — Racket 后端、Web UI、原生桌面应用',
-                description: '用 Racket 编写应用逻辑，用 HTML/CSS/JS 构建界面，并通过系统 WebView 交付原生桌面应用。Glaze 是面向 Racket 的 Tauri 式框架。'
+                description: '用 Racket 编写应用逻辑，用 HTML/CSS/JS 构建界面，并通过系统 WebView 交付原生桌面应用。面向 Racket 的桌面应用框架。'
             }
         };
 

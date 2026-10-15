@@ -1,6 +1,6 @@
 # Glaze
 
-用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。一个 Racket 版的 [Tauri](https://tauri.app/) —— 用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，最终运行在真正的桌面窗口中。
+用 [Racket](https://racket-lang.org/) 做后端、Web 技术做前端，构建桌面应用。用 Racket 写业务逻辑，用 HTML/CSS/JS 构建界面，最终运行在真正的桌面窗口中。
 
 **Human-first. Agent-native. Local by design. —— 为人而生，为 Agent 原生设计，本地优先。**
 
