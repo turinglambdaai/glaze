@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   compatibility reasons, project schema status in inspect/doctor/build, and a
   scaffold that exports its route list without running the native application.
 - CLI responsibility boundaries: the executable dispatcher now delegates to
-  private modules for scaffold, native run/verify, build options, licensing,
+  private modules for scaffold, native run/verify, build options,
   update signing, project metadata, and schema governance; boundary tests keep
   those command modules from depending back on CLI aggregators.
 - Runtime and delivery foundations: HTTP trust policy, shared static-resource

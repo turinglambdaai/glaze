@@ -20,6 +20,15 @@ GLZ1 is the logical protocol independently of its carrier. It owns hello negotia
 
 Keel supplies the transport-neutral lifecycle, schema, type, and structured-error vocabulary. Glaze owns the WebView carrier, JSON-compatible value policy, route declaration syntax, frontend bindings, capability enforcement, resource delivery, and platform window lifecycle. Glaze must not depend on Rivet, and Rivet must not depend on Glaze.
 
+Commercial product rights are a sibling concern rather than a Glaze layer. A
+product may compose Glaze with
+[Permit](https://github.com/turinglambdaai/permit/blob/main/docs/framework-integration.md),
+but Glaze does not depend on Permit and does not own entitlement, trial,
+activation, seat, subscription, payment, or account policy. Glaze may provide
+general secure storage that a product chooses for Permit state. Update-artifact
+verification remains Glaze distribution infrastructure and uses a separate
+trust domain from Permit credential signing and OS publisher credentials.
+
 ## Module boundaries
 
 The intended public dependency direction is:

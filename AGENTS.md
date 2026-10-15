@@ -23,6 +23,26 @@ Glaze 是一个 **Tauri-like framework for Racket**：
 - Windows 使用 WebView2，macOS 使用 WKWebView，Linux 使用 WebKitGTK；
 - 核心平台层尽量使用纯 Racket FFI，不要求用户安装 C/C++ 编译器。
 
+### 商业权益边界
+
+Glaze 负责应用运行时、Native WebView、通用安全存储、打包、发布和更新完整性；
+它不负责产品 entitlement、trial、activation、seat、subscription 或 payment
+policy。商业产品可以在产品层同时依赖 Glaze 与
+[Permit](https://github.com/turinglambdaai/permit)，但依赖方向必须保持为：
+
+```text
+product -> Glaze
+product -> Permit
+Glaze   -X-> Permit
+```
+
+不要重新加入 `glaze/license`、授权 CLI 或框架内置商业策略，也不要让 Glaze
+依赖 Permit。产品可以使用 Glaze 的通用 secure-storage 能力保存 Permit 凭证、
+本地 trial 状态或 `installation_id`，但这些数据的语义仍由产品与 Permit 拥有。
+Glaze 的更新制品签名、OS 代码签名和 Permit 凭证签名属于不同信任域，必须使用
+独立密钥与轮换流程。完整的共享契约见 Permit 的
+[`docs/framework-integration.md`](https://github.com/turinglambdaai/permit/blob/main/docs/framework-integration.md)。
+
 ### 最重要的产品契约：GUI-first
 
 **Glaze 是桌面 GUI 框架，不是“本地 server + 浏览器”的框架。**
