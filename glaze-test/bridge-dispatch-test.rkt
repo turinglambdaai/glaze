@@ -14,10 +14,8 @@
          glaze/capability
          glaze/private/bridge-dispatch
          glaze/types
-         (rename-in glaze/native-transport
-                    [current-glaze-error-reporter native-error-reporter])
-         (rename-in glaze/server
-                    [current-glaze-error-reporter http-error-reporter]))
+         (rename-in glaze/native-transport [current-glaze-error-reporter native-error-reporter])
+         (rename-in glaze/server [current-glaze-error-reporter http-error-reporter]))
 
 (define-runtime-path server-source "../glaze/server.rkt")
 (define-runtime-path native-source "../glaze/native-transport.rkt")
@@ -26,18 +24,20 @@
   (response/full 202 #"Accepted" (current-seconds) #"text/plain" '() (list #"raw")))
 
 (define routes
-  (list (GET "api/ping" (lambda (_request) (hasheq 'pong #t)))
-        (POST "api/echo"
-              (lambda (request) (hash-ref (request-json-body request) 'name))
-              #:body-types (list (cons "name" GString))
-              #:returns GString)
-        (GET "api/boom" (lambda (_request) (error 'boom "SECRET-DISPATCH-DETAIL")))
-        (GET "api/slow" (lambda (_request) (sleep 0.05) "done") #:returns GString)
-        (GET "api/raw" (lambda (_request) raw-response))
-        (GET "api/protected"
-             (lambda (_request) "allowed")
-             #:permission 'files:read
-             #:returns GString)))
+  (list
+   (GET "api/ping" (lambda (_request) (hasheq 'pong #t)))
+   (POST "api/echo"
+         (lambda (request) (hash-ref (request-json-body request) 'name))
+         #:body-types (list (cons "name" GString))
+         #:returns GString)
+   (GET "api/boom" (lambda (_request) (error 'boom "SECRET-DISPATCH-DETAIL")))
+   (GET "api/slow"
+        (lambda (_request)
+          (sleep 0.05)
+          "done")
+        #:returns GString)
+   (GET "api/raw" (lambda (_request) raw-response))
+   (GET "api/protected" (lambda (_request) "allowed") #:permission 'files:read #:returns GString)))
 
 (define (dispatch body [authority #f] [streams #f])
   (dispatch-bridge body routes authority (make-request-table) route->js-name streams))
@@ -50,12 +50,9 @@
   (check-eq? current-glaze-error-reporter http-error-reporter))
 
 (test-case "both carriers depend directly on the shared dispatch owner"
-  (check-false (regexp-match? #px"\"native-transport[.]rkt\""
-                              (file->string server-source)))
-  (check-true (regexp-match? #px"\"private/bridge-dispatch[.]rkt\""
-                             (file->string server-source)))
-  (check-true (regexp-match? #px"\"private/bridge-dispatch[.]rkt\""
-                             (file->string native-source))))
+  (check-false (regexp-match? #px"\"native-transport[.]rkt\"" (file->string server-source)))
+  (check-true (regexp-match? #px"\"private/bridge-dispatch[.]rkt\"" (file->string server-source)))
+  (check-true (regexp-match? #px"\"private/bridge-dispatch[.]rkt\"" (file->string native-source))))
 
 (test-case "synthetic requests preserve method, URI, and body"
   (define request (synthetic-request 'POST "api/echo" #"{\"name\":\"Ada\"}"))
@@ -65,25 +62,18 @@
 
 (test-case "invoke dispatch shares JSON args and typed validation"
   (define ok
-    (dispatch (hasheq 'glz 1
-                      'id "echo-ok"
-                      'method "POST"
-                      'path "api/echo"
-                      'args (hasheq 'name "Ada"))))
+    (dispatch
+     (hasheq 'glz 1 'id "echo-ok" 'method "POST" 'path "api/echo" 'args (hasheq 'name "Ada"))))
   (check-true (hash-ref ok 'ok))
   (check-equal? (hash-ref ok 'value) "Ada")
   (define invalid
-    (dispatch (hasheq 'glz 1
-                      'id "echo-invalid"
-                      'method "POST"
-                      'path "api/echo"
-                      'args (hasheq 'name 42))))
+    (dispatch
+     (hasheq 'glz 1 'id "echo-invalid" 'method "POST" 'path "api/echo" 'args (hasheq 'name 42))))
   (check-equal? (error-code invalid) "invalid-args"))
 
 (test-case "dispatch preserves capability and response pass-through contracts"
   (define denied
-    (dispatch (hasheq 'glz 1 'id "denied" 'path "api/protected")
-              (make-capability "reader" '())))
+    (dispatch (hasheq 'glz 1 'id "denied" 'path "api/protected") (make-capability "reader" '())))
   (check-equal? (error-code denied) "capability-denied")
   (define allowed
     (dispatch (hasheq 'glz 1 'id "allowed" 'path "api/protected")
@@ -104,14 +94,12 @@
   (check-equal? (second (car (unbox reports))) "glz1:api/boom"))
 
 (test-case "timeout and cancel retain GLZ1 terminal semantics"
-  (define timed-out
-    (dispatch (hasheq 'glz 1 'id "slow" 'path "api/slow" 'timeout_ms 1)))
+  (define timed-out (dispatch (hasheq 'glz 1 'id "slow" 'path "api/slow" 'timeout_ms 1)))
   (check-equal? (hash-ref timed-out 'outcome) "timed-out")
   (check-equal? (error-code timed-out) "timed-out")
   (define-values (_input output) (make-pipe))
   (define streams (make-hash (list (cons "stream-1" output))))
-  (define cancelled
-    (dispatch (hasheq 'glz 1 'op "cancel" 'id "stream-1") #f streams))
+  (define cancelled (dispatch (hasheq 'glz 1 'op "cancel" 'id "stream-1") #f streams))
   (check-true (hash-ref cancelled 'ok))
   (check-true (port-closed? output)))
 

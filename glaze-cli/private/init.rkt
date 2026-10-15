@@ -88,10 +88,10 @@ VERIFY
                              "  (run-app #:public-dir public\n"
                              "           #:api api\n"
                              (format "           #:title ~s))\n" name)))
-  (write-file (build-path name "glaze.rktd")
-              "#hasheq((schema-baseline . \"glaze-schema.json\")\n         (schema-binding . api)\n         (schema-module . \"main.rkt\"))\n")
-  (write-file (build-path name "glaze-schema.json")
-              (canonical-json-string (schema-snapshot '())))
+  (write-file
+   (build-path name "glaze.rktd")
+   "#hasheq((schema-baseline . \"glaze-schema.json\")\n         (schema-binding . api)\n         (schema-module . \"main.rkt\"))\n")
+  (write-file (build-path name "glaze-schema.json") (canonical-json-string (schema-snapshot '())))
   (write-file
    (build-path name "public" "index.html")
    #"<!DOCTYPE html>

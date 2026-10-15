@@ -32,6 +32,5 @@
     (error 'verify
            "verify.rkt not found; add a native UI acceptance script or rerun `raco glaze init`"))
   (define racket-exe
-    (or (find-executable-path "racket" #f)
-        (error 'verify "racket executable not found on PATH")))
+    (or (find-executable-path "racket" #f) (error 'verify "racket executable not found on PATH")))
   (system*/exit-code racket-exe (path->string verifier)))

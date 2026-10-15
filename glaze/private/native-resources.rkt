@@ -74,7 +74,6 @@
     [(member ext '(#".map")) #"application/json; charset=utf-8"]
     [else #"application/octet-stream"]))
 
-
 ;; ---- scheme URL parsing (shared by every platform's scheme handler) ----
 
 ;; "glaze://app/sub/x.js?query#frag" -> '("sub" "x.js"), percent-decoded.

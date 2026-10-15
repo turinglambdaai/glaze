@@ -17,19 +17,23 @@
   ;; require a submodule that does not exist.
   (define module-datum
     (call-with-input-file entry-path
-      (lambda (input)
-        (parameterize ([read-accept-reader #t]
-                       [current-load-relative-directory (path-only entry-path)])
-          (syntax->datum (read-syntax entry-path input))))))
+                          (lambda (input)
+                            (parameterize ([read-accept-reader #t]
+                                           [current-load-relative-directory (path-only entry-path)])
+                              (syntax->datum (read-syntax entry-path input))))))
   (define (main-form? form)
     (cond
       [(and (pair? form)
-            (memq (car form) '(module module* module+))
+            (memq (car form)
+                  '(module module* module+
+                     ))
             (pair? (cdr form))
             (eq? (cadr form) 'main))
        #t]
       [(and (pair? form)
-            (memq (car form) '(begin #%module-begin)))
+            (memq (car form)
+                  '(begin
+                     #%module-begin)))
        (for/or ([nested (in-list (cdr form))])
          (main-form? nested))]
       [else #f]))

@@ -36,10 +36,10 @@
 ;; the monolith through a cycle.
 (define cli-aggregate-import-rx #px"glaze-cli/(?:cli|inspect|pkg)")
 (for ([source (in-list (find-files (lambda (path)
-                                    (and (file-exists? path)
-                                         (regexp-match? #rx#"[.]rkt$" (path->bytes path))
-                                         (not (regexp-match? #rx#"/compiled/" (path->bytes path)))))
-                                  cli-private-root))])
+                                     (and (file-exists? path)
+                                          (regexp-match? #rx#"[.]rkt$" (path->bytes path))
+                                          (not (regexp-match? #rx#"/compiled/" (path->bytes path)))))
+                                   cli-private-root))])
   (check-false (regexp-match? cli-aggregate-import-rx (file->string source))
                (format "private CLI command imports an aggregate module: ~a"
                        (find-relative-path cli-private-root source))))

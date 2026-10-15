@@ -56,8 +56,10 @@
          (display "{}" out)
          (begin
            (display "{\n" out)
-           (for ([pair (in-list pairs)] [index (in-naturals)])
-             (unless (zero? index) (display ",\n" out))
+           (for ([pair (in-list pairs)]
+                 [index (in-naturals)])
+             (unless (zero? index)
+               (display ",\n" out))
              (write-indent out (add1 depth))
              (write-json (json-key-string (car pair)) out)
              (display ": " out)
@@ -70,8 +72,10 @@
          (display "[]" out)
          (begin
            (display "[\n" out)
-           (for ([item (in-list value)] [index (in-naturals)])
-             (unless (zero? index) (display ",\n" out))
+           (for ([item (in-list value)]
+                 [index (in-naturals)])
+             (unless (zero? index)
+               (display ",\n" out))
              (write-indent out (add1 depth))
              (write-canonical-json item out (add1 depth)))
            (display "\n" out)
@@ -88,8 +92,14 @@
 (define missing (gensym 'missing))
 
 (define (jref object key [default missing])
-  (define string-key (if (symbol? key) (symbol->string key) key))
-  (define symbol-key (if (string? key) (string->symbol key) key))
+  (define string-key
+    (if (symbol? key)
+        (symbol->string key)
+        key))
+  (define symbol-key
+    (if (string? key)
+        (string->symbol key)
+        key))
   (cond
     [(and (hash? object) (hash-has-key? object symbol-key)) (hash-ref object symbol-key)]
     [(and (hash? object) (hash-has-key? object string-key)) (hash-ref object string-key)]
@@ -126,9 +136,7 @@
   (define new-schema (jref new 'schema (hash)))
   (for ([key (in-list '(contract id revision))])
     (unless (equal? (jref old-schema key #f) (jref new-schema key #f))
-      (break! "schema-metadata-changed"
-              (format "schema.~a" key)
-              (format "schema ~a changed" key))))
+      (break! "schema-metadata-changed" (format "schema.~a" key) (format "schema ~a changed" key))))
 
   (define old-routes
     (for/hash ([route (in-list (jref old 'routes '()))])
@@ -158,10 +166,9 @@
                  (format "~a changed: ~a" collection name))]))
     (for ([name (in-list (sort (hash-keys new-values) string<?))]
           #:unless (hash-has-key? old-values name))
-      ((if addition-compatible? add! break!)
-       (format "~a-added" collection)
-       (format "schema.~a.~a" collection name)
-       (format "~a added: ~a" collection name))))
+      ((if addition-compatible? add! break!) (format "~a-added" collection)
+                                             (format "schema.~a.~a" collection name)
+                                             (format "~a added: ~a" collection name))))
 
   ;; Enums are closed sets.  Adding a case can make an old exhaustive client
   ;; fail, so any enum change is breaking.  New named enums are harmless until
@@ -195,9 +202,11 @@
             (break! "record-field-type-changed"
                     (format "~a.fields.~a.type" base-path field-name)
                     (format "record field type changed: ~a.~a" name field-name))]))
-       (define existing-new-order (filter (lambda (field-name) (member field-name old-names)) new-names))
+       (define existing-new-order
+         (filter (lambda (field-name) (member field-name old-names)) new-names))
        (unless (equal? existing-new-order old-names)
-         (break! "record-fields-reordered" (format "~a.fields" base-path)
+         (break! "record-fields-reordered"
+                 (format "~a.fields" base-path)
                  (format "record fields reordered: ~a" name)))
        (when (and (> (length new-names) (length old-names))
                   (not (equal? (take new-names (length old-names)) old-names)))
@@ -229,7 +238,8 @@
        (define old-command (hash-ref old-commands name))
        (define new-command (hash-ref new-commands name))
        (unless (equal? (jref old-command 'result) (jref new-command 'result))
-         (break! "command-result-changed" (format "~a.result" base-path)
+         (break! "command-result-changed"
+                 (format "~a.result" base-path)
                  (format "command result changed: ~a" name)))
        (define old-params (jref old-command 'parameters '()))
        (define new-params (jref new-command 'parameters '()))
@@ -248,9 +258,11 @@
             (break! "command-parameter-type-changed"
                     (format "~a.parameters.~a.type" base-path param-name)
                     (format "command parameter type changed: ~a.~a" name param-name))]))
-       (define existing-new-order (filter (lambda (param-name) (member param-name old-names)) new-names))
+       (define existing-new-order
+         (filter (lambda (param-name) (member param-name old-names)) new-names))
        (unless (equal? existing-new-order old-names)
-         (break! "command-parameters-reordered" (format "~a.parameters" base-path)
+         (break! "command-parameters-reordered"
+                 (format "~a.parameters" base-path)
                  (format "command parameters reordered: ~a" name)))
        (when (and (> (length new-names) (length old-names))
                   (not (equal? (take new-names (length old-names)) old-names)))
@@ -269,19 +281,26 @@
                      (format "required command parameter added: ~a.~a" name param-name))))
        (define old-errors (jref old-command 'errors '()))
        (define new-errors (jref new-command 'errors '()))
-       (for ([code (in-list old-errors)] #:unless (member code new-errors))
-         (break! "command-error-removed" (format "~a.errors.~a" base-path code)
+       (for ([code (in-list old-errors)]
+             #:unless (member code new-errors))
+         (break! "command-error-removed"
+                 (format "~a.errors.~a" base-path code)
                  (format "command error removed: ~a.~a" name code)))
-       (for ([code (in-list new-errors)] #:unless (member code old-errors))
-         (add! "command-error-added" (format "~a.errors.~a" base-path code)
+       (for ([code (in-list new-errors)]
+             #:unless (member code old-errors))
+         (add! "command-error-added"
+               (format "~a.errors.~a" base-path code)
                (format "command error added: ~a.~a" name code)))]))
   (for ([name (in-list (sort (hash-keys new-commands) string<?))]
         #:unless (hash-has-key? old-commands name))
     (add! "command-added" (format "schema.commands.~a" name) (format "command added: ~a" name)))
 
-  (hasheq 'compatible (null? breaking)
-          'breaking-changes (reverse breaking)
-          'compatible-additions (reverse additions)))
+  (hasheq 'compatible
+          (null? breaking)
+          'breaking-changes
+          (reverse breaking)
+          'compatible-additions
+          (reverse additions)))
 
 (define (schema-snapshot-compatible? old new)
   (hash-ref (schema-snapshot-report old new) 'compatible))

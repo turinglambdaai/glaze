@@ -14,6 +14,4 @@
 (test-case "macOS plist preserves configured URL-scheme order"
   (define plist (macos-info-plist "Demo" "1.2.3" '(demo demo-preview)))
   (check-true (string-contains? plist "<key>CFBundleURLTypes</key>"))
-  (check-true
-   (regexp-match? #px"<string>demo</string>[\\s\\S]*<string>demo-preview</string>"
-                  plist)))
+  (check-true (regexp-match? #px"<string>demo</string>[\\s\\S]*<string>demo-preview</string>" plist)))

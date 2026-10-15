@@ -19,7 +19,6 @@
          native-api-client-js
          native-bootstrap-js)
 
-
 ;; ---- typed client declarations (/glaze/api.d.ts) ----
 
 ;; Renders the .d.ts for the app's TYPED routes (routes without a declared
@@ -40,7 +39,6 @@
                                    (grecord-name d)
                                    (genum-name d)))))
   (generate-ts-declarations commands named))
-
 
 ;; Injected at document start by the host (WKUserScript and equivalents).
 ;; Defines the delivery plumbing and a transport-level client:

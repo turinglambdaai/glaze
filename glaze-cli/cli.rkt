@@ -11,8 +11,6 @@
          glaze-cli/private/schema
          glaze-cli/private/update-command)
 
-
-
 (define (print-help)
   (displayln "Usage: raco glaze <command> [args]")
   (displayln "")
@@ -58,7 +56,6 @@
   (displayln "  --url-scheme <name>  Deep-link URL scheme (repeatable): macOS gets")
   (displayln "                       Info.plist entries; call (ensure-url-scheme! ...)")
   (displayln "                       at app start on Windows/Linux)"))
-
 
 ;; Dispatch CLI commands
 (define args (vector->list (current-command-line-arguments)))

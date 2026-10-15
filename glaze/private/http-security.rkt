@@ -25,9 +25,7 @@
   (and (string? value) (regexp-match? loopback-host-rx (string-downcase value)) #t))
 
 (define (content-length-too-large? value limit)
-  (define size
-    (and value
-         (string->number (string-trim value))))
+  (define size (and value (string->number (string-trim value))))
   (and size (exact-positive-integer? size) (> size limit)))
 
 (define (cross-site-values? origin fetch-site port)
@@ -75,11 +73,7 @@
   (content-length-too-large? (header-string req #"Content-Length") limit))
 
 (define (request-cross-site? req port)
-  (cross-site-values? (header-string req #"Origin")
-                      (header-string req #"Sec-Fetch-Site")
-                      port))
+  (cross-site-values? (header-string req #"Origin") (header-string req #"Sec-Fetch-Site") port))
 
 (define (request-token-ok? req expected)
-  (token-values-match? (header-string req #"X-Glaze-Token")
-                       (header-string req #"Cookie")
-                       expected))
+  (token-values-match? (header-string req #"X-Glaze-Token") (header-string req #"Cookie") expected))

@@ -76,7 +76,6 @@
          native-api-client-js
          native-bootstrap-js)
 
-
 ;; ---- native transport instance ----
 
 ;; One per window (per open-app call): receives message-handler payloads,
@@ -212,8 +211,7 @@
        ;; would silently stop every future delivery): report and skip.
        (with-handlers ([exn:fail? (lambda (e)
                                     ((current-glaze-error-reporter) e "glz1:native:event"))])
-         ((unbox (native-transport-deliver-box t))
-          (event-delivery seq name data)))
+         ((unbox (native-transport-deliver-box t)) (event-delivery seq name data)))
        (loop)])))
 
 ;; Called by the host's message handler when it runs on a full Racket

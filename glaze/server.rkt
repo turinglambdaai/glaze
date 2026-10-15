@@ -144,14 +144,12 @@
      "port"
      port)))
 
-
 ;; ---- dispatcher ----
 
 ;; Local apps are reachable by every website in every browser. The Host check
 ;; above stops DNS rebinding; this limit caps how much a single request can
 ;; make the server buffer. 8 MiB covers JSON API payloads with headroom.
 (define default-max-body-size (* 8 1024 1024))
-
 
 ;; Fetch-Metadata + Origin guard for the bridge surface (API routes + SSE).
 ;; A cross-site page posting to a loopback API (`content-type: text/plain`
@@ -171,7 +169,6 @@
 
 (define (bridge-request? matched-api events-request? req)
   (or matched-api events-request? (glz1-request? req) (glz1-post-request? req)))
-
 
 (define (make-dispatcher public-dir
                          api-routes
@@ -217,7 +214,6 @@
         [(directory-exists? public-dir) (serve-static-file public-dir req)]
         [else (make-404-response)]))
     (output-response conn resp)))
-
 
 ;; ---- token bootstrap (capability URL -> HttpOnly cookie) ----
 

@@ -17,17 +17,20 @@
 
 (define (chunk-text delivery)
   (define frame (delivery-json delivery))
-  (and (hash? frame)
-       (equal? (hash-ref frame 'stream #f) "chunk")
-       (hash-ref frame 'text)))
+  (and (hash? frame) (equal? (hash-ref frame 'stream #f) "chunk") (hash-ref frame 'text)))
 
 (test-case "full responses preserve equivalent JavaScript and JSON carriers"
   (define response
-    (hasheq 'glz 1
-            'id "quote-\"-slash-\\"
-            'ok #t
-            'outcome "succeeded"
-            'value (hasheq 'message "水 and \"quotes\"")))
+    (hasheq 'glz
+            1
+            'id
+            "quote-\"-slash-\\"
+            'ok
+            #t
+            'outcome
+            "succeeded"
+            'value
+            (hasheq 'message "水 and \"quotes\"")))
   (define delivery (response-delivery response))
   (check-equal? (delivery-json delivery) response)
   (check-true (string-contains? (native-delivery-js delivery) "__glz1Deliver"))
@@ -35,65 +38,55 @@
 
 (test-case "events use one sequenced batch in both carriers"
   (define delivery (event-delivery 7 'counter-changed (hasheq 'value 2)))
-  (check-equal? (delivery-json delivery)
-                (list 7 "counter-changed" (hasheq 'value 2)))
+  (check-equal? (delivery-json delivery) (list 7 "counter-changed" (hasheq 'value 2)))
   (check-true (string-contains? (native-delivery-js delivery) "__glz1Events"))
-  (check-exn exn:fail?
-             (lambda () (event-delivery 8 'bad (lambda () 'not-json)))))
+  (check-exn exn:fail? (lambda () (event-delivery 8 'bad (lambda () 'not-json)))))
 
 (test-case "stream draining preserves UTF-8 across writes and frame order"
   (define active-streams (make-hash))
   (define deliveries '())
   (define response
-    (streaming-response
-     (lambda (out)
-       (display "A" out)
-       (write-byte #xe6 out)
-       (flush-output out)
-       ;; Force the reader to observe an incomplete three-byte sequence.
-       (sleep 0.05)
-       (write-byte #xb0 out)
-       (write-byte #xb4 out)
-       (display "B" out))))
-  (deliver-stream-response!
-   response
-   "utf8"
-   active-streams
-   (lambda (delivery) (set! deliveries (cons delivery deliveries))))
+    (streaming-response (lambda (out)
+                          (display "A" out)
+                          (write-byte #xe6 out)
+                          (flush-output out)
+                          ;; Force the reader to observe an incomplete three-byte sequence.
+                          (sleep 0.05)
+                          (write-byte #xb0 out)
+                          (write-byte #xb4 out)
+                          (display "B" out))))
+  (deliver-stream-response! response
+                            "utf8"
+                            active-streams
+                            (lambda (delivery) (set! deliveries (cons delivery deliveries))))
   (set! deliveries (reverse deliveries))
   (check-equal? (hash-ref (delivery-json (first deliveries)) 'stream) "open")
   (check-equal? (hash-ref (delivery-json (last deliveries)) 'stream) "end")
-  (check-equal? (apply string-append (filter values (map chunk-text deliveries)))
-                "A水B")
+  (check-equal? (apply string-append (filter values (map chunk-text deliveries))) "A水B")
   (check-false (hash-has-key? active-streams "utf8")))
 
 (test-case "invalid UTF-8 is replaced without stalling the stream"
   (define active-streams (make-hash))
   (define deliveries '())
-  (deliver-stream-response!
-   (streaming-response
-    (lambda (out)
-      (write-bytes (bytes #x61 #xff #x62) out)))
-   "invalid"
-   active-streams
-   (lambda (delivery) (set! deliveries (cons delivery deliveries))))
+  (deliver-stream-response! (streaming-response (lambda (out)
+                                                  (write-bytes (bytes #x61 #xff #x62) out)))
+                            "invalid"
+                            active-streams
+                            (lambda (delivery) (set! deliveries (cons delivery deliveries))))
   (define ordered (reverse deliveries))
-  (check-equal? (apply string-append (filter values (map chunk-text ordered)))
-                "a�b")
+  (check-equal? (apply string-append (filter values (map chunk-text ordered))) "a�b")
   (check-equal? (hash-ref (delivery-json (last ordered)) 'stream) "end"))
 
 (test-case "writer failure still terminates and unregisters the stream"
   (define active-streams (make-hash))
   (define deliveries '())
-  (deliver-stream-response!
-   (streaming-response
-    (lambda (out)
-      (display "partial" out)
-      (flush-output out)
-      (error 'writer "expected failure")))
-   "failure"
-   active-streams
-   (lambda (delivery) (set! deliveries (cons delivery deliveries))))
+  (deliver-stream-response! (streaming-response (lambda (out)
+                                                  (display "partial" out)
+                                                  (flush-output out)
+                                                  (error 'writer "expected failure")))
+                            "failure"
+                            active-streams
+                            (lambda (delivery) (set! deliveries (cons delivery deliveries))))
   (define ordered (reverse deliveries))
   (check-equal? (apply string-append (filter values (map chunk-text ordered))) "partial")
   (check-equal? (hash-ref (delivery-json (last ordered)) 'stream) "end")
@@ -103,19 +96,17 @@
   (define active-streams (make-hash))
   (define deliveries (make-async-channel))
   (define worker
-    (thread
-     (lambda ()
-       (deliver-stream-response!
-        (streaming-response
-         (lambda (out)
-           (let loop ()
-             (display "tick " out)
-             (flush-output out)
-             (sleep 0.02)
-             (loop))))
-        "cancel"
-        active-streams
-        (lambda (delivery) (async-channel-put deliveries delivery))))))
+    (thread (lambda ()
+              (deliver-stream-response! (streaming-response (lambda (out)
+                                                              (let loop ()
+                                                                (display "tick " out)
+                                                                (flush-output out)
+                                                                (sleep 0.02)
+                                                                (loop))))
+                                        "cancel"
+                                        active-streams
+                                        (lambda (delivery)
+                                          (async-channel-put deliveries delivery))))))
   (define open-frame (sync/timeout 5 deliveries))
   (check-equal? (hash-ref (delivery-json open-frame) 'stream) "open")
   (check-not-false (sync/timeout 5 deliveries))

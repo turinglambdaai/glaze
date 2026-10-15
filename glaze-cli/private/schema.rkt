@@ -25,12 +25,17 @@
 
 (define (parse-options args)
   (unless (pair? args)
-    (raise-user-error 'schema
-                      "usage: raco glaze schema <write|check> [--module <path>] [--binding <name>] [--baseline <path>] [--json]"))
+    (raise-user-error
+     'schema
+     "usage: raco glaze schema <write|check> [--module <path>] [--binding <name>] [--baseline <path>] [--json]"))
   (define action (car args))
   (unless (member action '("write" "check"))
     (raise-user-error 'schema "expected `write` or `check`, got: ~a" action))
-  (let loop ([remaining (cdr args)] [module #f] [binding #f] [baseline #f] [json? #f])
+  (let loop ([remaining (cdr args)]
+             [module #f]
+             [binding #f]
+             [baseline #f]
+             [json? #f])
     (cond
       [(null? remaining) (schema-options action module binding baseline json?)]
       [(equal? (car remaining) "--module")
@@ -42,8 +47,7 @@
       [(equal? (car remaining) "--baseline")
        (define value (option-value 'schema "--baseline" remaining))
        (loop (cddr remaining) module binding value json?)]
-      [(equal? (car remaining) "--json")
-       (loop (cdr remaining) module binding baseline #t)]
+      [(equal? (car remaining) "--json") (loop (cdr remaining) module binding baseline #t)]
       [else (raise-user-error 'schema "unexpected argument: ~a" (car remaining))])))
 
 (define (binding-symbol value)
@@ -57,10 +61,9 @@
   (define module-value
     (or (schema-options-module options) (project-config-ref config 'schema-module #f)))
   (unless module-value
-    (raise-user-error
-     'schema
-     "schema module is not configured; add schema-module to ~a or pass --module"
-     project-config-name))
+    (raise-user-error 'schema
+                      "schema module is not configured; add schema-module to ~a or pass --module"
+                      project-config-name))
   (define binding-value
     (or (schema-options-binding options) (project-config-ref config 'schema-binding 'api)))
   (define baseline-value
@@ -74,13 +77,12 @@
   (unless (file-exists? module-path)
     (raise-user-error 'schema "schema module does not exist: ~a" (path->string module-path)))
   (define routes
-    (with-handlers ([exn:fail?
-                     (lambda (error)
-                       (raise-user-error 'schema
-                                         "cannot load ~a from ~a: ~a"
-                                         binding
-                                         (path->string module-path)
-                                         (exn-message error)))])
+    (with-handlers ([exn:fail? (lambda (error)
+                                 (raise-user-error 'schema
+                                                   "cannot load ~a from ~a: ~a"
+                                                   binding
+                                                   (path->string module-path)
+                                                   (exn-message error)))])
       (parameterize ([current-output-port (open-output-nowhere)]
                      [current-error-port (open-output-nowhere)])
         (dynamic-require module-path binding))))
@@ -89,12 +91,11 @@
                       "~a from ~a must be a Glaze route list"
                       binding
                       (path->string module-path)))
-  (with-handlers ([exn:fail?
-                   (lambda (error)
-                     (raise-user-error 'schema
-                                       "cannot build schema from ~a: ~a"
-                                       (path->string module-path)
-                                       (exn-message error)))])
+  (with-handlers ([exn:fail? (lambda (error)
+                               (raise-user-error 'schema
+                                                 "cannot build schema from ~a: ~a"
+                                                 (path->string module-path)
+                                                 (exn-message error)))])
     (schema-snapshot routes)))
 
 (define (read-baseline path)
@@ -102,29 +103,33 @@
     (raise-user-error 'schema
                       "schema baseline does not exist: ~a (run `raco glaze schema write`)"
                       (path->string path)))
-  (with-handlers ([exn:fail?
-                   (lambda (error)
-                     (raise-user-error 'schema
-                                       "invalid schema baseline ~a: ~a"
-                                       (path->string path)
-                                       (exn-message error)))])
+  (with-handlers ([exn:fail? (lambda (error)
+                               (raise-user-error 'schema
+                                                 "invalid schema baseline ~a: ~a"
+                                                 (path->string path)
+                                                 (exn-message error)))])
     (call-with-input-file path read-json)))
 
 (define (write-baseline path snapshot)
   (define parent (path-only path))
-  (when parent (make-directory* parent))
+  (when parent
+    (make-directory* parent))
   (call-with-atomic-output-file path
-    (lambda (out _temporary-path)
-      (display (canonical-json-string snapshot) out))))
+                                (lambda (out _temporary-path)
+                                  (display (canonical-json-string snapshot) out))))
 
 (define (path-text path)
   (path->string (simplify-path path #t)))
 
 (define (error-report action message)
-  (hasheq 'contract-version 1
-          'action action
-          'ok #f
-          'error (hasheq 'code "schema-command-failed" 'message message)))
+  (hasheq 'contract-version
+          1
+          'action
+          action
+          'ok
+          #f
+          'error
+          (hasheq 'code "schema-command-failed" 'message message)))
 
 (define (emit-json value)
   (write-json value)
@@ -132,13 +137,14 @@
 
 (define (run-schema-command args [root (current-directory)])
   (define json-requested? (member "--json" args))
-  (with-handlers ([exn:fail?
-                   (lambda (error)
-                     (if json-requested?
-                         (emit-json (error-report (if (pair? args) (car args) "unknown")
-                                                  (exn-message error)))
-                         (eprintf "schema: ~a\n" (exn-message error)))
-                     2)])
+  (with-handlers ([exn:fail? (lambda (error)
+                               (if json-requested?
+                                   (emit-json (error-report (if (pair? args)
+                                                                (car args)
+                                                                "unknown")
+                                                            (exn-message error)))
+                                   (eprintf "schema: ~a\n" (exn-message error)))
+                               2)])
     (define options (parse-options args))
     (define-values (module-path binding baseline-path) (settings root options))
     (define current (load-current-snapshot module-path binding))
@@ -167,20 +173,19 @@
        (define compatibility (schema-snapshot-report baseline current))
        (define ok? (hash-ref compatibility 'compatible))
        (define report
-         (hash-set*
-          compatibility
-          'contract-version
-          1
-          'action
-          "check"
-          'ok
-          ok?
-          'module
-          (path-text module-path)
-          'binding
-          (symbol->string binding)
-          'baseline
-          (path-text baseline-path)))
+         (hash-set* compatibility
+                    'contract-version
+                    1
+                    'action
+                    "check"
+                    'ok
+                    ok?
+                    'module
+                    (path-text module-path)
+                    'binding
+                    (symbol->string binding)
+                    'baseline
+                    (path-text baseline-path)))
        (if (schema-options-json? options)
            (emit-json report)
            (begin

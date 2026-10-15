@@ -6,20 +6,15 @@
          glaze/private/http-security)
 
 (test-case "only literal loopback Host values pass"
-  (for ([host (in-list '("localhost"
-                         "LOCALHOST:8080"
-                         "127.0.0.1"
-                         "127.0.0.1:65535"
-                         "[::1]"
-                         "[::1]:9000"
-                         "::1"))])
+  (for ([host
+         (in-list
+          '("localhost" "LOCALHOST:8080" "127.0.0.1" "127.0.0.1:65535" "[::1]" "[::1]:9000" "::1"))])
     (check-true (loopback-host-value? host) host))
-  (for ([host (in-list '("example.test"
-                         "localhost.example.test"
-                         "127.0.0.1.example.test"
-                         "[::1].example.test"
-                         "127.0.0.2"
-                         ""))])
+  (for ([host (in-list '("example.test" "localhost.example.test"
+                                        "127.0.0.1.example.test"
+                                        "[::1].example.test"
+                                        "127.0.0.2"
+                                        ""))])
     (check-false (loopback-host-value? host) host)))
 
 (test-case "Content-Length policy rejects only valid oversized lengths"
