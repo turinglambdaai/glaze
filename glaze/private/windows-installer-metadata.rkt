@@ -87,11 +87,11 @@
       <Component Id='StartMenuShortcutComponent' Guid='*'>
         <Shortcut Id='StartMenuApplicationShortcut' Name='~a' Target='[INSTALLDIR]~a.exe' WorkingDirectory='INSTALLDIR' />
         <RemoveFolder Id='RemoveApplicationProgramsFolder' Directory='ApplicationProgramsFolder' On='uninstall' />
-        <RegistryValue Root='HKLM' Key='Software\~a\Shortcuts' Name='StartMenu' Type='integer' Value='1' KeyPath='yes' />
+        <RegistryValue Root='HKCU' Key='Software\~a\Shortcuts' Name='StartMenu' Type='integer' Value='1' KeyPath='yes' />
       </Component>
       <Component Id='DesktopShortcutComponent' Guid='*' Directory='DesktopFolder'>
         <Shortcut Id='DesktopApplicationShortcut' Name='~a' Target='[INSTALLDIR]~a.exe' WorkingDirectory='INSTALLDIR' />
-        <RegistryValue Root='HKLM' Key='Software\~a\Shortcuts' Name='Desktop' Type='integer' Value='1' KeyPath='yes' />
+        <RegistryValue Root='HKCU' Key='Software\~a\Shortcuts' Name='Desktop' Type='integer' Value='1' KeyPath='yes' />
       </Component>
     </ComponentGroup>
   </Fragment>
