@@ -12,17 +12,12 @@
 ;;   autolaunch  — login-item integration; platform APIs differ widely and
 ;;                 the surface has not been exercised across all three OSes
 ;;                 by a shipped product.
-;;   license     — commercial licensing; the product line has not shipped,
-;;                 so the protocol (activation, fingerprint binding) is
-;;                 deliberately unfrozen.
 ;;
 ;; A module graduates out by surviving a release cycle unchanged with real
 ;; product usage; it then joins its layer module and this list shrinks.
 
 (require "deeplink.rkt"
-         "autolaunch.rkt"
-         "license.rkt")
+         "autolaunch.rkt")
 
 (provide (all-from-out "deeplink.rkt")
-         (all-from-out "autolaunch.rkt")
-         (all-from-out "license.rkt"))
+         (all-from-out "autolaunch.rkt"))
