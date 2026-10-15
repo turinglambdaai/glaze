@@ -41,6 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Commercial installer experience for `raco glaze build --installer`. The
+  macOS DMG switches to the branded drag-to-install layout when the project
+  passes `--dmg-background`: the volume stages the bundle next to an
+  `/Applications` symlink, a read/write image is attached, Finder is
+  scripted to size the 660x400 window, set the background, and place both
+  icons, and the styled volume converts back to the compressed image. The
+  Windows MSI authors the stock install-dir wizard sequence (welcome,
+  license agreement, install directory, progress, exit) through the UI
+  extension with start-menu and desktop shortcuts, plus a launch-app
+  checkbox on the finish page driven by the Util extension's WixShellExec;
+  the license page shows `--installer-license` or renders the repository
+  LICENSE text into RTF automatically, and `--installer-banner` /
+  `--installer-dialog` replace the wizard artwork. The wix CLI resolves
+  extensions only from its local cache, so the matching extension versions
+  install on demand. Projects without the new options build exactly as
+  before.
 - Architecture governance foundation: a canonical documentation map,
   current-state architecture, API stability policy, active 1.0 gate plan,
   exact public-export checks, and an explicit agent-to-agent handoff rule.

@@ -19,7 +19,14 @@
          "private/build-entry.rkt"
          "private/linux-package-metadata.rkt"
          "private/macos-bundle-metadata.rkt"
-         "private/windows-installer-metadata.rkt")
+         (only-in "private/windows-installer-metadata.rkt"
+                  windows-wxs
+                  windows-nsis
+                  stable-upgrade-code
+                  text->rtf
+                  project-license-text
+                  default-license-notice
+                  dmg-style-applescript))
 
 (provide build-app
          default-entry-template
@@ -92,6 +99,17 @@
 ;;                  CFBundleURLTypes in the bundle's Info.plist; on
 ;;                  Windows/Linux call (ensure-url-scheme! ...) at app
 ;;                  start to register the handler
+;;   #:dmg-background — macOS only: project-relative or absolute .png shown
+;;                  as the DMG window background; declaring it switches the
+;;                  DMG to the branded drag-to-install layout (Applications
+;;                  symlink, fixed 660x400 window, both icons placed).
+;;                  Render at 1320x800 with 144dpi metadata so the natural
+;;                  point size matches the window.
+;;   #:installer-license — Windows only: .rtf shown on the MSI wizard's
+;;                  license page; without it the repository LICENSE text
+;;                  renders into RTF automatically
+;;   #:installer-banner / #:installer-dialog — Windows only: .bmp artwork
+;;                  for the MSI wizard (493x58 and 493x312)
 ;;
 ;; Returns the path to the produced distribution directory.
 (define (build-app #:entry [entry "main.rkt"]
@@ -108,7 +126,11 @@
                    #:no-hardened-runtime? [no-hardened-runtime? #f]
                    #:timestamp-url [timestamp-url #f]
                    #:notarize-profile [notarize-profile #f]
-                   #:url-schemes [url-schemes '()])
+                   #:url-schemes [url-schemes '()]
+                   #:dmg-background [dmg-background #f]
+                   #:installer-license [installer-license #f]
+                   #:installer-banner [installer-banner #f]
+                   #:installer-dialog [installer-dialog #f])
   (define entry-path
     (if (path? entry)
         entry
@@ -241,9 +263,23 @@
   ;; Optional installer step. Each platform helper probes for the required
   ;; external tooling and warns (without failing the build) when it's absent;
   ;; the CI matrix installs them. Returns the produced artifact path (or #f).
+  (define (asset-path value who)
+    (and value
+         (let ([path (if (path? value) value (string->path value))])
+           (unless (absolute-path? path)
+             (set! path (simple-form-path (build-path project-dir path))))
+           (unless (file-exists? path)
+             (error 'build-app "~a asset not found: ~a" who path))
+           path)))
   (define installer-artifact
     (if installer?
-        (make-installer os out-dir-path app-name (or version "0.0.0") app-publisher app-identifier)
+        (make-installer os out-dir-path app-name (or version "0.0.0")
+                        app-publisher app-identifier
+                        project-dir
+                        (asset-path dmg-background 'dmg-background)
+                        (asset-path installer-license 'installer-license)
+                        (asset-path installer-banner 'installer-banner)
+                        (asset-path installer-dialog 'installer-dialog))
         #f))
 
   ;; Sign the installer artifact too (Windows msi / NSIS setup exe) — it
@@ -263,10 +299,15 @@
 ;; archive (.zip / .tar.gz) when the tool is missing, printing a warning so the
 ;; caller knows an installer wasn't produced. Returns the produced artifact
 ;; path, or #f when nothing could be produced.
-(define (make-installer os out-dir app-name version publisher identifier)
+(define (make-installer os out-dir app-name version publisher identifier
+                        project-dir dmg-background installer-license installer-banner installer-dialog)
   (case os
-    [(windows) (make-windows-installer out-dir app-name version publisher identifier)]
-    [(macosx) (make-macos-installer out-dir app-name)]
+    [(windows) (make-windows-installer out-dir app-name version publisher identifier
+                                       #:project-dir project-dir
+                                       #:license-rtf installer-license
+                                       #:banner-bmp installer-banner
+                                       #:dialog-bmp installer-dialog)]
+    [(macosx) (make-macos-installer out-dir app-name dmg-background)]
     [else (make-linux-installer out-dir app-name version publisher identifier)]))
 
 ;; Returns the first argv[0]-resolvable command among names, or #f.
@@ -279,7 +320,11 @@
   (apply system* args))
 
 ;; Windows: prefer WiX v4 (`wix`), then NSIS (`makensis`); else zip the dist.
-(define (make-windows-installer out-dir app-name version publisher identifier)
+(define (make-windows-installer out-dir app-name version publisher identifier
+                                #:project-dir [project-dir #f]
+                                #:license-rtf [license-rtf #f]
+                                #:banner-bmp [banner-bmp #f]
+                                #:dialog-bmp [dialog-bmp #f])
   (define dist (path->complete-path out-dir))
   (cond
     [(find-tool "wix.exe" "wix")
@@ -291,6 +336,19 @@
      (define wix-temp (make-temporary-file "glaze-installer-~a" 'directory))
      (define wxs-path (build-path wix-temp (string-append app-name ".wxs")))
      (define temp-msi (build-path wix-temp (string-append app-name ".msi")))
+     ;; The wizard's license page always needs an RTF: the configured one is
+     ;; used verbatim, otherwise the repository license text renders into
+     ;; RTF, and a project with neither gets a neutral notice.
+     (define license-path
+       (or license-rtf
+           (let ([generated (build-path wix-temp "license.rtf")])
+             (call-with-output-file generated
+               #:exists 'truncate/replace
+               (lambda (out)
+                 (display (text->rtf (or (project-license-text project-dir)
+                                         default-license-notice))
+                                  out)))
+             generated)))
      (define wix-arch
        (case (system-type 'arch)
          [(x86_64 amd64) "x64"]
@@ -300,13 +358,22 @@
                      (call-with-output-file
                       wxs-path
                       (lambda (out)
-                        (display (windows-wxs app-name dist version publisher identifier) out))
+                        (display (windows-wxs app-name dist version publisher identifier
+                                              #:license-rtf license-path
+                                              #:banner-bmp banner-bmp
+                                              #:dialog-bmp dialog-bmp)
+                                 out))
                       #:exists 'replace))
                    (lambda ()
-                     (if (run (or (find-executable-path "wix.exe" #f) (find-executable-path "wix" #f))
+                     (define wix (or (find-executable-path "wix.exe" #f)
+                                     (find-executable-path "wix" #f)))
+                     (ensure-wix-extensions! wix)
+                     (if (run wix
                               "build"
                               "-arch"
                               wix-arch
+                              "-ext" "WixToolset.UI.wixext"
+                              "-ext" "WixToolset.Util.wixext"
                               "-o"
                               (path->string temp-msi)
                               (path->string wxs-path))
@@ -344,12 +411,16 @@
                 (current-error-port))
      (archive-directory dist app-name "zip")]))
 
-;; macOS: prefer create-dmg, then hdiutil; else zip the .app.
-(define (make-macos-installer out-dir app-name)
+;; macOS: branded drag-to-install layout when a background is declared,
+;; else prefer create-dmg, then plain hdiutil; else zip the .app.
+(define (make-macos-installer out-dir app-name [dmg-background #f])
   (define dist (path->complete-path out-dir))
   (define bundle (build-path dist (string-append app-name ".app")))
   (define dmg-path (build-path dist (string-append app-name ".dmg")))
   (cond
+    [(and dmg-background (find-executable-path "hdiutil" #f))
+     (create-branded-dmg! (find-executable-path "hdiutil" #f)
+                          dmg-background bundle dmg-path app-name)]
     [(find-tool "create-dmg")
      (and (run (find-executable-path "create-dmg" #f)
                "--volname"
@@ -373,6 +444,79 @@
      (display "[glaze] No macOS dmg toolchain found (create-dmg / hdiutil); " (current-error-port))
      (displayln "producing a .zip instead." (current-error-port))
      (archive-directory dist app-name "zip")]))
+
+;; ---- branded DMG layout and wizard license helpers live in
+;; glaze/private/windows-installer-metadata so the CLI and tests share them.
+
+;; The wix CLI resolves -ext references only from its local extension cache,
+;; so the matching UI and Util extension versions are installed on demand.
+(define (ensure-wix-extensions! wix)
+  (define version-output
+    (with-output-to-string (lambda () (run wix "--version"))))
+  (define version-match (regexp-match #px"^[0-9]+\\.[0-9]+\\.[0-9]+" version-output))
+  (define version (and version-match (car version-match)))
+  (for ([extension (in-list '("WixToolset.UI.wixext" "WixToolset.Util.wixext"))])
+    (run wix "extension" "add" "-g"
+         (if version (string-append extension "/" version) extension))))
+
+;; Commercial drag-to-install image: stage the volume contents (bundle,
+;; /Applications link, hidden background asset), attach a read/write image
+;; through /Volumes (Finder only addresses volumes there), let Finder size
+;; the window and place both icons, then convert to the compressed output.
+(define (create-branded-dmg! hdiutil background bundle dmg-path app-name)
+  (define staging (make-temporary-file "glaze-dmg-~a" 'directory))
+  (define staging-app (build-path staging (string-append app-name ".app")))
+  (define rw-image (build-path staging "dmg-rw.dmg"))
+  (define script-path (build-path staging "dmg-style.applescript"))
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (copy-directory/files bundle staging-app)
+      (make-file-or-directory-link "/Applications"
+                                   (build-path staging "Applications"))
+      (make-directory* (build-path staging ".background"))
+      (copy-file background (build-path staging ".background" "background.png"))
+      (define attach-output
+        (with-output-to-string
+          (lambda ()
+            (unless (run hdiutil "create" "-fs" "HFS+"
+                         "-volname" app-name
+                         "-srcfolder" (path->string staging)
+                         "-format" "UDRW" "-ov"
+                         (path->string rw-image))
+              (error 'build-app "hdiutil create failed"))
+            (unless (run hdiutil "attach" (path->string rw-image)
+                         "-noautoopen" "-readwrite")
+              (error 'build-app "hdiutil attach failed")))))
+      (define mount-path
+        (let* ([line (last (string-split (string-trim attach-output) "\n"))]
+               [fields (string-split line "\t")])
+          (string-trim (last fields))))
+      (define disk-name (last (string-split mount-path "/")))
+      (call-with-output-file script-path
+        #:exists 'truncate/replace
+        (lambda (out) (display (dmg-style-applescript disk-name app-name) out)))
+      (define (detach!)
+        (with-handlers ([exn:fail? void])
+          (unless (run hdiutil "detach" mount-path)
+            (run hdiutil "detach" "-force" mount-path))))
+      (with-handlers ([exn:fail?
+                       (lambda (e)
+                         (detach!)
+                         (raise e))])
+        (unless (run (find-executable-path "osascript" #f) (path->string script-path))
+          (error 'build-app "DMG layout script failed; see output above"))
+        (when (find-executable-path "sync" #f)
+          (run (find-executable-path "sync" #f)))
+        (detach!))
+      (when (file-exists? dmg-path) (delete-file dmg-path))
+      (unless (run hdiutil "convert" (path->string rw-image)
+                   "-format" "UDZO" "-ov" "-o" (path->string dmg-path))
+        (error 'build-app "hdiutil convert failed"))
+      dmg-path)
+    (lambda ()
+      (when (directory-exists? staging)
+        (delete-directory/files staging)))))
 
 ;; Linux: build every available native package format — AppImage
 ;; (appimagetool / linuxdeploy), deb (dpkg-deb), and rpm (rpmbuild) — and

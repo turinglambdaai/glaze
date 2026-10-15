@@ -9,6 +9,7 @@
          glaze-cli/private/project)
 
 (provide parse-build-opts
+         parse-installer-assets
          build-command)
 
 ;; Parse the rest args for `build`. Recognized flags:
@@ -29,6 +30,10 @@
 ;;   --timestamp-url <u>  Windows: RFC-3161 timestamp server for signtool
 ;;   --notarize <profile> macOS: notarytool keychain profile
 ;;   --url-scheme <name>  deep-link URL scheme (repeatable)
+;;   --dmg-background <p>         macOS: branded DMG background .png
+;;   --installer-license <p>      Windows: .rtf for the MSI license page
+;;   --installer-banner <p>       Windows: 493x58 .bmp wizard banner
+;;   --installer-dialog <p>       Windows: 493x312 .bmp wizard dialog
 (define (parse-build-opts rest)
   ;; Extract installer identity separately so the established positional
   ;; parser below stays backward compatible and these options can appear in
@@ -41,6 +46,13 @@
       (match args
         [(list* "--publisher" value more) (extract more value identifier kept)]
         [(list* "--identifier" value more) (extract more publisher value kept)]
+        ;; The installer asset flags parse separately (parse-installer-assets);
+        ;; swallow them and their values here so the positional loop below
+        ;; never sees them.
+        [(list* "--dmg-background" _ more) (extract more publisher identifier kept)]
+        [(list* "--installer-license" _ more) (extract more publisher identifier kept)]
+        [(list* "--installer-banner" _ more) (extract more publisher identifier kept)]
+        [(list* "--installer-dialog" _ more) (extract more publisher identifier kept)]
         [(cons value more) (extract more publisher identifier (cons value kept))]
         ['() (values publisher identifier (reverse kept))])))
   (let loop ([args filtered-rest]
@@ -286,6 +298,22 @@
              notarize
              schemes)])))
 
+;; The four installer asset flags use the same out-of-order extraction so
+;; they compose with every existing option.
+(define (parse-installer-assets rest)
+  (let extract ([args rest]
+                [bg #f]
+                [license #f]
+                [banner #f]
+                [dialog #f])
+    (match args
+      [(list* "--dmg-background" value more) (extract more value license banner dialog)]
+      [(list* "--installer-license" value more) (extract more bg value banner dialog)]
+      [(list* "--installer-banner" value more) (extract more bg license value dialog)]
+      [(list* "--installer-dialog" value more) (extract more bg license banner value)]
+      [(cons _ more) (extract more bg license banner dialog)]
+      ['() (values bg license banner dialog)])))
+
 (define (build-command rest)
   (define-values (name
                   version
@@ -303,6 +331,8 @@
                   publisher
                   identifier)
     (parse-build-opts rest))
+  (define-values (dmg-background installer-license installer-banner installer-dialog)
+    (parse-installer-assets rest))
   (define schema-state (hash-ref (project-schema-status) 'status))
   (unless (equal? schema-state "ready")
     (printf "Warning: project schema is ~a; run `raco glaze schema write` before release.\n"
@@ -323,5 +353,9 @@
                #:no-hardened-runtime? no-hardened
                #:timestamp-url ts-url
                #:notarize-profile notarize
-               #:url-schemes schemes))
+               #:url-schemes schemes
+               #:dmg-background dmg-background
+               #:installer-license installer-license
+               #:installer-banner installer-banner
+               #:installer-dialog installer-dialog))
   (printf "Done. Distribution in: ~a\n" dist-path))

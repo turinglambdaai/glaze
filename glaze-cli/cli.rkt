@@ -55,7 +55,12 @@
   (displayln "  --notarize <profile> macOS: notarize + staple via notarytool keychain profile")
   (displayln "  --url-scheme <name>  Deep-link URL scheme (repeatable): macOS gets")
   (displayln "                       Info.plist entries; call (ensure-url-scheme! ...)")
-  (displayln "                       at app start on Windows/Linux)"))
+  (displayln "                       at app start on Windows/Linux)")
+  (displayln "  --dmg-background <p> macOS: branded DMG background .png (1320x800 at")
+  (displayln "                       144dpi); switches to the drag-to-install layout")
+  (displayln "  --installer-license <p>  Windows: .rtf for the MSI wizard license page")
+  (displayln "  --installer-banner <p>   Windows: 493x58 .bmp wizard banner artwork")
+  (displayln "  --installer-dialog <p>   Windows: 493x312 .bmp wizard dialog artwork"))
 
 ;; Dispatch CLI commands
 (define args (vector->list (current-command-line-arguments)))
