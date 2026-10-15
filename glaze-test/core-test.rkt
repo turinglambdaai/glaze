@@ -11,8 +11,8 @@
          (only-in glaze/api route?)
          glaze/core)
 
-;; define-api-routes is a macro (phase-1 binding) — module->exports phase-0
-;; vars doesn't list it; asserted via syntax binding below.
+;; This smoke list keeps helpful per-name failure messages. The exact variable
+;; and syntax export set is enforced by public-api-test.rkt.
 (define core-names
   (sort (list 'run-app
               'app-quit!
@@ -67,10 +67,8 @@
               'generate-api-declarations)
         symbol<?))
 
-;; every documented name must be requireable from glaze/core (a delete or
-;; rename fails here). The negative half of the guard — no unreviewed
-;; additions — is enforced by review: module->exports under-reports this
-;; module's re-exports.
+;; Every documented name must be requireable from glaze/core (a delete or
+;; rename fails here).
 (for ([n (in-list core-names)])
   (check-not-exn (lambda () (dynamic-require 'glaze/core n)) (format "core missing: ~a" n)))
 

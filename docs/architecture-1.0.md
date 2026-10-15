@@ -1,13 +1,16 @@
 # Glaze 1.0 Runtime Architecture (RFC)
 
-**Status:** draft, pre-1.0 direction; implementation progress through 0.13.1
-plus the macOS native-transport slice (see the migration order below).
+**Status:** historical RFC and rationale. It is no longer the active progress
+tracker. See [current architecture](architecture.md) and the active
+[Glaze 1.0 plan](1.0-plan.md) for decisions, evidence, gates, and handoff.
 **Scope:** runtime kernel, bridge protocol, security model, module layout,
 and the relationship with Rivet.
 
-This RFC records where Glaze is today, what must be rewritten before 1.0,
-and what the target looks like. The short version: **keep the product layer,
-the service layer, and the delivery chain; rewrite the runtime kernel.**
+This RFC records the reasoning that started the 1.0 work. Some proposed work
+has landed and some decisions have since changed. In particular, native GLZ1
+transport now works on all three desktop platforms, and a prebuilt native shim
+is not a 1.0 prerequisite without evidence that the pure-Racket FFI backend
+cannot meet a gate. The canonical current state lives in `architecture.md`.
 
 ## Where we are
 

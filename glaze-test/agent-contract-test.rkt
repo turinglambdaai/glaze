@@ -19,5 +19,11 @@
                   (define app (hash-ref report 'application))
                   (check-true (hash-ref (hash-ref app 'entry) 'exists))
                   (check-true (hash-ref (hash-ref app 'frontend) 'exists))
+                  (check-equal? (hash-ref (hash-ref report 'schema) 'status)
+                                "missing-config")
+                  (check-not-false
+                   (member "schema-check"
+                           (map (lambda (item) (hash-ref item 'name))
+                                (hash-ref report 'commands))))
                   (check-not-exn (lambda () (write-json report (open-output-string)))))
                 (lambda () (delete-directory/files root))))

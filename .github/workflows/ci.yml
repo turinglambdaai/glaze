@@ -108,6 +108,9 @@ jobs:
           cd agent-smoke
           test -f AGENTS.md
           test -f verify.rkt
+          test -f glaze.rktd
+          test -f glaze-schema.json
+          raco glaze schema check --json > schema.json
           raco glaze inspect --json > inspect.json
           python - <<'PY'
           import json
@@ -115,6 +118,7 @@ jobs:
               report = json.load(source)
           assert report["contract-version"] == 1
           assert report["application"]["instructions"]["exists"] is True
+          assert report["schema"]["status"] == "ready"
           PY
           if [ "$RUNNER_OS" = "Linux" ]; then
             xvfb-run -a raco glaze doctor --json
@@ -169,6 +173,9 @@ jobs:
           cd sampleapp
           test -f AGENTS.md
           test -f verify.rkt
+          test -f glaze.rktd
+          test -f glaze-schema.json
+          raco glaze schema check --json > schema.json
           raco glaze inspect --json > inspect.json
           python - <<'PY'
           import json
@@ -176,6 +183,7 @@ jobs:
               report = json.load(source)
           assert report["contract-version"] == 1
           assert report["application"]["entry"]["exists"] is True
+          assert report["schema"]["status"] == "ready"
           PY
           # --sign - exercises the signing pipeline everywhere: macOS signs
           # the bundle ad-hoc (verifiable without a cert); Windows/Linux

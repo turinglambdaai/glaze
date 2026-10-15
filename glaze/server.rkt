@@ -36,7 +36,10 @@
          "bridge.rkt"
          "capability.rkt"
          "events.rkt"
-         "native-transport.rkt"
+         "private/bridge-dispatch.rkt"
+         "private/http-security.rkt"
+         "private/native-client.rkt"
+         "private/native-resources.rkt"
          (only-in keel schema-command-result)
          "types.rkt")
 
@@ -47,8 +50,8 @@
          current-glaze-error-reporter
          generate-api-declarations)
 
-;; Exception reporter for API-handler failures (the 500 path): the parameter
-;; lives in native-transport.rkt so both transports report through it. Default
+;; Exception reporter for API-handler failures (the 500 path) lives in the
+;; shared dispatch owner so both carriers observe the same parameter. Default
 ;; logs to stderr; run-app parameterizes this to its #:on-error callback.
 
 (define sse-path "glaze/events")
@@ -141,26 +144,6 @@
      "port"
      port)))
 
-;; ---- Host-header validation (DNS-rebinding guard) ----
-
-(define (host-allowed? req port)
-  (define h (headers-assq #"Host" (request-headers/raw req)))
-  (cond
-    ;; No Host header (ancient clients, raw sockets): nothing was spoofed.
-    [(not h) #t]
-    [else
-     (define host (bytes->string/latin-1 (header-value h)))
-     (define bare
-       (if (string-contains? host ":")
-           (substring host 0 (string-index-of host #\:))
-           host))
-     (member bare (list "127.0.0.1" "localhost" "[::1]" "::1"))]))
-
-(define (string-index-of s ch)
-  (for/or ([c (in-string s)]
-           [i (in-naturals)]
-           #:when (char=? c ch))
-    i))
 
 ;; ---- dispatcher ----
 
@@ -169,13 +152,6 @@
 ;; make the server buffer. 8 MiB covers JSON API payloads with headroom.
 (define default-max-body-size (* 8 1024 1024))
 
-(define (body-too-large? req limit)
-  (define h (headers-assq #"Content-Length" (request-headers/raw req)))
-  (cond
-    [(not h) #f]
-    [else
-     (define v (string->number (string-trim (bytes->string/latin-1 (header-value h)))))
-     (and v (exact-positive-integer? v) (> v limit))]))
 
 ;; Fetch-Metadata + Origin guard for the bridge surface (API routes + SSE).
 ;; A cross-site page posting to a loopback API (`content-type: text/plain`
@@ -196,22 +172,6 @@
 (define (bridge-request? matched-api events-request? req)
   (or matched-api events-request? (glz1-request? req) (glz1-post-request? req)))
 
-(define (cross-site-request? req port)
-  (define origin-h (headers-assq #"Origin" (request-headers/raw req)))
-  (define fetch-site-h (headers-assq #"Sec-Fetch-Site" (request-headers/raw req)))
-  (cond
-    [origin-h
-     (with-handlers ([exn:fail? (lambda (_) #t)])
-       (define u (string->url (bytes->string/latin-1 (header-value origin-h))))
-       (not (and (equal? (url-scheme u) "http")
-                 (member (url-host u) '("127.0.0.1" "localhost" "::1"))
-                 (let ([p (url-port u)])
-                   (if p
-                       (= p port)
-                       (= port 80))))))]
-    [fetch-site-h
-     (not (member (bytes->string/latin-1 (header-value fetch-site-h)) '("same-origin" "none")))]
-    [else #f]))
 
 (define (make-dispatcher public-dir
                          api-routes
@@ -226,9 +186,9 @@
     (define events-request? (and event-bus (sse-request? req)))
     (define resp
       (cond
-        [(not (host-allowed? req port)) (error-response 403 "host not allowed")]
-        [(body-too-large? req max-body-size) (error-response 413 "request body too large")]
-        [(and (bridge-request? matched-api events-request? req) (cross-site-request? req port))
+        [(not (request-host-allowed? req)) (error-response 403 "host not allowed")]
+        [(request-body-too-large? req max-body-size) (error-response 413 "request body too large")]
+        [(and (bridge-request? matched-api events-request? req) (request-cross-site? req port))
          (error-response 403 "cross-origin request rejected")]
         ;; One-time bootstrap: the capability URL (?glaze-token=..., opened by
         ;; run-app) exchanges the token for an HttpOnly cookie and redirects
@@ -240,7 +200,7 @@
         ;; not resources: static files and the api.js bootstrap stay open —
         ;; the page received its cookie via the bootstrap redirect above.
         [(and api-token
-              (not (token-ok? req api-token))
+              (not (request-token-ok? req api-token))
               (or matched-api events-request? (glz1-request? req) (glz1-post-request? req)))
          (error-response 401 "missing or invalid glaze token")]
         [(and matched-api authority (not (api-match-authorized? authority matched-api req)))
@@ -258,20 +218,6 @@
         [else (make-404-response)]))
     (output-response conn resp)))
 
-;; Token arrives as the X-Glaze-Token header (curl / programmatic clients)
-;; or the glaze_token cookie (browsers — EventSource cannot set headers, but
-;; same-origin requests carry cookies, so SSE works unmodified).
-(define (token-ok? req expected)
-  (define h (headers-assq #"X-Glaze-Token" (request-headers/raw req)))
-  (or (and h (string=? (bytes->string/latin-1 (header-value h)) expected))
-      (let* ([cookie-h (headers-assq #"Cookie" (request-headers/raw req))]
-             [cookie-str (and cookie-h (bytes->string/latin-1 (header-value cookie-h)))])
-        (and cookie-str
-             (for/or ([part (in-list (string-split cookie-str ";"))])
-               (define kv (string-split (string-trim part) "="))
-               (and (= (length kv) 2)
-                    (string=? (first kv) "glaze_token")
-                    (string=? (second kv) expected)))))))
 
 ;; ---- token bootstrap (capability URL -> HttpOnly cookie) ----
 

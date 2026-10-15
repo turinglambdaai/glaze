@@ -9,14 +9,17 @@
 ;; runtime the app resolves the directory without depending on the working
 ;; directory.
 
-(require file/sha1
-         racket/file
+(require racket/file
          racket/list
          racket/path
          racket/port
          racket/string
          racket/system
-         "assets.rkt")
+         "assets.rkt"
+         "private/build-entry.rkt"
+         "private/linux-package-metadata.rkt"
+         "private/macos-bundle-metadata.rkt"
+         "private/windows-installer-metadata.rkt")
 
 (provide build-app
          default-entry-template
@@ -395,175 +398,6 @@
      (displayln "producing a .tar.gz instead." (current-error-port))
      (archive-directory dist app-name "tar.gz")]))
 
-;; ---- shared Linux package metadata ----
-
-;; deb Architecture / rpm BuildArch names.
-(define (deb-arch-name)
-  (case (system-type 'arch)
-    [(x86_64 amd64) "amd64"]
-    [(aarch64 arm64) "arm64"]
-    [else "all"]))
-
-(define (rpm-arch-name)
-  (case (system-type 'arch)
-    [(x86_64 amd64) "x86_64"]
-    [(aarch64 arm64) "aarch64"]
-    [else "noarch"]))
-
-;; deb Package names are lowercase [a-z0-9+-.].
-(define (sanitize-package-name app-name)
-  (define lowered (string-downcase app-name))
-  (define cleaned
-    (regexp-replace* #rx"-*$"
-                     (regexp-replace* #rx"^-*"
-                                      (apply string-append
-                                             (for/list ([c (in-string lowered)])
-                                               (if (or (char<=? #\a c #\z)
-                                                       (char<=? #\0 c #\9)
-                                                       (memq c '(#\. #\+ #\-)))
-                                                   (string c)
-                                                   "-")))
-                                      "")
-                     ""))
-  (if (non-empty-string? cleaned) cleaned "app"))
-
-;; rpm Version fields reject dashes.
-(define (sanitize-package-version version)
-  (define cleaned
-    (apply string-append
-           (for/list ([c (in-string version)])
-             (if (or (char-alphabetic? c) (char-numeric? c) (memq c '(#\. #\_)))
-                 (string c)
-                 "."))))
-  (if (non-empty-string? cleaned) cleaned "0.0.0"))
-
-;; The icon name is the hicolor/AppDir icon stem; appimagetool refuses a
-;; desktop file without a resolvable Icon entry.
-(define (desktop-entry app-name [icon-name #f])
-  (format
-   "[Desktop Entry]\nType=Application\nName=~a\nExec=~a~a\nTerminal=false\nCategories=Utility;\n"
-   app-name
-   app-name
-   (if icon-name
-       (format "\nIcon=~a" icon-name)
-       "")))
-
-(define (deb-control app-name version publisher arch)
-  (format
-   "Package: ~a\nVersion: ~a\nArchitecture: ~a\nMaintainer: ~a\nSection: utils\nPriority: optional\nDescription: ~a desktop application (built with Glaze)\n"
-   (sanitize-package-name app-name)
-   (sanitize-package-version version)
-   arch
-   (if (non-empty-string? publisher) publisher "Unknown maintainer")
-   app-name))
-
-(define (rpm-spec app-name version publisher staging-root)
-  (format #<<SPECEOF
-Name: ~a
-Version: ~a
-Release: 1
-Summary: ~a desktop application (built with Glaze)
-License: Unknown
-BuildArch: ~a
-%description
-~a desktop application packaged by Glaze; publisher: ~a.
-%prep
-%build
-%install
-mkdir -p %{buildroot}
-cp -a ~a/usr %{buildroot}/
-%files
-/usr/bin/~a
-/usr/lib/~a
-/usr/share/applications/~a.desktop
-/usr/share/icons/hicolor/64x64/apps/~a.png
-SPECEOF
-          (sanitize-package-name app-name)
-          (sanitize-package-version version)
-          app-name
-          (rpm-arch-name)
-          app-name
-          (if (non-empty-string? publisher) publisher "unknown")
-          (path->string staging-root)
-          app-name
-          app-name
-          app-name
-          (sanitize-package-name app-name)))
-
-;; ---- generated placeholder icon ----
-
-;; A flat-color square PNG in pure Racket (zlib stored blocks + adler32):
-;; projects without an icon still get a valid hicolor/AppDir icon instead
-;; of a broken desktop integration or a failing appimagetool run.
-(define (crc32-bytes data)
-  (define table
-    (for/vector #:length 256
-                ([n (in-naturals)])
-      (for/fold ([c n]) ([_ (in-range 8)])
-        (if (zero? (bitwise-and c 1))
-            (arithmetic-shift c -1)
-            (bitwise-xor #xEDB88320 (arithmetic-shift c -1))))))
-  (bitwise-xor #xFFFFFFFF
-               (for/fold ([c #xFFFFFFFF]) ([b (in-bytes data)])
-                 (bitwise-and #xFFFFFFFF (vector-ref table (bitwise-xor (bitwise-and c #xFF) b))))))
-
-(define (adler32-bytes data)
-  ;; RFC 1950: s1/s2 accumulate modulo 65521, not a 16-bit mask — masking
-  ;; instead of reducing silently corrupts the checksum for larger payloads.
-  (define mod 65521)
-  (let loop ([i 0]
-             [a 1]
-             [b 0])
-    (if (= i (bytes-length data))
-        (+ (* (modulo b mod) 65536) (modulo a mod))
-        (let ([a2 (modulo (+ a (bytes-ref data i)) mod)]) (loop (add1 i) a2 (modulo (+ b a2) mod))))))
-
-;; zlib stream using stored (uncompressed) deflate blocks.
-(define (zlib-store-bytes data)
-  (define block-size 65535)
-  (define blocks
-    (let loop ([offset 0])
-      (cond
-        [(>= offset (bytes-length data)) '()]
-        [else
-         (define len (min block-size (- (bytes-length data) offset)))
-         (define final? (>= (+ offset len) (bytes-length data)))
-         (define chunk (subbytes data offset (+ offset len)))
-         (cons (cons final? chunk) (loop (+ offset len)))])))
-  (apply bytes-append
-         (cons (bytes #x78 #x01)
-               (append (for/list ([block (in-list blocks)])
-                         (define final? (car block))
-                         (define chunk (cdr block))
-                         (define len (bytes-length chunk))
-                         (bytes (if final? 1 0)
-                                (bitwise-and len #xFF)
-                                (arithmetic-shift (bitwise-and len #xFF00) -8)
-                                (bitwise-and (bitwise-not len) #xFF)
-                                (arithmetic-shift (bitwise-and (bitwise-not len) #xFF00) -8)))
-                       (map cdr blocks)
-                       (list (integer->integer-bytes (adler32-bytes data) 4 #f #t))))))
-
-(define (png-chunk type data)
-  (define type-bytes (string->bytes/latin-1 type))
-  (define body (bytes-append type-bytes data))
-  (bytes-append (integer->integer-bytes (bytes-length data) 4 #f #t)
-                body
-                (integer->integer-bytes (crc32-bytes body) 4 #f #t)))
-
-(define (icon-png-bytes [size 64] [r #xC1] [g #x5F] [b #x3C])
-  ;; PNG RGB scanlines are per-pixel interleaved: a filter byte, then R G B
-  ;; for each pixel in the row.
-  (define row (apply bytes (cons 0 (append-map (lambda (_) (list r g b)) (range size)))))
-  (define raw (apply bytes-append (make-list size row)))
-  (bytes-append #"\211PNG\r\n\032\n"
-                (png-chunk "IHDR"
-                           (bytes-append (integer->integer-bytes size 4 #f #t)
-                                         (integer->integer-bytes size 4 #f #t)
-                                         (bytes 8 2 0 0 0)))
-                (png-chunk "IDAT" (zlib-store-bytes raw))
-                (png-chunk "IEND" #"")))
-
 ;; ---- staging tree shared by deb / rpm / AppImage ----
 
 ;; Build a /usr-style tree outside dist: the whole runtime lands in
@@ -751,110 +585,6 @@ SPECEOF
 ;; Derive a stable UUIDv5-shaped UpgradeCode from the application identifier.
 ;; The ProductCode remains WiX-generated per version, while this value is
 ;; deliberately identical across releases so MajorUpgrade can find old MSIs.
-(define (stable-upgrade-code identifier)
-  (define digest (subbytes (sha1-bytes (open-input-string identifier)) 0 16))
-  (bytes-set! digest 6 (bitwise-ior #x50 (bitwise-and #x0f (bytes-ref digest 6))))
-  (bytes-set! digest 8 (bitwise-ior #x80 (bitwise-and #x3f (bytes-ref digest 8))))
-  (define hex (string-upcase (bytes->hex-string digest)))
-  (format "{~a-~a-~a-~a-~a}"
-          (substring hex 0 8)
-          (substring hex 8 12)
-          (substring hex 12 16)
-          (substring hex 16 20)
-          (substring hex 20 32)))
-
-(define (xml-escape value)
-  (for/fold ([result value])
-            ([replacement
-              (in-list
-               '(("&" . "&amp;") ("<" . "&lt;") (">" . "&gt;") ("'" . "&apos;") ("\"" . "&quot;")))])
-    (string-replace result (car replacement) (cdr replacement))))
-
-;; Minimal WiX v4 source referencing the dist directory contents.
-(define (windows-wxs app-name dist-dir version publisher identifier)
-  (define dist (xml-escape (path->string dist-dir)))
-  (format #<<WXEOF
-<?xml version='1.0' encoding='utf-8'?>
-<Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
-  <Package Name='~a' Manufacturer='~a' Version='~a' UpgradeCode='~a' Scope='perMachine'>
-    <MajorUpgrade DowngradeErrorMessage='A newer version is already installed.' />
-    <MediaTemplate EmbedCab='yes' />
-    <StandardDirectory Id='ProgramFiles64Folder'>
-      <Directory Id='INSTALLDIR' Name='~a' />
-    </StandardDirectory>
-    <Files Directory='INSTALLDIR' Include='~a\**' />
-  </Package>
-</Wix>
-WXEOF
-          (xml-escape app-name)
-          (xml-escape publisher)
-          (xml-escape version)
-          (stable-upgrade-code identifier)
-          (xml-escape app-name)
-          dist))
-
-;; NSIS supports silent installation via /S. The ARP keys below make install,
-;; upgrade, and uninstall detection work for winget and Windows Settings.
-(define (nsis-escape value)
-  (string-replace (string-replace value "$" "$$") "\"" "$\\\""))
-
-(define (windows-nsis app-name dist-dir version publisher identifier)
-  (format
-   #<<NSI
-Unicode True
-Name "~a"
-OutFile "~a\~a-setup.exe"
-RequestExecutionLevel admin
-SetRegView 64
-InstallDir "$PROGRAMFILES64\~a"
-InstallDirRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "InstallLocation"
-Page directory
-Page instfiles
-UninstPage instfiles
-Section "Install"
-  SetOutPath "$INSTDIR"
-  File /r /x "*.msi" /x "*-setup.exe" /x "*.wxs" /x "*.nsi" "~a\*.*"
-  CreateShortcut "$DESKTOP\~a.lnk" "$INSTDIR\~a.exe"
-  WriteUninstaller "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "DisplayName" "~a"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "DisplayVersion" "~a"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "Publisher" "~a"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "DisplayIcon" "$INSTDIR\~a.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "QuietUninstallString" '$\"$INSTDIR\Uninstall.exe$\" /S'
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "NoModify" 1
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a" "NoRepair" 1
-SectionEnd
-Section "Uninstall"
-  Delete "$DESKTOP\~a.lnk"
-  RMDir /r "$INSTDIR"
-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\~a"
-SectionEnd
-NSI
-   (nsis-escape app-name)
-   (path->string dist-dir)
-   (nsis-escape app-name)
-   (nsis-escape app-name)
-   (nsis-escape identifier)
-   (path->string dist-dir)
-   (nsis-escape app-name)
-   (nsis-escape app-name)
-   (nsis-escape identifier)
-   (nsis-escape app-name)
-   (nsis-escape identifier)
-   (nsis-escape version)
-   (nsis-escape identifier)
-   (nsis-escape publisher)
-   (nsis-escape identifier)
-   (nsis-escape identifier)
-   (nsis-escape app-name)
-   (nsis-escape identifier)
-   (nsis-escape identifier)
-   (nsis-escape identifier)
-   (nsis-escape identifier)
-   (nsis-escape app-name)
-   (nsis-escape identifier)))
 
 (module+ test
   (require rackunit)
@@ -912,83 +642,6 @@ NSI
      (displayln "[glaze] No archive tool found; skipping." (current-error-port))
      #f]))
 
-;; The generated entry module: requires glaze and the user's main (whose
-;; server startup runs). At runtime it sets the working directory to the
-;; directory of the packaged executable, so a relative #:public-dir "public"
-;; in the user's main.rkt resolves to the public/ we copy next to the
-;; distribution (see copy-public-into-dist in build-app). It tries the
-;; executable's own directory first, then falls back to the original CWD if
-;; that directory does not contain a public/ (covering launchers that report
-;; a wrapper path).
-;;
-;; Running the user program must mirror `racket main.rkt`: instantiate the
-;; (module+ main) submodule when the user entry declares one, otherwise the
-;; module body itself. A static (require "main.rkt") here loads the module
-;; as a plain library — its main submodule would never run and the packaged
-;; app would exit 0 without executing anything (the entry wrapper itself has
-;; no main submodule either).
-(define (entry-declares-main-submodule? entry-path)
-  ;; Read the module form instead of searching its text: a comment or string
-  ;; containing `(module+ main ...)` must not make the generated wrapper
-  ;; require a submodule that does not exist.
-  (define module-datum
-    (call-with-input-file entry-path
-                          (lambda (input)
-                            (parameterize ([read-accept-reader #t]
-                                           [current-load-relative-directory (path-only entry-path)])
-                              (syntax->datum (read-syntax entry-path input))))))
-  (define (main-form? form)
-    (cond
-      [(and (pair? form)
-            (memq (car form)
-                  '(module module* module+
-                     ))
-            (pair? (cdr form))
-            (eq? (cadr form) 'main))
-       #t]
-      [(and (pair? form)
-            (memq (car form)
-                  '(begin
-                     #%module-begin)))
-       (for/or ([nested (in-list (cdr form))])
-         (main-form? nested))]
-      [else #f]))
-  (and (pair? module-datum)
-       (eq? (car module-datum) 'module)
-       (for/or ([form (in-list (cdddr module-datum))])
-         (main-form? form))))
-
-(define (entry-module-source user-entry)
-  (define entry-path
-    (if (complete-path? user-entry)
-        user-entry
-        (path->complete-path user-entry)))
-  (define entry-filename (path->string (file-name-from-path entry-path)))
-  ;; In raco-exe builds `module-declared?` reports #f and `dynamic-require`
-  ;; cannot resolve the submodule. Detect an explicit main submodule from the
-  ;; parsed source at build time and emit the embedded-safe static require.
-  (define has-main-submod? (entry-declares-main-submodule? entry-path))
-  (string-append
-   "#lang racket/base\n"
-   "(require racket/path)\n"
-   "(require glaze)\n"
-   ";; Prefer the directory holding the packaged executable; inside a macOS\n"
-   ";; .app also try ../Resources/public; fall back to the launcher's CWD.\n"
-   "(let* ([exe (find-system-path 'run-file)]\n"
-   "       [dir (and (path? exe) (path-only exe))]\n"
-   "       [candidates (list dir\n"
-   "                         (and dir (build-path dir \"..\" \"Resources\")))]\n"
-   "       [pick (for/or ([c (in-list candidates)])\n"
-   "               (and c (directory-exists? (build-path c \"public\")) c))])\n"
-   "  (when (and pick (not (directory-exists? (build-path (current-directory) \"public\"))))\n"
-   "    (current-directory pick)))\n"
-   ;; Static require: embeds the user module and its full dependency closure
-   ;; (raco exe cannot see dynamic-requires), and runs top-level code once.
-   (format "(require \"~a\")\n" entry-filename)
-   (if has-main-submod?
-       (format "(require (submod \"~a\" main))\n" entry-filename)
-       "")))
-
 ;; Assemble a canonical macOS .app bundle from whatever `raco distribute`
 ;; produced. Current versions lay out <dist>/bin/<name> + <dist>/lib/; older
 ;; ones differ — the launcher's library rpath (@executable_path/../lib) has
@@ -1021,41 +674,6 @@ NSI
                          (lambda (o) (display (macos-info-plist app-name version url-schemes) o))
                          #:exists 'replace))
 
-(define (macos-info-plist app-name version [url-schemes '()])
-  (format #<<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key><string>~a</string>
-  <key>CFBundleDisplayName</key><string>~a</string>
-  <key>CFBundleIdentifier</key><string>io.glaze.~a</string>
-  <key>CFBundleExecutable</key><string>~a</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>~a</string>
-  <key>CFBundleVersion</key><string>~a</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>LSMinimumSystemVersion</key><string>10.13</string>~a
-</dict>
-</plist>
-PLIST
-          app-name
-          app-name
-          app-name
-          app-name
-          version
-          version
-          (if (null? url-schemes)
-              ""
-              (string-append "\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n"
-                             "      <key>CFBundleURLName</key><string>io.glaze."
-                             app-name
-                             "</string>\n"
-                             "      <key>CFBundleURLSchemes</key>\n      <array>\n"
-                             (string-join (for/list ([sc (in-list url-schemes)])
-                                            (format "        <string>~a</string>\n" sc))
-                                          "")
-                             "      </array>\n    </dict>\n  </array>"))))
 ;; Copy the project's public/ into the distribution next to the executable.
 ;; On macOS, assets live in <app>.app/Contents/Resources/public; elsewhere in
 ;; <dist>/public. The generated entry sets current-directory to the exe's dir
@@ -1258,6 +876,3 @@ PLIST
     (system*/exit-code xcrun "stapler" "staple" (path->string staple-target))
     (fprintf (current-error-port) "[glaze] notarized: ~a\n" staple-target)
     #t))
-
-(define (default-entry-template)
-  entry-module-source)

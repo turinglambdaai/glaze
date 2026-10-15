@@ -18,7 +18,8 @@
          racket/match
          racket/port
          racket/string
-         racket/system)
+         racket/system
+         glaze-cli/private/project)
 
 (provide glaze-repo-url
          glaze-pkg-names
@@ -323,6 +324,8 @@
                         (values (string->symbol name) (doctor-entry->jsexpr parsed)))
                       'webview
                       webview
+                      'project-schema
+                      (project-schema-status)
                       'problems
                       all-problems))
     (newline)
@@ -334,6 +337,7 @@
           (if (hash-ref webview 'supported)
               "available"
               (format "unavailable — ~a" (hash-ref webview 'diagnostic))))
+  (printf "project schema: ~a\n" (hash-ref (project-schema-status) 'status))
   (cond
     [(null? all-problems) (printf "OK: no glaze package problems found\n")]
     [else

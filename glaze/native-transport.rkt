@@ -11,18 +11,23 @@
 ;; development adapter (hot reload, curl, tests); it is no longer the
 ;; production trust boundary.
 ;;
-;; Everything on this side of the host boundary is transport-neutral and
-;; shared verbatim by both adapters:
+;; Transport-neutral responsibilities are private owners imported and
+;; re-exported here for compatibility:
 ;;
 ;;   - dispatch-bridge / dispatch-invoke: GLZ1 envelope dispatch (op-routed
 ;;     hello / cancel / invoke) against the route table, with typed errors,
 ;;     cooperative cancellation, bounded timeouts, and capability checks —
-;;     the exact pipeline server.rkt used to own;
+;;     the exact pipeline server.rkt used to own, now in
+;;     private/bridge-dispatch.rkt;
 ;;   - static-resource: the static file rules (string segments only,
-;;     filesystem containment, SPA index fallback, MIME table);
+;;     filesystem containment, SPA index fallback, MIME table, now in
+;;     private/native-resources.rkt;
 ;;   - native-api-client-js / native-bootstrap-js: the page-side bindings
 ;;     that make the generated glaze.api entries and event delivery run over
-;;     the message handler instead of fetch/EventSource.
+;;     the message handler instead of fetch/EventSource, now in
+;;     private/native-client.rkt.
+;;   - native-delivery: full-response, stream, and event framing plus
+;;     UTF-8-safe stream draining, now in private/native-delivery.rkt.
 ;;
 ;; The host side (per platform) only has to: serve scheme resources through
 ;; static-resource, feed message-handler payloads into
@@ -31,27 +36,17 @@
 
 (require json
          racket/async-channel
-         racket/file
          racket/list
          racket/match
-         racket/path
-         racket/promise
-         racket/string
-         net/url
-         (only-in web-server/http/request-structs make-request)
-         (only-in web-server/http/response-structs response? response-output)
-         (only-in keel
-                  schema-command
-                  schema-command-error-codes
-                  schema-command-parameters
-                  schema-command-result
-                  schema-parameter-name
-                  schema-parameter-type)
+         (only-in web-server/http/response-structs response?)
          "api.rkt"
          "bridge.rkt"
          "capability.rkt"
          "events.rkt"
-         "types.rkt")
+         "private/bridge-dispatch.rkt"
+         "private/native-client.rkt"
+         "private/native-delivery.rkt"
+         "private/native-resources.rkt")
 
 (provide dispatch-bridge
          dispatch-invoke
@@ -81,285 +76,6 @@
          native-api-client-js
          native-bootstrap-js)
 
-;; Exception reporter for handler failures (the internal-error path). Lives
-;; here — not in server.rkt — because native-transport worker threads report
-;; through it too. Default logs to stderr; run-app parameterizes this to its
-;; #:on-error callback.
-(define current-glaze-error-reporter
-  (make-parameter
-   (lambda (exn uri)
-     (fprintf (current-error-port) "[glaze] handler error on ~a: ~a\n" uri (exn-message exn)))))
-
-;; ---- error envelope ----
-
-;; The outcome field uses keel's request vocabulary; ok #f always names a
-;; failed/cancelled/timed-out terminal, and the error object is keel-shaped.
-(define (glz1-error-envelope id code message data)
-  (hasheq 'glz
-          glz1-version
-          'id
-          id
-          'ok
-          #f
-          'outcome
-          (outcome-for-code code)
-          'error
-          (bridge-error-object code message data)))
-
-;; ---- dispatch core ----
-
-;; Route lookup from envelope parts — the GLZ1 invoke names its target in
-;; the envelope, not in a request URI.
-(define (find-api-match-by-parts api-routes method segments)
-  (for/or ([r (in-list api-routes)])
-    (define captured (route-match r method segments))
-    (and captured (list r captured))))
-
-;; A minimal web-server request for handlers invoked through the native
-;; transport. Handlers receive the envelope's args as their JSON bo)dy, like
-;; the HTTP adapter's rewritten request.
-(define (synthetic-request method path body-bytes)
-  (make-request (string->bytes/latin-1 (symbol->string (or method 'GET)))
-                (string->url (string-append "glaze://app/" path))
-                '()
-                (delay
-                  '())
-                body-bytes
-                "127.0.0.1"
-                0
-                "native"))
-
-;; POST /glaze/invoke (HTTP) and the message-handler invoke (native) share
-;; this pipeline: envelope parse, route match, capability check, handler
-;; invocation with a bounded async result path, and typed terminal outcomes.
-;; The only transport difference is how the handler's request struct is
-;; built; #:make-handler-request receives (method path body-bytes).
-;;
-;; Returns the response jsexpr, or a raw web-server response? when a handler
-;; produces a full/streaming response — the HTTP adapter passes those to the
-;; connection untouched; the native transport answers a typed error instead
-;; (there is no wire to stream onto once the envelope is committed).
-(define (dispatch-invoke body
-                         routes
-                         authority
-                         table
-                         #:make-handler-request [make-handler-request synthetic-request])
-  (define-values (parse-result parse-error)
-    (with-handlers ([exn:fail:glaze:bridge?
-                     (lambda (e)
-                       (values #f
-                               (glz1-error-envelope #f
-                                                    (exn:fail:glaze:bridge-code e)
-                                                    (exn-message e)
-                                                    (exn:fail:glaze:bridge-data e))))])
-      (values (call-with-values (lambda () (parse-invoke-envelope body)) list) #f)))
-  (cond
-    [parse-error parse-error]
-    [else
-     (define id (list-ref parse-result 0))
-     (define path (list-ref parse-result 1))
-     (define method-sym (list-ref parse-result 2))
-     (define args (list-ref parse-result 3))
-     (define segments (filter (lambda (sg) (not (equal? sg ""))) (string-split path "/")))
-     ;; An explicit envelope method must match exactly; without one, GET
-     ;; wins, then the mutating methods in registration order.
-     (define match
-       (cond
-         [method-sym (find-api-match-by-parts routes method-sym segments)]
-         [else
-          (or (find-api-match-by-parts routes 'GET segments)
-              (for/or ([mth (in-list '(POST PUT DELETE))])
-                (find-api-match-by-parts routes mth segments)))]))
-     (define method-mismatch?
-       (and method-sym
-            (not match)
-            (for/or ([mth (in-list '(GET POST PUT DELETE))])
-              (find-api-match-by-parts routes mth segments))))
-     (cond
-       [(not match)
-        (glz1-error-envelope id
-                             (if method-mismatch? 'method-not-allowed 'unknown-command)
-                             (format "no route matches ~a ~a" (or method-sym 'GET) path)
-                             'null)]
-       [(and authority
-             (route-permission (first match))
-             (not (capability-has-permission? authority (route-permission (first match)))))
-        (glz1-error-envelope id 'capability-denied "capability denied API route" 'null)]
-       [else
-        (define route (first match))
-        (define captured (second match))
-        ;; Typed contract: declared body parameters are validated against
-        ;; their keel types before the handler runs. dispatch-invoke is
-        ;; callable standalone (direct dispatch callers), so violations
-        ;; RETURN a typed envelope instead of raising.
-        (define arg-violation
-          (and (route-schema route)
-               (for/or ([p (in-list (schema-command-parameters (route-schema route)))])
-                 (define key (schema-parameter-name p))
-                 (define-values (ok? why)
-                   (validate-jsexpr (schema-parameter-type p)
-                                    (hash-ref args (string->symbol key) 'null)))
-                 (and (not ok?) (cons 'invalid-args (format "~a: ~a" key why))))))
-        (cond
-          [arg-violation (glz1-error-envelope id (car arg-violation) (cdr arg-violation) 'null)]
-          [else
-           (define timeout-secs
-             (let ([ms (and (hash? body) (hash-ref body 'timeout_ms #f))])
-               (and (exact-positive-integer? ms) (/ ms 1000.0))))
-           (call-with-bridge-request
-            table
-            id
-            (lambda ()
-              ;; A timed-out caller stops receiving. A bounded async channel
-              ;; lets the handler publish its eventual result and terminate
-              ;; instead of leaking forever in a synchronous channel-put.
-              (define result-ch (make-async-channel 1))
-              (thread
-               (lambda ()
-                 (async-channel-put
-                  result-ch
-                  (with-handlers
-                      ([exn:fail:glaze:bridge? (lambda (e)
-                                                 (glz1-error-envelope id
-                                                                      (exn:fail:glaze:bridge-code e)
-                                                                      (exn-message e)
-                                                                      (exn:fail:glaze:bridge-data
-                                                                       e)))]
-                       [exn:fail:glaze:bad-param?
-                        (lambda (e) (glz1-error-envelope id 'invalid-args (exn-message e) 'null))]
-                       [exn:fail? (lambda (e)
-                                    ((current-glaze-error-reporter) e (string-append "glz1:" path))
-                                    (glz1-error-envelope id 'internal "internal error" 'null))])
-                    (define result
-                      (parameterize ([current-capability-id (and authority (capability-id authority))]
-                                     [current-capability-authorizer
-                                      (and
-                                       authority
-                                       (lambda (permission resource)
-                                         (capability-authorized? authority permission resource)))])
-                        (apply (route-handler route)
-                               (make-handler-request (or method-sym (route-method route))
-                                                     path
-                                                     (string->bytes/utf-8 (jsexpr->string args)))
-                               captured)))
-                    ;; Typed contract: a handler result violating its
-                    ;; declared type is a server bug — full detail to the
-                    ;; error reporter, typed internal error to the page.
-                    (when (and (route-schema route) (not (response? result)))
-                      (define-values (rok? rwhy)
-                        (validate-jsexpr (schema-command-result (route-schema route)) result))
-                      (unless rok?
-                        ((current-glaze-error-reporter)
-                         (exn:fail (format "result schema violation on ~a: ~a" path rwhy)
-                                   (current-continuation-marks))
-                         (string-append "glz1:" path))
-                        (raise-bridge-error 'internal "internal error")))
-                    ;; Streaming and full-response handlers bypass
-                    ;; the envelope: the wire is already committed.
-                    (if (response? result)
-                        result
-                        (build-invoke-response id result))))))
-              (define maybe-result
-                (if timeout-secs
-                    (sync/timeout timeout-secs result-ch)
-                    (sync result-ch)))
-              (cond
-                [(not maybe-result)
-                 (glz1-error-envelope id
-                                      'timed-out
-                                      (format "handler exceeded ~ams" (hash-ref body 'timeout_ms))
-                                      'null)]
-                [else maybe-result])))])])]))
-
-;; The op-routed entry both transports share. Native messages carry an "op"
-;; field ("hello" / "cancel"); anything with a path is an invoke. HTTP keeps
-;; its own GET /glaze/hello and POST /glaze/cancel endpoints (same wire
-;; shapes), and routes its invoke bodies through here as well.
-;; `streams` (the transport's active-stream registry, id -> output-port) is
-;; optional so the HTTP-side callers and the tests keep the 5-arg shape.
-;; Cancelling an id that is mid-stream closes its pipe: the writer ends,
-;; EOF delivers the terminal frame, and the page's aborted promise was
-;; already settled by the page-side cancel.
-(define (dispatch-bridge body routes authority table name-fn [streams #f])
-  (cond
-    [(not (hash? body)) (glz1-error-envelope #f 'bad-envelope "message must be a JSON object" 'null)]
-    [(equal? (hash-ref body 'op #f) "hello")
-     (define id (hash-ref body 'id #f))
-     (if (string? id)
-         (build-invoke-response id (build-hello routes #f name-fn))
-         (glz1-error-envelope #f 'bad-envelope "hello needs a non-empty id" 'null))]
-    [(equal? (hash-ref body 'op #f) "cancel")
-     (define id (hash-ref body 'id #f))
-     (if (and (eq? (hash-ref body 'glz #f) glz1-version) (string? id) (not (string=? id "")))
-         (begin
-           (when (and streams (hash? streams))
-             (define pout (hash-ref streams id #f))
-             (when (output-port? pout)
-               (close-output-port pout)))
-           (request-table-cancel! table id)
-           (hasheq 'glz glz1-version 'id id 'ok #t 'value "cancel-signalled"))
-         (glz1-error-envelope #f 'bad-envelope "cancel needs {glz:1, id}" 'null))]
-    [else (dispatch-invoke body routes authority table)]))
-
-;; ---- shared static resources ----
-
-;; The static file rules both transports serve with: string segments only
-;; (".." and "." arrive as path/param symbols and never touch the
-;; filesystem), filesystem-level symlink containment, SPA index.html
-;; fallback. Returns (values mime-type bytes) or (values #f #f).
-(define (static-resource dir segments)
-  (cond
-    [(not (and (path-string? dir) (directory-exists? dir))) (values #f #f)]
-    [(not (andmap string? segments)) (values #f #f)]
-    [else
-     (define candidate (apply build-path dir segments))
-     (cond
-       [(and (file-exists? candidate)
-             (not (directory-exists? candidate))
-             (static-file-contained? dir candidate))
-        (values (path->mime-type candidate) (file->bytes candidate))]
-       [else
-        (define fallback (build-path dir "index.html"))
-        (if (and (file-exists? fallback) (static-file-contained? dir fallback))
-            (values (path->mime-type fallback) (file->bytes fallback))
-            (values #f #f))])]))
-
-;; Filesystem-level containment behind the lexical guard above: a symlink
-;; inside public-dir must not smuggle a path outside it. Both sides resolve
-;; every symlink component first (e.g. /tmp -> /private/tmp on macOS), so the
-;; prefix check compares real locations, not spellings.
-(define (static-file-contained? root candidate)
-  (with-handlers ([exn:fail? (lambda (_) #f)])
-    (path-inside? (canonical-path root) (canonical-path candidate))))
-
-(define (path->mime-type p)
-  (define ext (path-get-extension p))
-  (cond
-    [(not ext) #"application/octet-stream"]
-    [(member ext '(#".html" #".htm")) #"text/html; charset=utf-8"]
-    [(member ext '(#".css")) #"text/css; charset=utf-8"]
-    [(member ext '(#".js" #".mjs")) #"application/javascript; charset=utf-8"]
-    [(member ext '(#".json")) #"application/json; charset=utf-8"]
-    [(member ext '(#".xml")) #"application/xml; charset=utf-8"]
-    [(member ext '(#".txt")) #"text/plain; charset=utf-8"]
-    [(member ext '(#".svg")) #"image/svg+xml"]
-    [(member ext '(#".png")) #"image/png"]
-    [(member ext '(#".jpg" #".jpeg")) #"image/jpeg"]
-    [(member ext '(#".gif")) #"image/gif"]
-    [(member ext '(#".webp")) #"image/webp"]
-    [(member ext '(#".avif")) #"image/avif"]
-    [(member ext '(#".ico")) #"image/x-icon"]
-    [(member ext '(#".woff2")) #"font/woff2"]
-    [(member ext '(#".woff")) #"font/woff"]
-    [(member ext '(#".ttf")) #"font/ttf"]
-    [(member ext '(#".otf")) #"font/otf"]
-    [(member ext '(#".wasm")) #"application/wasm"]
-    [(member ext '(#".mp4")) #"video/mp4"]
-    [(member ext '(#".webm")) #"video/webm"]
-    [(member ext '(#".ogg" #".ogv")) #"video/ogg"]
-    [(member ext '(#".mp3")) #"audio/mpeg"]
-    [(member ext '(#".map")) #"application/json; charset=utf-8"]
-    [else #"application/octet-stream"]))
 
 ;; ---- native transport instance ----
 
@@ -384,73 +100,6 @@
 (define (bump-stat! t key)
   (define box (native-transport-stats-box t))
   (set-box! box (hash-update (unbox box) key add1 0)))
-
-;; One delivery to the page, in both carriers: `js` is a self-contained
-;; JavaScript snippet for evaluateJavaScript-style hosts (WKWebView,
-;; WebKitGTK); `json` is the bare JSON text for PostWebMessageAsJson-style
-;; hosts (WebView2 delivers it as a parsed object on the message event).
-;; Host wiring picks its carrier and hops it to the UI thread.
-(struct native-delivery (js json) #:transparent)
-
-;; JS snippet that resolves one pending invoke: the response travels as a
-;; JSON text inside a JSON string literal, so no hand-rolled escaping is
-;; needed and the page does one JSON.parse.
-(define (deliver-response-js response)
-  (define id (and (hash? response) (hash-ref response 'id #f)))
-  (string-append "window.__glz1Deliver && window.__glz1Deliver("
-                 (jsexpr->string (or id "unknown"))
-                 ","
-                 (jsexpr->string (jsexpr->string response))
-                 ");"))
-
-;; ---- streaming responses over the native channel ----
-;;
-;; A handler that answers a streaming-response cannot be delivered as one
-;; envelope (the bytes arrive over time). The wire sequence is:
-;;   envelope {glz,id,ok:true,outcome:"succeeded",stream:true}  (open frame)
-;;   window.__glz1Chunk(id, text)                               (per chunk)
-;;   window.__glz1End(id)                                       (terminal)
-;; The page's bootstrap routes the open frame to a per-id stream object and
-;; resolves the invoking promise on the terminal frame.
-
-(define (stream-open-js id)
-  (string-append "window.__glz1StreamOpen && window.__glz1StreamOpen(" (jsexpr->string id) ");"))
-
-(define (stream-chunk-js id chunk)
-  (string-append "window.__glz1Chunk && window.__glz1Chunk("
-                 (jsexpr->string id)
-                 ","
-                 (jsexpr->string chunk)
-                 ");"))
-
-(define (stream-end-js id)
-  (string-append "window.__glz1End && window.__glz1End(" (jsexpr->string id) ");"))
-
-;; Every stream frame travels in both carriers like a full response: the
-;; js snippet for evaluateJavaScript hosts, and a {glz,stream,id[,text]}
-;; JSON object for PostWebMessageAsJson hosts — the WebView2 message
-;; listener routes stream frames to the same page hooks.
-(define (stream-open-delivery id)
-  (native-delivery (stream-open-js id)
-                   (jsexpr->string (hasheq 'glz glz1-version 'stream "open" 'id id))))
-
-(define (stream-chunk-delivery id text)
-  (native-delivery (stream-chunk-js id text)
-                   (jsexpr->string (hasheq 'glz glz1-version 'stream "chunk" 'id id 'text text))))
-
-(define (stream-end-delivery id)
-  (native-delivery (stream-end-js id)
-                   (jsexpr->string (hasheq 'glz glz1-version 'stream "end" 'id id))))
-
-;; (list seq name data) from the event bus becomes one sequenced batch frame.
-(define (events-deliver-js seq name data)
-  (string-append "window.__glz1Events && window.__glz1Events("
-                 (jsexpr->string (list seq
-                                       (if (symbol? name)
-                                           (symbol->string name)
-                                           name)
-                                       data))
-                 ");"))
 
 (define (start-native-transport #:api routes
                                 #:authority [authority #f]
@@ -542,56 +191,13 @@
     [(response? response)
      (bump-stat! t 'responses-delivered)
      (define id (and (hash? body) (let ([v (hash-ref body 'id #f)]) (and (string? v) v))))
-     (define out (response-output response))
      (define deliver! (unbox (native-transport-deliver-box t)))
-     (define-values (pin pout) (make-pipe))
      (define streams (unbox (native-transport-streams-box t)))
-     (hash-set! streams id pout)
-     (thread (lambda ()
-               ;; A writer exception truncates the stream (the HTTP adapter closes
-               ;; the connection the same way); the pipe still hits EOF so the
-               ;; terminal frame settles the page's promise.
-               (with-handlers ([exn:fail? void])
-                 (out pout))
-               (close-output-port pout)))
-     (deliver! (stream-open-delivery id))
-     ;; Chunk boundaries can split a multi-byte UTF-8 sequence: deliver
-     ;; only the longest valid prefix and hold the incomplete tail for the
-     ;; next read. A byte that can never complete becomes the replacement
-     ;; character (bytes->string/utf-8's default) instead of stalling.
-     (let drain ([pending #""])
-       (define buf (make-bytes 4096))
-       (define n (read-bytes-avail! buf pin))
-       (cond
-         [(eof-object? n)
-          (hash-remove! streams id)
-          (unless (zero? (bytes-length pending))
-            (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending))))
-          (deliver! (stream-end-delivery id))]
-         [(and (exact-nonnegative-integer? n) (> n 0))
-          (define all (bytes-append pending (subbytes buf 0 n)))
-          (let split ([len (bytes-length all)])
-            (cond
-              [(zero? len) (drain #"")]
-              [else
-               (define-values (text rest)
-                 (with-handlers ([exn:fail? (lambda (_) (values #f #f))])
-                   (values (bytes->string/utf-8 (subbytes all 0 len)) (subbytes all len))))
-               (cond
-                 [text
-                  (deliver! (stream-chunk-delivery id text))
-                  (drain rest)]
-                 [(= len 1)
-                  (deliver! (stream-chunk-delivery id (bytes->string/utf-8 (subbytes all 0 1))))
-                  (drain (subbytes all 1))]
-                 [else (split (sub1 len))])]))]
-         [else (deliver! (stream-end-delivery id))]))
-     (void)]
+     (deliver-stream-response! response id streams deliver!)]
     ;; Everything else is a full envelope jsexpr: one frame.
     [else
      (bump-stat! t 'responses-delivered)
-     ((unbox (native-transport-deliver-box t)) (native-delivery (deliver-response-js response)
-                                                                (jsexpr->string response)))]))
+     ((unbox (native-transport-deliver-box t)) (response-delivery response))]))
 
 (define (event-loop t ch)
   (define bus (native-transport-bus t))
@@ -607,12 +213,7 @@
        (with-handlers ([exn:fail? (lambda (e)
                                     ((current-glaze-error-reporter) e "glz1:native:event"))])
          ((unbox (native-transport-deliver-box t))
-          (native-delivery (events-deliver-js seq name data)
-                           (jsexpr->string (list seq
-                                                 (if (symbol? name)
-                                                     (symbol->string name)
-                                                     name)
-                                                 data)))))
+          (event-delivery seq name data)))
        (loop)])))
 
 ;; Called by the host's message handler when it runs on a full Racket
@@ -652,219 +253,3 @@
       (with-handlers ([exn:fail? (lambda (_) (void))])
         (kill-thread th)))
     (set-box! (native-transport-threads-box t) '())))
-
-;; ---- typed client declarations (/glaze/api.d.ts) ----
-
-;; Renders the .d.ts for the app's TYPED routes (routes without a declared
-;; schema keep their JS entry from api.js and are not typed yet). Function
-;; names match the generated JS client (route->js-name).
-(define (generate-api-declarations routes)
-  (define typed (filter route-schema routes))
-  (define commands
-    (for/list ([r (in-list typed)])
-      (schema-command (route->js-name (route-segments r))
-                      (schema-command-parameters (route-schema r))
-                      (schema-command-result (route-schema r))
-                      (schema-command-error-codes (route-schema r)))))
-  (define named
-    (remove-duplicates (append* (map route-named-types typed))
-                       #:key (lambda (d)
-                               (if (grecord? d)
-                                   (grecord-name d)
-                                   (genum-name d)))))
-  (generate-ts-declarations commands named))
-
-;; ---- scheme URL parsing (shared by every platform's scheme handler) ----
-
-;; "glaze://app/sub/x.js?query#frag" -> '("sub" "x.js"), percent-decoded.
-;; The host scheme handlers route on this, so a hostile or malformed URL
-;; simply produces #f / non-"glaze" segments and falls to the 404 path.
-(require (only-in net/uri-codec uri-decode))
-;; WKWebView/WebKitGTK load the controlled scheme directly
-;; (glaze://app/...). WebView2 refuses top-level navigation to custom
-;; schemes — the exact reason Tauri uses http://tauri.localhost on
-;; Windows — so the Windows host serves http://glaze.localhost/... and the
-;; parser accepts both shapes.
-(define (native-scheme-segments url-str)
-  (define m
-    (or (regexp-match #rx"^glaze://app/(.*)$" (or url-str ""))
-        (regexp-match #rx"^https?://glaze[.]localhost/(.*)$" (or url-str ""))))
-  (and m
-       (let* ([rest (second m)]
-              [path (car (regexp-split #rx"[?#]" rest))])
-         (filter non-empty-string? (map uri-decode (string-split path "/"))))))
-;; The origin the page runs on, per platform (for e2e assertions).
-(define (native-app-origin)
-  (if (eq? (system-type 'os) 'windows) "http://glaze.localhost/" "glaze://app/"))
-
-;; ---- page-side bindings ----
-
-;; Injected at document start by the host (WKUserScript and equivalents).
-;; Defines the delivery plumbing and a transport-level client:
-;; __glz1.invoke / cancel / hello / on. Host API differences are confined
-;; to the `sink` selection (see the heredoc): WKWebView (macOS) and
-;; WebKitGTK (Linux) share the webkit message-handler API, WebView2
-;; (Windows) posts through window.chrome.webview and delivers
-;; PostWebMessageAsJson back on the message event. The generated native
-;; api.js (served by the scheme handler at /glaze/api.js) binds
-;; glaze.call / glaze.api on top of this, so app HTML needs no changes
-;; between adapters or platforms.
-(define native-bootstrap-js
-  #<<JS
-(function () {
-  if (window.__glz1) { return; }
-  var pending = {};
-  var seq = 0;
-  var listeners = [];
-  var sink = null;
-  // WKWebView (macOS) and WebKitGTK (Linux) share the webkit
-  // message-handler API; WebView2 (Windows) posts through
-  // window.chrome.webview and delivers PostWebMessageAsJson back on the
-  // message event.
-  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.glz1) {
-    sink = { send: function (text) { window.webkit.messageHandlers.glz1.postMessage(text); } };
-  } else if (window.chrome && window.chrome.webview) {
-    sink = { send: function (text) { window.chrome.webview.postMessage(text); } };
-    window.chrome.webview.addEventListener("message", function (e) {
-      var d = e.data;
-      if (d && d.glz === 1 && d.stream === "open") { window.__glz1StreamOpen(d.id); }
-      else if (d && d.glz === 1 && d.stream === "chunk") { window.__glz1Chunk(d.id, d.text); }
-      else if (d && d.glz === 1 && d.stream === "end") { window.__glz1End(d.id); }
-      else if (d && d.glz === 1 && d.id) { window.__glz1Deliver(d.id, JSON.stringify(d)); }
-    });
-  }
-  function send(envelope) {
-    if (!sink) { throw new Error("native bridge unavailable"); }
-    sink.send(JSON.stringify(envelope));
-  }
-  window.__glz1Deliver = function (id, text) {
-    var p = pending[id];
-    if (!p) { return; }
-    delete pending[id];
-    var out;
-    try { out = JSON.parse(text); }
-    catch (e) {
-      out = { glz: 1, id: id, ok: false, outcome: "failed",
-              error: { code: "internal", message: "undecodable response", data: null } };
-    }
-    if (out.ok) { p.resolve(out.value); }
-    else {
-      var err = new Error((out.error && out.error.message) || "bridge error");
-      err.code = out.error && out.error.code;
-      err.outcome = out.outcome;
-      err.requestId = id;
-      p.reject(err);
-    }
-  };
-  // Streaming responses: the backend opens with __glz1StreamOpen, sends
-  // __glz1Chunk per piece of text, and settles the promise on __glz1End.
-  // An invoke that errors before the stream opens still arrives through
-  // __glz1Deliver as a normal envelope, so both terminal shapes resolve
-  // the same pending entry.
-  window.__glz1StreamOpen = function (id) {
-    var p = pending[id];
-    if (p && !p.stream) { p.stream = { text: "" }; }
-  };
-  window.__glz1Chunk = function (id, text) {
-    var p = pending[id];
-    if (p && p.stream) {
-      p.stream.text += text;
-      if (p.onDelta) { try { p.onDelta(text); } catch (e) {} }
-    }
-  };
-  window.__glz1End = function (id) {
-    var p = pending[id];
-    if (p && p.stream) {
-      delete pending[id];
-      p.resolve(p.stream.text);
-    }
-  };
-  window.__glz1Events = function (batch) {
-    var arr;
-    try { arr = JSON.parse(batch); } catch (e) { return; }
-    arr.forEach(function (ev) {
-      listeners.forEach(function (l) {
-        if (l.name === ev[1]) { try { l.fn(ev[2]); } catch (e) {} }
-      });
-    });
-  };
-  function call(op) {
-    return new Promise(function (resolve, reject) {
-      var id = "r" + (++seq) + "-" + Date.now();
-      var env = { glz: 1, id: id, op: op };
-      pending[id] = { resolve: resolve, reject: reject };
-      send(env);
-    });
-  }
-  window.__glz1 = {
-    invoke: function (path, args, opts) {
-      opts = opts || {};
-      return new Promise(function (resolve, reject) {
-        var id = "r" + (++seq) + "-" + Date.now();
-        var env = { glz: 1, id: id, path: path, args: args || {} };
-        if (opts.method) { env.method = opts.method; }
-        if (opts.timeoutMs) { env.timeout_ms = opts.timeoutMs; }
-        pending[id] = { resolve: resolve, reject: reject, onDelta: opts.onDelta };
-        send(env);
-      });
-    },
-    // Streaming invoke: the promise settles with the full text on the
-    // terminal frame; opts.onDelta fires per chunk as it arrives. No
-    // timeout_ms — a stream settles when the writer finishes. opts.signal
-    // (an AbortSignal) rejects the promise at once and sends the cancel
-    // op, which closes the stream's pipe server side.
-    invokeStream: function (path, args, opts) {
-      opts = opts || {};
-      return new Promise(function (resolve, reject) {
-        var id = "r" + (++seq) + "-" + Date.now();
-        var env = { glz: 1, id: id, path: path, args: args || {} };
-        if (opts.method) { env.method = opts.method; }
-        pending[id] = { resolve: resolve, reject: reject, onDelta: opts.onDelta };
-        if (opts.signal) {
-          if (opts.signal.aborted) {
-            delete pending[id];
-            reject(new Error("aborted"));
-            return;
-          }
-          opts.signal.addEventListener("abort", function () {
-            var p = pending[id];
-            if (p) {
-              delete pending[id];
-              p.reject(new Error("aborted"));
-            }
-            send({ glz: 1, op: "cancel", id: id });
-          });
-        }
-        send(env);
-      });
-    },
-    cancel: function (id) { send({ glz: 1, op: "cancel", id: id }); },
-    hello: function () { return call("hello"); },
-    on: function (name, fn) { listeners.push({ name: name, fn: fn }); }
-  };
-})();
-JS
-  )
-
-;; The native twin of the HTTP api.js: same route entries (api-client-entries
-;; from glaze/bridge), transport bindings over __glz1 instead of
-;; fetch/EventSource. The scheme handler serves this at /glaze/api.js so an
-;; app's existing <script src="/glaze/api.js"> works unchanged.
-(define (native-api-client-js api-routes)
-  (string-append "/* Generated by glaze (native transport) — do not edit. */\n"
-                 "window.glaze = window.glaze || {};\n"
-                 "(function () {\n"
-                 "  var g = window.__glz1;\n"
-                 "  if (!g) { throw new Error('glaze native bootstrap missing'); }\n"
-                 "  glaze.call = function (method, path, body) {\n"
-                 "    return g.invoke(path, body, { method: method });\n"
-                 "  };\n"
-                 "  glaze.on = function (name, fn) { g.on(name, fn); };\n"
-                 "  glaze.invoke = g.invoke;\n"
-                 "  glaze.invokeStream = g.invokeStream;\n"
-                 "  glaze.cancel = g.cancel;\n"
-                 "  glaze.hello = g.hello;\n"
-                 "})();\n"
-                 "glaze.api = {\n"
-                 (api-client-entries api-routes)
-                 "\n};\n"))

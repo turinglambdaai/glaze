@@ -127,6 +127,8 @@ A native desktop window opens and hosts the frontend served by the local Racket 
 raco glaze init <name>       # Create a native Glaze desktop project
 raco glaze inspect --json    # Read the project/edit/verification contract
 raco glaze doctor --json     # Diagnose package and native WebView readiness
+raco glaze schema write      # Explicitly refresh the application API baseline
+raco glaze schema check --json # Reject breaking application API changes
 raco glaze dev               # Run this project's native desktop app
 raco glaze verify            # Assert title/URL and capture the native window
 raco glaze build             # Build a distributable (exe + bundled assets)
@@ -142,10 +144,30 @@ raco glaze help              # Show help
 
 There is intentionally no browser-mode `dev`/`serve` command. Development and production use the same native WebView path so missing dependencies and native-backend failures cannot be hidden by a browser fallback.
 
-`init` also creates `AGENTS.md` and a runnable `verify.rkt`. This gives coding
-agents explicit edit boundaries, machine-readable inspection/diagnostics, and
-native-window evidence with meaningful exit codes. See the
+`init` also creates `AGENTS.md`, `glaze.rktd`, a deterministic
+`glaze-schema.json`, and a runnable `verify.rkt`. This gives coding agents
+explicit edit boundaries, machine-readable inspection/diagnostics, a reviewed
+application API contract, and native-window evidence with meaningful exit codes. See the
 [agent-native workflow](docs/agent-native.md).
+
+### Application schema contract
+
+`glaze.rktd` tells the schema tool which module and exported route-list binding
+to load. The generated default is equivalent to:
+
+```racket
+#hasheq((schema-module . "main.rkt")
+        (schema-binding . api)
+        (schema-baseline . "glaze-schema.json"))
+```
+
+Keep application startup inside `module+ main` and export the route list. This
+lets CI inspect the exact GLZ1/Keel contract without opening a window or running
+application startup code. `schema check` exits 1 for a compatibility break, 2
+for configuration or loading errors, and 0 for compatible changes. Its JSON
+report separates `breaking-changes` from `compatible-additions`. Updating a
+baseline is an explicit review decision: run `schema write`, inspect the diff,
+then commit it with the intentional API change.
 
 ### `build`
 
@@ -244,12 +266,19 @@ A new Glaze project looks like this:
 
 ```
 myapp/
-├── main.rkt          # Racket entry point
+├── main.rkt          # Exported API plus native entry point
+├── glaze.rktd        # Schema module/binding/baseline configuration
+├── glaze-schema.json # Reviewed deterministic GLZ1/Keel contract
+├── AGENTS.md         # Local agent contract
+├── verify.rkt        # Native-window acceptance check
 └── public/
     └── index.html    # Frontend
 ```
 
-`raco glaze init` generates a native-window entry point. The call is deliberately top-level so the same file also starts correctly when `raco glaze build` packages it through the generated wrapper:
+`raco glaze init` generates an import-safe API module whose `module+ main`
+submodule is the native-window entry point. `racket main.rkt`, `raco glaze dev`,
+and packaged wrappers still run the same application path, while schema tooling
+can load `api` without starting the app:
 
 ```racket
 #lang racket/base
@@ -259,8 +288,13 @@ myapp/
 
 (define-runtime-path public "public")
 
-(run-app #:public-dir public
-         #:title "myapp")
+(define api '())
+(provide api)
+
+(module+ main
+  (run-app #:public-dir public
+           #:api api
+           #:title "myapp"))
 ```
 
 `run-app` starts the local HTTP application server, opens the native WebView window, and shuts the server down when the window closes. A native-backend failure is fatal and includes dependency guidance.

@@ -120,6 +120,18 @@ jobs:
           PLTUSERHOME="$smoke_root/racket-user" \
             racket -e '(require glaze glaze/server glaze/events)'
           PLTUSERHOME="$smoke_root/racket-user" raco glaze help >/dev/null
+          cd "$smoke_root"
+          PLTUSERHOME="$smoke_root/racket-user" raco glaze init schema-smoke
+          cd schema-smoke
+          PLTUSERHOME="$smoke_root/racket-user" raco glaze schema check --json \
+            > schema-report.json
+          python - <<'PY'
+          import json
+          with open("schema-report.json", encoding="utf-8") as source:
+              report = json.load(source)
+          assert report["ok"] is True
+          assert report["compatible"] is True
+          PY
 
       - name: Upload source release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

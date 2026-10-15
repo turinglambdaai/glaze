@@ -2,6 +2,17 @@
 
 本文件给维护 Glaze 的 AI agent 和开发者使用。目标是说明项目当前真正的架构契约、容易踩坑的地方，以及改动后必须怎么验证。
 
+## 开始任何架构或路线图工作之前
+
+先读以下四个文件，不要只依赖聊天历史：
+
+1. `docs/README.md`：文档所有权地图，避免创建平行真相源；
+2. `docs/architecture.md`：当前已经成立的架构和依赖方向；
+3. `docs/1.0-plan.md`：当前阶段、退出条件、证据和下一项实现 handoff。
+4. `docs/agent-handoff.md`：单 slice 的文件所有权、验证阶梯与停止条件。
+
+仓库状态是 agent-to-agent handoff。一次只实现 `docs/1.0-plan.md` 中一个有边界的 slice，完成后更新证据和 “Next implementation handoff”。公共 API 变更还必须同步 `glaze-test/public-api-test.rkt`、`docs/api-stability.md` 和 `CHANGELOG.md`；不能通过修改快照来掩盖意外扩张。
+
 ## 项目定位
 
 Glaze 是一个 **Tauri-like framework for Racket**：
@@ -209,13 +220,15 @@ closed?
 ```text
 raco glaze init <name>
 raco glaze dev
+raco glaze schema write|check [--json]
 raco glaze build
 raco glaze keygen
 raco glaze license
 raco glaze help
 ```
 
-`init` 生成的 `main.rkt` 必须直接使用 `run-app`。
+`init` 生成的 `main.rkt` 必须在 `module+ main` 中直接使用 `run-app`，并导出
+`glaze.rktd` 指定的 route list，使 schema 工具加载模块时不会启动应用。
 
 `dev` 必须运行项目真实 `main.rkt`，这样 routes、events、window options、token 等与生产行为一致。
 

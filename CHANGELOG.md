@@ -39,6 +39,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Architecture governance foundation: a canonical documentation map,
+  current-state architecture, API stability policy, active 1.0 gate plan,
+  exact public-export checks, and an explicit agent-to-agent handoff rule.
+- Application API release contracts: deterministic versioned GLZ1/Keel
+  baselines, `raco glaze schema write/check --json`, machine-readable
+  compatibility reasons, project schema status in inspect/doctor/build, and a
+  scaffold that exports its route list without running the native application.
+- CLI responsibility boundaries: the executable dispatcher now delegates to
+  private modules for scaffold, native run/verify, build options, licensing,
+  update signing, project metadata, and schema governance; boundary tests keep
+  those command modules from depending back on CLI aggregators.
+- Runtime and delivery foundations: HTTP trust policy, shared static-resource
+  rules, one shared GLZ1 dispatch pipeline, native browser bootstrap/client
+  generation, native response/event/stream framing with UTF-8-safe draining,
+  build-entry generation, and platform installer metadata now have private
+  owners and direct tests; public import paths and behavior remain compatible.
+  HTTP no longer imports the native carrier aggregation module to obtain
+  command semantics.
+- A repository-local AI implementation contract gives ZCode and other agents a
+  single-source work queue, file ownership rules, validation ladder, and stop
+  conditions for architecture-sensitive changes.
+
 ## [0.15.0] - 2026-10-14
 
 ### Added

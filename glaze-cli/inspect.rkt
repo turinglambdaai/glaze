@@ -2,7 +2,8 @@
 
 (require json
          racket/file
-         racket/path)
+         racket/path
+         glaze-cli/private/project)
 
 (provide project-report
          run-inspect)
@@ -58,9 +59,13 @@
               (list "title" "url" "png-screenshot"))
         'generated-paths
         (list (entry complete "dist" 'directory))
+        'schema
+        (project-schema-status complete)
         'commands
         (list (command "inspect" "raco glaze inspect --json" #f)
               (command "diagnose" "raco glaze doctor --json" #f)
+              (command "schema-write" "raco glaze schema write --json" #t)
+              (command "schema-check" "raco glaze schema check --json" #f)
               (command "run" "raco glaze dev" #t)
               (command "verify-ui" "raco glaze verify" #t)
               (command "build" "raco glaze build" #t))))
@@ -79,7 +84,9 @@
                   name
                   (hash-ref item 'path)
                   (if (hash-ref item 'exists) "present" "missing")))
+        (printf "  schema: ~a\n" (hash-ref (hash-ref report 'schema) 'status))
         (displayln "  next:")
         (displayln "    raco glaze doctor --json")
+        (displayln "    raco glaze schema check")
         (displayln "    raco glaze verify")))
   0)

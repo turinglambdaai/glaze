@@ -4,8 +4,8 @@
 ;; glaze/devtools, and glaze/experimental are the 1.0 aggregation layers
 ;; (docs/architecture-1.0.md). Each layer's headline names must stay
 ;; requireable — a rename or move upstream fails here instead of breaking
-;; applications that bind the layer. The negative half (no unreviewed
-;; additions) is enforced by review, as with the core facade guard.
+;; applications that bind the layer. public-api-test.rkt enforces the exact
+;; variable and syntax export set so unreviewed additions fail too.
 ;;
 ;; glaze/experimental is deliberately guarded looser: its surface may
 ;; change in any release without a compat baseline, so only each
