@@ -88,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   entitlement library instead of framework-owned business policy. Glaze does
   not depend on Permit.
 
+## [0.16.0] - 2026-10-16
+
 ### Added
 
 - Aggregation layer modules completing the 1.0 layout skeleton:
