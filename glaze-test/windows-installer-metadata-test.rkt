@@ -40,38 +40,42 @@
               "the checkbox must launch only on a fresh install")
   (check-true (string-contains? wxs "StartMenuApplicationShortcut")
               "a start-menu shortcut must be authored")
-  (check-true (string-contains? wxs "DesktopShortcutComponent")
-              "a desktop shortcut must be authored")
+  (check-true (string-contains? wxs "DesktopShortcutComponent") "a desktop shortcut must be authored")
   (check-false (string-contains? wxs "WixUILicenseRtf")
                "wizard bitmaps and license stay unauthored when unconfigured"))
 
 (test-case "configured wizard assets ride in through WixVariables"
-  (define wxs (windows-wxs "Demo" (string->path "C:/dist") "1.2.3" "Acme" "com.acme.demo"
-                           #:license-rtf (string->path "C:/branding/license.rtf")
-                           #:banner-bmp (string->path "C:/branding/banner.bmp")
-                           #:dialog-bmp (string->path "C:/branding/dialog.bmp")))
-  (check-true (string-contains? wxs "WixVariable Id='WixUILicenseRtf' Value='C:/branding/license.rtf'"))
+  (define wxs
+    (windows-wxs "Demo"
+                 (string->path "C:/dist")
+                 "1.2.3"
+                 "Acme"
+                 "com.acme.demo"
+                 #:license-rtf (string->path "C:/branding/license.rtf")
+                 #:banner-bmp (string->path "C:/branding/banner.bmp")
+                 #:dialog-bmp (string->path "C:/branding/dialog.bmp")))
+  (check-true (string-contains? wxs
+                                "WixVariable Id='WixUILicenseRtf' Value='C:/branding/license.rtf'"))
   (check-true (string-contains? wxs "WixVariable Id='WixUIBannerBmp' Value='C:/branding/banner.bmp'"))
-  (check-true (string-contains? wxs "WixVariable Id='WixUIDialogBmp' Value='C:/branding/dialog.bmp'")))
+  (check-true (string-contains? wxs
+                                "WixVariable Id='WixUIDialogBmp' Value='C:/branding/dialog.bmp'")))
 
 (test-case "the license RTF renderer stays ASCII with unicode escapes"
   (define rtf (text->rtf "Demo License\nsecond line with ünïcode ✓\ttabbed"))
-  (check-true (string-prefix? rtf "{\\rtf1\\ansi")
-              "the generated license must be RTF")
+  (check-true (string-prefix? rtf "{\\rtf1\\ansi") "the generated license must be RTF")
   (check-true (string-contains? rtf "Demo License\\par")
               "license line breaks must become RTF paragraph breaks")
   (check-true (string-contains? rtf "\\u252?")
               "non-ASCII license characters must become unicode escapes")
   (check-false (string-contains? rtf "ünïcode")
                "the generated RTF must stay ASCII so WiX never re-decodes it")
-  (check-true (string-contains? rtf "\\tab ")
-              "tabs must render as RTF tab escapes"))
+  (check-true (string-contains? rtf "\\tab ") "tabs must render as RTF tab escapes"))
 
 (test-case "the repository license text renders automatically"
   (define root (make-temporary-file "glaze-installer-test-~a" 'directory))
   (call-with-output-file (build-path root "LICENSE")
-    #:exists 'truncate/replace
-    (lambda (out) (display "Demo License Text\n" out)))
+                         #:exists 'truncate/replace
+                         (lambda (out) (display "Demo License Text\n" out)))
   (check-equal? (project-license-text root) "Demo License Text\n")
   (check-false (project-license-text (build-path root "missing")))
   (delete-directory/files root))
@@ -80,10 +84,11 @@
   (define script (dmg-style-applescript "Smoke App" "Smoke.app"))
   (check-true (string-contains? script "tell disk \"Smoke App\"")
               "the script must address the volume by name")
-  (check-true (regexp-match?
-               #rx"set background picture of theViewOptions to file \"[.]background:background[.]png\""
-               script)
-              "the background must come from the hidden .background folder")
+  (check-true
+   (regexp-match?
+    #rx"set background picture of theViewOptions to file \"[.]background:background[.]png\""
+    script)
+   "the background must come from the hidden .background folder")
   (check-true (string-contains? script "set position of item \"Smoke.app\" of container window")
               "the bundle icon must be positioned")
   (check-true (string-contains? script "set position of item \"Applications\" of container window")

@@ -40,7 +40,11 @@
 ;; from the UI extension; the exit page offers launching the app through the
 ;; Util extension's WixShellExec. Optional paths (license RTF, wizard
 ;; bitmaps) ride in as WixVariables; omitted ones keep the wizard defaults.
-(define (windows-wxs app-name dist-dir version publisher identifier
+(define (windows-wxs app-name
+                     dist-dir
+                     version
+                     publisher
+                     identifier
                      #:license-rtf [license-rtf #f]
                      #:banner-bmp [banner-bmp #f]
                      #:dialog-bmp [dialog-bmp #f])
@@ -49,7 +53,8 @@
     (if path
         (format "    <WixVariable Id='~a' Value='~a' />\n" id (xml-escape (path->string path)))
         ""))
-  (format #<<WXEOF
+  (format
+   #<<WXEOF
 <?xml version='1.0' encoding='utf-8'?>
 <Wix xmlns='http://wixtoolset.org/schemas/v4/wxs' xmlns:ui='http://wixtoolset.org/schemas/v4/wxs/ui'>
   <Package Name='~a' Manufacturer='~a' Version='~a' UpgradeCode='~a' Scope='perMachine'>
@@ -97,26 +102,26 @@
   </Fragment>
 </Wix>
 WXEOF
-          (xml-escape app-name)
-          (xml-escape publisher)
-          (xml-escape version)
-          (stable-upgrade-code identifier)
-          (wix-variable "WixUILicenseRtf" license-rtf)
-          (wix-variable "WixUIBannerBmp" banner-bmp)
-          (wix-variable "WixUIDialogBmp" dialog-bmp)
-          (xml-escape app-name)          ; license checkbox label
-          (xml-escape app-name)          ; shell-exec target
-          (if (equal? (system-type 'arch) 'aarch64) "ARM64" "X64")
-          (xml-escape app-name)          ; install directory name
-          (xml-escape app-name)          ; start-menu folder name
-          (xml-escape app-name)          ; start-menu shortcut name
-          (xml-escape app-name)          ; start-menu shortcut target
-          (xml-escape identifier)        ; start-menu registry key
-          (xml-escape app-name)          ; desktop shortcut name
-          (xml-escape app-name)          ; desktop shortcut target
-          (xml-escape identifier)        ; desktop registry key
-          dist                           ; harvested payload
-          ))
+   (xml-escape app-name)
+   (xml-escape publisher)
+   (xml-escape version)
+   (stable-upgrade-code identifier)
+   (wix-variable "WixUILicenseRtf" license-rtf)
+   (wix-variable "WixUIBannerBmp" banner-bmp)
+   (wix-variable "WixUIDialogBmp" dialog-bmp)
+   (xml-escape app-name) ; license checkbox label
+   (xml-escape app-name) ; shell-exec target
+   (if (equal? (system-type 'arch) 'aarch64) "ARM64" "X64")
+   (xml-escape app-name) ; install directory name
+   (xml-escape app-name) ; start-menu folder name
+   (xml-escape app-name) ; start-menu shortcut name
+   (xml-escape app-name) ; start-menu shortcut target
+   (xml-escape identifier) ; start-menu registry key
+   (xml-escape app-name) ; desktop shortcut name
+   (xml-escape app-name) ; desktop shortcut target
+   (xml-escape identifier) ; desktop registry key
+   dist ; harvested payload
+   ))
 
 ;; ---- wizard license page ----
 
@@ -137,7 +142,10 @@ WXEOF
        [(< code 128) (string ch)]
        ;; RTF \uN takes a signed 16-bit code unit.
        [(<= code #xFFFF)
-        (format "\\u~a?" (if (>= code #x8000) (- code #x10000) code))]
+        (format "\\u~a?"
+                (if (>= code #x8000)
+                    (- code #x10000)
+                    code))]
        [else
         (define value (- code #x10000))
         (format "\\u~a?\\u~a?"
@@ -177,7 +185,8 @@ WXEOF
 (define (dmg-style-applescript disk-name app-name)
   (define bottom-right
     (format "{~a, ~a, ~a, ~a}"
-            dmg-window-origin-x dmg-window-origin-y
+            dmg-window-origin-x
+            dmg-window-origin-y
             (+ dmg-window-origin-x dmg-window-width)
             (+ dmg-window-origin-y dmg-window-height)))
   (format (string-append
@@ -201,8 +210,10 @@ WXEOF
           dmg-icon-size
           bottom-right
           (applescript-escape app-name)
-          (car dmg-app-icon-position) (cdr dmg-app-icon-position)
-          (car dmg-applications-icon-position) (cdr dmg-applications-icon-position)))
+          (car dmg-app-icon-position)
+          (cdr dmg-app-icon-position)
+          (car dmg-applications-icon-position)
+          (cdr dmg-applications-icon-position)))
 
 ;; NSIS supports silent installation via /S. The ARP keys below make install,
 ;; upgrade, and uninstall detection work for winget and Windows Settings.

@@ -265,7 +265,9 @@
   ;; the CI matrix installs them. Returns the produced artifact path (or #f).
   (define (asset-path value who)
     (and value
-         (let ([path (if (path? value) value (string->path value))])
+         (let ([path (if (path? value)
+                         value
+                         (string->path value))])
            (unless (absolute-path? path)
              (set! path (simple-form-path (build-path project-dir path))))
            (unless (file-exists? path)
@@ -273,8 +275,12 @@
            path)))
   (define installer-artifact
     (if installer?
-        (make-installer os out-dir-path app-name (or version "0.0.0")
-                        app-publisher app-identifier
+        (make-installer os
+                        out-dir-path
+                        app-name
+                        (or version "0.0.0")
+                        app-publisher
+                        app-identifier
                         project-dir
                         (asset-path dmg-background 'dmg-background)
                         (asset-path installer-license 'installer-license)
@@ -299,14 +305,28 @@
 ;; archive (.zip / .tar.gz) when the tool is missing, printing a warning so the
 ;; caller knows an installer wasn't produced. Returns the produced artifact
 ;; path, or #f when nothing could be produced.
-(define (make-installer os out-dir app-name version publisher identifier
-                        project-dir dmg-background installer-license installer-banner installer-dialog)
+(define (make-installer os
+                        out-dir
+                        app-name
+                        version
+                        publisher
+                        identifier
+                        project-dir
+                        dmg-background
+                        installer-license
+                        installer-banner
+                        installer-dialog)
   (case os
-    [(windows) (make-windows-installer out-dir app-name version publisher identifier
-                                       #:project-dir project-dir
-                                       #:license-rtf installer-license
-                                       #:banner-bmp installer-banner
-                                       #:dialog-bmp installer-dialog)]
+    [(windows)
+     (make-windows-installer out-dir
+                             app-name
+                             version
+                             publisher
+                             identifier
+                             #:project-dir project-dir
+                             #:license-rtf installer-license
+                             #:banner-bmp installer-banner
+                             #:dialog-bmp installer-dialog)]
     [(macosx) (make-macos-installer out-dir app-name dmg-background)]
     [else (make-linux-installer out-dir app-name version publisher identifier)]))
 
@@ -320,7 +340,11 @@
   (apply system* args))
 
 ;; Windows: prefer WiX v4 (`wix`), then NSIS (`makensis`); else zip the dist.
-(define (make-windows-installer out-dir app-name version publisher identifier
+(define (make-windows-installer out-dir
+                                app-name
+                                version
+                                publisher
+                                identifier
                                 #:project-dir [project-dir #f]
                                 #:license-rtf [license-rtf #f]
                                 #:banner-bmp [banner-bmp #f]
@@ -343,11 +367,11 @@
        (or license-rtf
            (let ([generated (build-path wix-temp "license.rtf")])
              (call-with-output-file generated
-               #:exists 'truncate/replace
-               (lambda (out)
-                 (display (text->rtf (or (project-license-text project-dir)
-                                         default-license-notice))
-                                  out)))
+                                    #:exists 'truncate/replace
+                                    (lambda (out)
+                                      (display (text->rtf (or (project-license-text project-dir)
+                                                              default-license-notice))
+                                               out)))
              generated)))
      (define wix-arch
        (case (system-type 'arch)
@@ -355,25 +379,30 @@
          [(aarch64 arm64) "arm64"]
          [else "x86"]))
      (dynamic-wind (lambda ()
-                     (call-with-output-file
-                      wxs-path
-                      (lambda (out)
-                        (display (windows-wxs app-name dist version publisher identifier
-                                              #:license-rtf license-path
-                                              #:banner-bmp banner-bmp
-                                              #:dialog-bmp dialog-bmp)
-                                 out))
-                      #:exists 'replace))
+                     (call-with-output-file wxs-path
+                                            (lambda (out)
+                                              (display (windows-wxs app-name
+                                                                    dist
+                                                                    version
+                                                                    publisher
+                                                                    identifier
+                                                                    #:license-rtf license-path
+                                                                    #:banner-bmp banner-bmp
+                                                                    #:dialog-bmp dialog-bmp)
+                                                       out))
+                                            #:exists 'replace))
                    (lambda ()
-                     (define wix (or (find-executable-path "wix.exe" #f)
-                                     (find-executable-path "wix" #f)))
+                     (define wix
+                       (or (find-executable-path "wix.exe" #f) (find-executable-path "wix" #f)))
                      (ensure-wix-extensions! wix)
                      (if (run wix
                               "build"
                               "-arch"
                               wix-arch
-                              "-ext" "WixToolset.UI.wixext"
-                              "-ext" "WixToolset.Util.wixext"
+                              "-ext"
+                              "WixToolset.UI.wixext"
+                              "-ext"
+                              "WixToolset.Util.wixext"
                               "-o"
                               (path->string temp-msi)
                               (path->string wxs-path))
@@ -420,7 +449,10 @@
   (cond
     [(and dmg-background (find-executable-path "hdiutil" #f))
      (create-branded-dmg! (find-executable-path "hdiutil" #f)
-                          dmg-background bundle dmg-path app-name)]
+                          dmg-background
+                          bundle
+                          dmg-path
+                          app-name)]
     [(find-tool "create-dmg")
      (and (run (find-executable-path "create-dmg" #f)
                "--volname"
@@ -451,13 +483,17 @@
 ;; The wix CLI resolves -ext references only from its local extension cache,
 ;; so the matching UI and Util extension versions are installed on demand.
 (define (ensure-wix-extensions! wix)
-  (define version-output
-    (with-output-to-string (lambda () (run wix "--version"))))
+  (define version-output (with-output-to-string (lambda () (run wix "--version"))))
   (define version-match (regexp-match #px"^[0-9]+\\.[0-9]+\\.[0-9]+" version-output))
   (define version (and version-match (car version-match)))
   (for ([extension (in-list '("WixToolset.UI.wixext" "WixToolset.Util.wixext"))])
-    (run wix "extension" "add" "-g"
-         (if version (string-append extension "/" version) extension))))
+    (run wix
+         "extension"
+         "add"
+         "-g"
+         (if version
+             (string-append extension "/" version)
+             extension))))
 
 ;; Commercial drag-to-install image: stage the volume contents (bundle,
 ;; /Applications link, hidden background asset), attach a read/write image
@@ -469,54 +505,65 @@
   (define rw-image (build-path staging "dmg-rw.dmg"))
   (define script-path (build-path staging "dmg-style.applescript"))
   (dynamic-wind
-    (lambda () #f)
-    (lambda ()
-      (copy-directory/files bundle staging-app)
-      (make-file-or-directory-link "/Applications"
-                                   (build-path staging "Applications"))
-      (make-directory* (build-path staging ".background"))
-      (copy-file background (build-path staging ".background" "background.png"))
-      (define attach-output
-        (with-output-to-string
-          (lambda ()
-            (unless (run hdiutil "create" "-fs" "HFS+"
-                         "-volname" app-name
-                         "-srcfolder" (path->string staging)
-                         "-format" "UDRW" "-ov"
-                         (path->string rw-image))
-              (error 'build-app "hdiutil create failed"))
-            (unless (run hdiutil "attach" (path->string rw-image)
-                         "-noautoopen" "-readwrite")
-              (error 'build-app "hdiutil attach failed")))))
-      (define mount-path
-        (let* ([line (last (string-split (string-trim attach-output) "\n"))]
-               [fields (string-split line "\t")])
-          (string-trim (last fields))))
-      (define disk-name (last (string-split mount-path "/")))
-      (call-with-output-file script-path
-        #:exists 'truncate/replace
-        (lambda (out) (display (dmg-style-applescript disk-name app-name) out)))
-      (define (detach!)
-        (with-handlers ([exn:fail? void])
-          (unless (run hdiutil "detach" mount-path)
-            (run hdiutil "detach" "-force" mount-path))))
-      (with-handlers ([exn:fail?
-                       (lambda (e)
-                         (detach!)
-                         (raise e))])
-        (unless (run (find-executable-path "osascript" #f) (path->string script-path))
-          (error 'build-app "DMG layout script failed; see output above"))
-        (when (find-executable-path "sync" #f)
-          (run (find-executable-path "sync" #f)))
-        (detach!))
-      (when (file-exists? dmg-path) (delete-file dmg-path))
-      (unless (run hdiutil "convert" (path->string rw-image)
-                   "-format" "UDZO" "-ov" "-o" (path->string dmg-path))
-        (error 'build-app "hdiutil convert failed"))
-      dmg-path)
-    (lambda ()
-      (when (directory-exists? staging)
-        (delete-directory/files staging)))))
+   (lambda () #f)
+   (lambda ()
+     (copy-directory/files bundle staging-app)
+     (make-file-or-directory-link "/Applications" (build-path staging "Applications"))
+     (make-directory* (build-path staging ".background"))
+     (copy-file background (build-path staging ".background" "background.png"))
+     (define attach-output
+       (with-output-to-string
+        (lambda ()
+          (unless (run hdiutil
+                       "create"
+                       "-fs"
+                       "HFS+"
+                       "-volname"
+                       app-name
+                       "-srcfolder"
+                       (path->string staging)
+                       "-format"
+                       "UDRW"
+                       "-ov"
+                       (path->string rw-image))
+            (error 'build-app "hdiutil create failed"))
+          (unless (run hdiutil "attach" (path->string rw-image) "-noautoopen" "-readwrite")
+            (error 'build-app "hdiutil attach failed")))))
+     (define mount-path
+       (let* ([line (last (string-split (string-trim attach-output) "\n"))]
+              [fields (string-split line "\t")])
+         (string-trim (last fields))))
+     (define disk-name (last (string-split mount-path "/")))
+     (call-with-output-file script-path
+                            #:exists 'truncate/replace
+                            (lambda (out) (display (dmg-style-applescript disk-name app-name) out)))
+     (define (detach!)
+       (with-handlers ([exn:fail? void])
+         (unless (run hdiutil "detach" mount-path)
+           (run hdiutil "detach" "-force" mount-path))))
+     (with-handlers ([exn:fail? (lambda (e)
+                                  (detach!)
+                                  (raise e))])
+       (unless (run (find-executable-path "osascript" #f) (path->string script-path))
+         (error 'build-app "DMG layout script failed; see output above"))
+       (when (find-executable-path "sync" #f)
+         (run (find-executable-path "sync" #f)))
+       (detach!))
+     (when (file-exists? dmg-path)
+       (delete-file dmg-path))
+     (unless (run hdiutil
+                  "convert"
+                  (path->string rw-image)
+                  "-format"
+                  "UDZO"
+                  "-ov"
+                  "-o"
+                  (path->string dmg-path))
+       (error 'build-app "hdiutil convert failed"))
+     dmg-path)
+   (lambda ()
+     (when (directory-exists? staging)
+       (delete-directory/files staging)))))
 
 ;; Linux: build every available native package format — AppImage
 ;; (appimagetool / linuxdeploy), deb (dpkg-deb), and rpm (rpmbuild) — and
