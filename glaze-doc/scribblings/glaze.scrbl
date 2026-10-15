@@ -888,12 +888,10 @@ server (the HTTP adapter for hot reload and curl) and FFI discovery
 diagnostics.}
 
 @defmodule[glaze/experimental]{Capabilities that are shipped but NOT
-frozen: @racketmodname[glaze/deeplink] (OS URL-scheme handover),
-@racketmodname[glaze/autolaunch] (login items), and
-@racketmodname[glaze/license] (commercial licensing). The surface may
-change in any release without a compat baseline; a module graduates into
-its layer after surviving a release cycle unchanged under real product
-usage.}
+frozen: @racketmodname[glaze/deeplink] (OS URL-scheme handover) and
+@racketmodname[glaze/autolaunch] (login items). The surface may change in
+any release without a compat baseline; a module graduates into its layer
+after surviving a release cycle unchanged under real product usage.}
 
 @section[#:tag "native-transport"]{Native Transport}
 
@@ -1247,33 +1245,6 @@ Release automation can validate and sign a payload with
 @exec{raco glaze manifest-sign}, then verify the wrapper and pinned key id with
 @exec{raco glaze manifest-verify}.
 
-@section{Licensing}
-
-@defmodule[glaze/license]
-
-Glaze includes an offline RSA-2048/SHA-256 licensing helper backed by the
-system @exec{openssl} command.
-
-@defproc[(issue-license [#:private-key private-key path-string?]
-                        [#:product product string?]
-                        [#:subject subject string?]
-                        [#:expiry expiry (or/c #f string?) #f]
-                        [#:machine-id machine-id (or/c #f string?) #f]
-                        [#:out output (or/c string? path?) "app.license"])
-         path?]{}
-@defproc[(validate-license [license-file (or/c string? path?)]
-                           [#:public-key public-key path-string?]
-                           [#:product product string?]
-                           [#:machine-id machine-id string? (machine-id)])
-         hash?]{}
-@defproc[(license-valid? [license-file (or/c string? path?)]
-                         [#:public-key public-key path-string?]
-                         [#:product product string?]
-                         [#:machine-id machine-id string? (machine-id)])
-         boolean?]{}
-@defproc[(machine-id) string?]{}
-@defproc[(days-until-expiry [expiry string?]) exact-integer?]{}
-
 @section{File Dialogs}
 
 @defmodule[glaze/dialogs]
@@ -1383,8 +1354,6 @@ the NSIS Add/Remove Programs identity.
  raco glaze init <name>                Create a native desktop project
  raco glaze dev                        Run the project's native main.rkt
  raco glaze build                      Build a distributable / installer
- raco glaze keygen [--out <dir>]       Create an RSA keypair for licenses
- raco glaze license sign|verify        Sign or verify license files
  raco glaze help                       Show help
 }
 

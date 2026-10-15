@@ -222,8 +222,6 @@ raco glaze init <name>
 raco glaze dev
 raco glaze schema write|check [--json]
 raco glaze build
-raco glaze keygen
-raco glaze license
 raco glaze help
 ```
 
@@ -249,7 +247,6 @@ glaze/
 │   ├── build.rkt
 │   ├── assets.rkt
 │   ├── update.rkt
-│   ├── license.rkt
 │   ├── dialogs.rkt
 │   ├── deeplink.rkt
 │   ├── autolaunch.rkt
@@ -403,11 +400,8 @@ Windows GUI 构建使用 `raco exe --gui`，因此用户可能看不到 stderr�
 
 installer toolchain 缺失时降级 zip/tar.gz 并响亮告警是允许的，因为那只是**分发格式**降级；不要把这种语义复制到应用 UI runtime。
 
-## License / Update
+## Update
 
-- license：RSA-2048/SHA-256，系统 `openssl` CLI；
-- `machine-id` 返回稳定摘要，不直接暴露原始系统 ID；
-- `validate-license` 的 reason tag 是稳定接口，修改前先改测试；
 - update manifest 可带 `sha256`；
 - `verify-file-sha256` 返回 `#f` 同时可能代表“不匹配”或“无法校验”，绝不能把 `#f` 当验证成功。
 

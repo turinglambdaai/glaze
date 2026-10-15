@@ -6,7 +6,6 @@
          glaze-cli/inspect
          glaze-cli/private/build-command
          glaze-cli/private/init
-         glaze-cli/private/license-command
          glaze-cli/private/run
          glaze-cli/private/schema
          glaze-cli/private/update-command)
@@ -18,13 +17,11 @@
   (displayln "  init <name>   Create a native Glaze desktop project")
   (displayln "  dev           Run this project's native Glaze desktop app")
   (displayln "  build         Build a distributable (raco exe + raco distribute)")
-  (displayln "  keygen        Create an RSA keypair for license signing")
   (displayln "  updater-keygen  Create an Ed25519 keypair for update signing")
   (displayln "  update-sign   Sign an update artifact (Ed25519 over its sha256)")
   (displayln "  update-verify Verify an update artifact signature")
   (displayln "  manifest-sign Sign a validated update manifest")
   (displayln "  manifest-verify Verify a signed update manifest")
-  (displayln "  license       Sign or verify offline license files")
   (displayln "  install       Pin the glaze package to a revision and link it")
   (displayln "  doctor        Diagnose package/WebView readiness (--json for agents)")
   (displayln "  inspect       Show project edit/verification map (--json for agents)")
@@ -79,8 +76,6 @@
      ["schema" (exit (run-schema-command rest))]
      ["verify" (exit (verify-app))]
      ["build" (build-command rest)]
-     ["keygen" (keygen-command rest)]
-     ["license" (license-command rest)]
      ["updater-keygen" (updater-keygen-command rest)]
      ["update-sign" (updater-sign-command rest)]
      ["update-verify" (updater-verify-command rest)]

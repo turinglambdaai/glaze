@@ -79,6 +79,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   single-source work queue, file ownership rules, validation ladder, and stop
   conditions for architecture-sensitive changes.
 
+### Removed
+
+- Removed the built-in RSA product-licensing module and the `raco glaze keygen` /
+  `raco glaze license` commands. Product entitlement is deliberately outside
+  Glaze's framework boundary; applications may compose with
+  [Permit](https://github.com/turinglambdaai/permit) or another independent
+  entitlement library instead of framework-owned business policy. Glaze does
+  not depend on Permit.
+
 ## [0.15.0] - 2026-10-14
 
 ### Added

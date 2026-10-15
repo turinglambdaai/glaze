@@ -23,7 +23,6 @@
          "assets.rkt"
          "build.rkt"
          "app.rkt"
-         "license.rkt"
          "dialogs.rkt"
          "deeplink.rkt"
          "autolaunch.rkt"
@@ -52,7 +51,6 @@
                        "sys/main.rkt"
                        "hotkey/main.rkt"
                        "update.rkt"
-                       "license.rkt"
                        "dialogs.rkt"
                        "deeplink.rkt"
                        "autolaunch.rkt")

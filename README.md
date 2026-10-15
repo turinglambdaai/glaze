@@ -132,13 +132,11 @@ raco glaze schema check --json # Reject breaking application API changes
 raco glaze dev               # Run this project's native desktop app
 raco glaze verify            # Assert title/URL and capture the native window
 raco glaze build             # Build a distributable (exe + bundled assets)
-raco glaze keygen            # Create an RSA keypair for license signing
 raco glaze updater-keygen    # Create an Ed25519 update-signing keypair
 raco glaze update-sign       # Sign an update artifact
 raco glaze update-verify     # Verify an artifact and pinned-key signature
 raco glaze manifest-sign     # Validate and sign a complete update manifest
 raco glaze manifest-verify   # Verify a manifest signature and pinned key id
-raco glaze license           # Sign or verify offline license files
 raco glaze help              # Show help
 ```
 
@@ -202,28 +200,9 @@ raco glaze build --name myapp --sign 40HEXCHARS --installer
 
 Details: `--sign` takes a codesign identity (macOS) or a SHA-1 thumbprint / subject name for `signtool` (Windows). Hardened runtime is applied automatically on macOS unless `--no-hardened-runtime` is passed (and is skipped for ad-hoc, where its library validation would reject the app's own framework). `--notarize <keychain-profile>` submits the built dmg via `notarytool`, waits, and staples the ticket. `--entitlements <file>`, `--timestamp-url <url>` round it out. Signing failures abort the build; a *missing toolchain* degrades with a loud warning.
 
-### Licensing (paid apps)
+### Product entitlements
 
-`glaze/license` ships an offline license-key scheme with zero native dependencies — RSA-2048/SHA-256 signatures via the system `openssl` CLI:
-
-```bash
-raco glaze keygen --out keys
-raco glaze license sign --key keys/private.pem --product "MyApp" \
-  --subject "customer@example.com" --expiry 2027-12-31 --out app.license
-raco glaze license verify --pub keys/public.pem --product "MyApp" app.license
-```
-
-```racket
-(require glaze/license)
-
-(define r (validate-license "app.license" #:public-key "keys/public.pem" #:product "MyApp"))
-(unless (hash-ref r 'valid)
-  (error 'myapp "license invalid: ~a" (hash-ref r 'reason)))
-
-(issue-license ... #:machine-id (machine-id))
-```
-
-Failure reasons are stable tags (`missing-file`, `malformed`, `signature`, `product`, `expired`, `machine`, `openssl-unavailable`) suitable for UI messages. Honest scope: this defends against casual license sharing — a local attacker can always patch a binary; it is not tamper resistance.
+Product licensing is intentionally outside Glaze's framework boundary. Applications that need offline-verifiable commercial entitlements can compose Glaze with [Permit](https://github.com/turinglambdaai/permit) or another independent entitlement library; Glaze does not depend on it. Product entitlements and Glaze's update-artifact signatures remain separate concerns and keys.
 
 ### Update integrity
 

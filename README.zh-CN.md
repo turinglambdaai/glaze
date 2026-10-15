@@ -148,8 +148,6 @@ raco glaze doctor --json  # 检查包与原生 WebView 就绪状态
 raco glaze dev           # 运行当前项目的原生桌面应用
 raco glaze verify        # 断言 title/URL 并捕获原生窗口截图
 raco glaze build         # 构建可分发包（exe + 内置资源）
-raco glaze keygen        # 生成用于许可证签名的 RSA 密钥对
-raco glaze license       # 签发 / 校验离线许可证文件
 raco glaze help          # 显示帮助
 ```
 
@@ -185,22 +183,9 @@ raco glaze build --name myapp --sign 40HEXCHARS --installer
 
 签名失败会中止构建；缺失签名工具链时会明确告警。
 
-### 许可证（收费应用）
+### 产品权益授权
 
-```bash
-raco glaze keygen --out keys
-raco glaze license sign --key keys/private.pem --product "MyApp" \
-  --subject "customer@example.com" --expiry 2027-12-31 --out app.license
-raco glaze license verify --pub keys/public.pem --product "MyApp" app.license
-```
-
-```racket
-(require glaze/license)
-
-(define r (validate-license "app.license" #:public-key "keys/public.pem" #:product "MyApp"))
-(unless (hash-ref r 'valid)
-  (error 'myapp "许可证无效：~a" (hash-ref r 'reason)))
-```
+产品许可证有意放在 Glaze 框架边界之外。需要离线可验证商业权益的应用可以将 Glaze 与 [Permit](https://github.com/turinglambdaai/permit) 或其他独立权益库组合使用；Glaze 本身不依赖它。产品权益签名与 Glaze 的更新制品签名始终是两套独立职责和密钥。
 
 ## 项目结构
 
