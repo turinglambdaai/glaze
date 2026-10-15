@@ -86,35 +86,38 @@
                           (lambda (output) (write-bytes #"test" output)))
 
    ;; The exact payload bytes are signed, and key-id pinning rejects a valid
-   ;; signature made for an unexpected release key.
-   (signing-keygen #:private-key private-key #:public-key public-key)
-   (define signed-output (open-output-bytes))
-   (write-signed-update-manifest manifest private-key "release-2026" signed-output)
-   (define signed-bytes (get-output-bytes signed-output))
-   (define verified
-     (verify-signed-update-manifest (open-input-bytes signed-bytes)
-                                    public-key
-                                    #:key-id "release-2026"))
-   (check-equal? (update-manifest-version verified) "1.2.0")
-   (check-exn #rx"unexpected key"
-              (lambda ()
-                (verify-signed-update-manifest (open-input-bytes signed-bytes)
-                                               public-key
-                                               #:key-id "wrong-key")))
+   ;; signature made for an unexpected release key. Signing needs the
+   ;; OpenSSL 3 CLI; environments without it (package-build sandboxes) skip
+   ;; the signature leg instead of failing.
+   (when (openssl-available?)
+     (signing-keygen #:private-key private-key #:public-key public-key)
+     (define signed-output (open-output-bytes))
+     (write-signed-update-manifest manifest private-key "release-2026" signed-output)
+     (define signed-bytes (get-output-bytes signed-output))
+     (define verified
+       (verify-signed-update-manifest (open-input-bytes signed-bytes)
+                                      public-key
+                                      #:key-id "release-2026"))
+     (check-equal? (update-manifest-version verified) "1.2.0")
+     (check-exn #rx"unexpected key"
+                (lambda ()
+                  (verify-signed-update-manifest (open-input-bytes signed-bytes)
+                                                 public-key
+                                                 #:key-id "wrong-key")))
 
-   ;; A modified payload remains valid JSON but cannot retain the signature.
-   (define wrapper (read-json (open-input-bytes signed-bytes)))
-   (define payload (base64-decode (string->bytes/utf-8 (hash-ref wrapper 'payload))))
-   (define tampered-wrapper
-     (hash-set wrapper
-               'payload
-               (bytes->string/utf-8 (base64-encode (bytes-append payload #" ") #""))))
-   (define tampered-output (open-output-bytes))
-   (write-json tampered-wrapper tampered-output)
-   (check-exn #rx"signature verification failed"
-              (lambda ()
-                (verify-signed-update-manifest (open-input-bytes (get-output-bytes tampered-output))
-                                               public-key)))
+     ;; A modified payload remains valid JSON but cannot retain the signature.
+     (define wrapper (read-json (open-input-bytes signed-bytes)))
+     (define payload (base64-decode (string->bytes/utf-8 (hash-ref wrapper 'payload))))
+     (define tampered-wrapper
+       (hash-set wrapper
+                 'payload
+                 (bytes->string/utf-8 (base64-encode (bytes-append payload #" ") #""))))
+     (define tampered-output (open-output-bytes))
+     (write-json tampered-wrapper tampered-output)
+     (check-exn #rx"signature verification failed"
+                (lambda ()
+                  (verify-signed-update-manifest (open-input-bytes (get-output-bytes tampered-output))
+                                                 public-key))))
 
    ;; Portable replacement keeps a rollback copy and installs atomically.
    (call-with-output-file target-file
