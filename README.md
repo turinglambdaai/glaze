@@ -202,7 +202,7 @@ Details: `--sign` takes a codesign identity (macOS) or a SHA-1 thumbprint / subj
 
 ### Product entitlements
 
-Product licensing is intentionally outside Glaze's framework boundary. Applications that need offline-verifiable commercial entitlements can compose Glaze with [Permit](https://github.com/turinglambdaai/permit) or another independent entitlement library; Glaze does not depend on it. Product entitlements and Glaze's update-artifact signatures remain separate concerns and keys.
+Product licensing is intentionally outside Glaze's framework boundary. Applications that need offline-verifiable commercial entitlements can compose Glaze with [Permit](https://github.com/turinglambdaai/permit) or another independent entitlement library; Glaze does not depend on it. Applications that need online checkout, payment-event handling, or credential delivery may additionally use [Commerce](https://github.com/turinglambdaai/commerce) as a product/service dependency. Manual-sale and fully offline products do not need Commerce. Provider secrets, Commerce secrets, Permit signing, Glaze update signing, and platform code signing remain separate concerns and keys.
 
 ### Update integrity
 

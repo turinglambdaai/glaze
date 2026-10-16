@@ -15,8 +15,8 @@
 
 ## 家族协作契约
 
-四仓库依赖图、职责路由与发布顺序的权威说明在 Keel 的
-[`CONTRIBUTING.md`](https://github.com/turinglambdaai/keel/blob/main/CONTRIBUTING.md#family-operating-model)。
+五仓库依赖图、职责路由、发布顺序与信任边界的权威说明在 Keel 的
+[`docs/family-architecture.md`](https://github.com/turinglambdaai/keel/blob/main/docs/family-architecture.md)。
 Glaze 的当前实现队列仍只由 `docs/1.0-plan.md` 管理，不把具体 milestone
 复制到家族文档。
 
@@ -34,7 +34,7 @@ Glaze 是一个 **Tauri-like framework for Racket**：
 
 ### 商业权益边界
 
-Glaze 不拥有 entitlement、trial、activation、seat、subscription、payment、account——这些归 [Permit](https://github.com/turinglambdaai/permit)：它是产品的并列依赖（`product -> Glaze`、`product -> Permit`），永远不是 Glaze 的依赖（`Glaze -X-> Permit`）。Glaze 的更新制品签名、OS 代码签名与 Permit 凭证签名属于不同信任域，必须分钥分轮换流程。权威契约在 Permit 的 [`docs/framework-integration.md`](https://github.com/turinglambdaai/permit/blob/main/docs/framework-integration.md)，此处只保留摘要，不要复述。产品可以用 Glaze 的通用 secure-storage 保存 Permit 凭证、本地 trial 状态或 `installation_id`，数据语义仍归产品与 Permit；也不要重新加入 `glaze/license`、授权 CLI 或框架内置商业策略。
+Glaze 不拥有 entitlement、trial、activation、seat、subscription、payment、checkout 或 account。签名权益语义归 [Permit](https://github.com/turinglambdaai/permit)，可选在线商业编排归 [Commerce](https://github.com/turinglambdaai/commerce)；二者都由产品组合，永远不是 Glaze 的依赖（`Glaze -X-> Permit/Commerce`）。Glaze 更新制品签名、OS 代码签名、Permit 凭证签名与 Commerce secrets 属于不同信任域，必须分钥分轮换流程。权威本地权益契约在 Permit 的 [`docs/framework-integration.md`](https://github.com/turinglambdaai/permit/blob/main/docs/framework-integration.md)，此处只保留摘要，不要复述。产品可以用 Glaze 的通用 secure-storage 保存 Permit 凭证、本地 trial 状态或 `installation_id`，数据语义仍归产品与 Permit；也不要重新加入 `glaze/license`、授权 CLI、支付 route 或框架内置商业策略。
 
 ### 最重要的产品契约：GUI-first
 

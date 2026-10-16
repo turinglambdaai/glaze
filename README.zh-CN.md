@@ -185,7 +185,7 @@ raco glaze build --name myapp --sign 40HEXCHARS --installer
 
 ### 产品权益授权
 
-产品许可证有意放在 Glaze 框架边界之外。需要离线可验证商业权益的应用可以将 Glaze 与 [Permit](https://github.com/turinglambdaai/permit) 或其他独立权益库组合使用；Glaze 本身不依赖它。产品权益签名与 Glaze 的更新制品签名始终是两套独立职责和密钥。
+产品许可证有意放在 Glaze 框架边界之外。需要离线可验证商业权益的应用可以将 Glaze 与 [Permit](https://github.com/turinglambdaai/permit) 或其他独立权益库组合使用；Glaze 本身不依赖它。需要在线结账、支付事件处理或凭证交付时，产品还可以把 [Commerce](https://github.com/turinglambdaai/commerce) 作为独立的产品/服务层依赖；手工销售与完全离线产品不需要 Commerce。支付渠道密钥、Commerce 密钥、Permit 权益签名、Glaze 更新签名和平台代码签名始终分属不同职责与信任域。
 
 ## 项目结构
 

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Extend the family boundary to Commerce: online payment orchestration and
+  credential delivery stay optional product/service concerns and never become
+  Glaze dependencies or framework routes.
 - Commercial installer experience for `raco glaze build --installer`. The
   macOS DMG switches to the branded drag-to-install layout when the project
   passes `--dmg-background`: the volume stages the bundle next to an

@@ -26,8 +26,14 @@ product may compose Glaze with
 but Glaze does not depend on Permit and does not own entitlement, trial,
 activation, seat, subscription, payment, or account policy. Glaze may provide
 general secure storage that a product chooses for Permit state. Update-artifact
-verification remains Glaze distribution infrastructure and uses a separate
-trust domain from Permit credential signing and OS publisher credentials.
+verification remains Glaze distribution infrastructure. An online product may
+separately use [Commerce](https://github.com/turinglambdaai/commerce) for
+checkout, authenticated payment events, commercial projections, and credential
+delivery. Glaze does not define a Commerce client protocol or import Commerce.
+Provider secrets, Commerce secrets, Permit credential signing, update signing,
+and OS publisher credentials remain separate trust domains. The complete
+cross-repository rules live in the
+[family architecture](https://github.com/turinglambdaai/keel/blob/main/docs/family-architecture.md).
 
 ## Module boundaries
 
