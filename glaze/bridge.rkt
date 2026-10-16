@@ -19,10 +19,8 @@
 ;;   - event sequence numbers on the SSE stream (id: lines) so a consumer
 ;;     can detect that the backlog overflow dropped something.
 ;;
-;; The envelope layer is transport-agnostic on purpose: when the native
-;; message-handler transport lands (docs/architecture-1.0.md), these same
-;; structures move to it unchanged. See also rivet#196 — the value shapes
-;; are the working proposal for the shared Glaze/Rivet protocol core.
+;; The envelope layer is transport-agnostic on purpose: native and HTTP
+;; carriers share these structures and dispatch semantics (docs/architecture.md).
 
 (require json
          racket/list

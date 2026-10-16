@@ -1,7 +1,7 @@
 #lang racket/base
 
-;; 1.0-gate resource-leak soak (docs/architecture-1.0.md step: resource-leak
-;; soak). Exercises the two long-lived resource cycles headlessly:
+;; Resource-leak soak for the 1.0 evidence gates (docs/1.0-plan.md). Exercises
+;; the two long-lived resource cycles headlessly:
 ;;
 ;;   1. native-transport create/dispatch/teardown, repeated N times —
 ;;      asserting thread count returns to baseline after each cycle;

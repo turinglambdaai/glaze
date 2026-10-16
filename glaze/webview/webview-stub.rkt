@@ -31,8 +31,8 @@
                       #:devtools? [devtools? #f]
                       #:native-transport [native-transport #f]
                       #:on-close [on-close (lambda () (void))])
-  ;; The native transport ships on macOS first (docs/architecture-1.0.md
-  ;; migration step 5 covers the ports).
+  ;; Native transport is required on every production host
+  ;; (docs/architecture.md); the stub cannot emulate it.
   (when native-transport
     (error 'open-webview "the native transport is not supported on this platform yet"))
   #f)

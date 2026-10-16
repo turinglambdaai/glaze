@@ -183,7 +183,7 @@
                         (callback-remove! window)
                         (proc))))
 
-;; ---- native transport wiring (docs/architecture-1.0.md) ----
+;; ---- native transport wiring (docs/architecture.md) ----
 ;; With a native-transport attached, the page is loaded from the controlled
 ;; glaze://app/ scheme instead of the loopback HTTP server:
 ;;   - GlazeSchemeHandler serves frontend resources from the transport's

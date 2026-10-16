@@ -161,7 +161,7 @@
   (mv-stop)
   (delete-directory/files mv-dir)
 
-  ;; ---- native transport end-to-end (docs/architecture-1.0.md step 4) ----
+  ;; ---- native transport end-to-end (docs/1.0-plan.md gate G4) ----
   ;; The page loads from the controlled glaze://app/ scheme (never a TCP
   ;; port) and drives the backend through the GLZ1 message handler: the
   ;; inline script invokes api/ping, then posts the result to api/record.

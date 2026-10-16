@@ -1,7 +1,7 @@
 #lang racket/base
 
-;; Typed command declarations (docs/architecture-1.0.md step 6, Tauri
-;; command+TS parity). Keel stays the canonical schema; this module adds the
+;; Typed command declarations (docs/architecture.md). Keel stays the canonical
+;; schema; this module adds the
 ;; three things a Racket-side declaration needs on top of it:
 ;;
 ;;   1. TYPE DESCRIPTORS usable in route declarations anywhere a predicate

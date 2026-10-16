@@ -15,6 +15,11 @@
 
 ## 家族协作契约
 
+四仓库依赖图、职责路由与发布顺序的权威说明在 Keel 的
+[`CONTRIBUTING.md`](https://github.com/turinglambdaai/keel/blob/main/CONTRIBUTING.md#family-operating-model)。
+Glaze 的当前实现队列仍只由 `docs/1.0-plan.md` 管理，不把具体 milestone
+复制到家族文档。
+
 Glaze 与 Rivet 共享传输中立的契约包 `keel`。家族包只经 catalog 发布包消费，禁止 vendor 或手抄源码；每个家族依赖声明 `#:version` 下限 = 本仓库测试套件实际覆盖的最低版本，抬下限与声明它的 CHANGELOG 条目在同一次改动落地。每周的 *Family compatibility* workflow（`.github/workflows/family-compat.yml`）把家族包升到最新并跑全量测试；红了就地适配或修上游，先把 `main` 修绿再做其他事。
 
 ## 项目定位

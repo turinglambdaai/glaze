@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; 1.0-gate fuzzing (docs/architecture-1.0.md step: protocol fuzzing).
+;; GLZ1 protocol fuzzing for the 1.0 evidence gates (docs/1.0-plan.md).
 ;;
 ;; Structured, deterministic (fixed-seed xorshift) fuzzing of the GLZ1
 ;; trust boundary — the decoders a hostile page can reach:

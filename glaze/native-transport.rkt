@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; The native host transport (docs/architecture-1.0.md) and the pieces the
+;; The native host transport (docs/architecture.md) and the pieces the
 ;; HTTP development adapter shares with it.
 ;;
 ;; In a packaged app the WebView never talks to a TCP port. The page loads

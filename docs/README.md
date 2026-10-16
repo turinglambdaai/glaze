@@ -8,13 +8,11 @@ This directory has one owner for each durable decision. New documents must link 
 - [Glaze 1.0 plan](1.0-plan.md): the active sequence, gates, evidence, work ownership, and next implementation handoff. Delete it after the 1.0 gates close.
 - [API stability](api-stability.md): public-module tiers, compatibility rules, and the exact export gate.
 - [AI implementation handoff](agent-handoff.md): the one-slice execution, ownership, validation, and stop rules used by ZCode and other agents.
-- [Glaze 1.0 runtime RFC](architecture-1.0.md): historical rationale and proposed directions. It is not the active progress tracker.
 
 ## Developer and product contracts
 
 - [Agent-native workflow](agent-native.md): project inspection, diagnosis, editing, and native-window verification.
 - [GUI-first contract](gui-first.md): why application startup requires a native WebView and never falls back to a browser tab.
 - [Releasing](RELEASING.md): framework release procedure and provenance requirements.
-- [Winget](WINGET.md): Windows package-manager publication notes.
 
 The generated HTML site under `docs/index.html` is product-facing material. The Racket API reference lives under `glaze-doc/scribblings/`. Durable engineering decisions belong in the Markdown owners above, then user-facing material should link to or summarize them.

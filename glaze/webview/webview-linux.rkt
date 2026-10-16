@@ -104,7 +104,7 @@
               "g_signal_connect_data"
               (_fun _pointer _string _fpointer _pointer _pointer _uint -> _uintptr)))
 
-;; ---- native transport (docs/architecture-1.0.md migration step 5) ----
+;; ---- native transport (docs/architecture.md) ----
 ;; WebKitGTK shares WKWebView's window.webkit.messageHandlers JS API, so the
 ;; bootstrap's webkit branch works unchanged; scheme resources go through
 ;; webkit_web_context_register_uri_scheme on the default context (shared

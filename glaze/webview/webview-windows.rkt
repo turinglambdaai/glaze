@@ -419,7 +419,7 @@
            (define-values (hr p) (fn cwv))
            (and (= hr S_OK) (wstr->string p))))))
 
-;; ---- native transport (docs/architecture-1.0.md migration step 5) ----
+;; ---- native transport (docs/architecture.md) ----
 ;; vtable indices verified against the official WebView2.h (Microsoft.Web.
 ;; WebView2 nupkg): ICoreWebView2 PostWebMessageAsJson = 32,
 ;; add_WebMessageReceived = 34, add_WebResourceRequested = 55,
