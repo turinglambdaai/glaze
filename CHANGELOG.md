@@ -79,6 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   single-source work queue, file ownership rules, validation ladder, and stop
   conditions for architecture-sensitive changes.
 
+### Changed
+
+- Declare the `keel` dependency floor (`#:version "0.3.1"`): every family
+  dependency now pins the lowest version the test suite actually covers, and
+  floor bumps ship in the same changelog entry that raises the tested
+  version.
+
 ### Removed
 
 - Removed the built-in RSA product-licensing module and the `raco glaze keygen` /

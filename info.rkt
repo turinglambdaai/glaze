@@ -16,7 +16,9 @@
     "db-lib"
     ;; Shared application contract (value codec, structured errors,
     ;; lifecycle, schema), resolved through the Racket package catalog.
-    "keel"
+    ;; The floor is the lowest version this suite actually covers; raise
+    ;; it in the same CHANGELOG entry that raises the tested version.
+    ["keel" #:version "0.3.1"]
     ;; Tests ship inside this package, so rackunit is a runtime dep.
     "rackunit-lib"))
 (define build-deps
