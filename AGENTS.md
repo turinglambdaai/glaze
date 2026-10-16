@@ -13,6 +13,10 @@
 
 仓库状态是 agent-to-agent handoff。一次只实现 `docs/1.0-plan.md` 中一个有边界的 slice，完成后更新证据和 “Next implementation handoff”。公共 API 变更还必须同步 `glaze-test/public-api-test.rkt`、`docs/api-stability.md` 和 `CHANGELOG.md`；不能通过修改快照来掩盖意外扩张。
 
+## 家族协作契约
+
+Glaze 与 Rivet 共享传输中立的契约包 `keel`。家族包只经 catalog 发布包消费，禁止 vendor 或手抄源码；每个家族依赖声明 `#:version` 下限 = 本仓库测试套件实际覆盖的最低版本，抬下限与声明它的 CHANGELOG 条目在同一次改动落地。每周的 *Family compatibility* workflow（`.github/workflows/family-compat.yml`）把家族包升到最新并跑全量测试；红了就地适配或修上游，先把 `main` 修绿再做其他事。
+
 ## 项目定位
 
 Glaze 是一个 **Tauri-like framework for Racket**：
@@ -25,23 +29,7 @@ Glaze 是一个 **Tauri-like framework for Racket**：
 
 ### 商业权益边界
 
-Glaze 负责应用运行时、Native WebView、通用安全存储、打包、发布和更新完整性；
-它不负责产品 entitlement、trial、activation、seat、subscription 或 payment
-policy。商业产品可以在产品层同时依赖 Glaze 与
-[Permit](https://github.com/turinglambdaai/permit)，但依赖方向必须保持为：
-
-```text
-product -> Glaze
-product -> Permit
-Glaze   -X-> Permit
-```
-
-不要重新加入 `glaze/license`、授权 CLI 或框架内置商业策略，也不要让 Glaze
-依赖 Permit。产品可以使用 Glaze 的通用 secure-storage 能力保存 Permit 凭证、
-本地 trial 状态或 `installation_id`，但这些数据的语义仍由产品与 Permit 拥有。
-Glaze 的更新制品签名、OS 代码签名和 Permit 凭证签名属于不同信任域，必须使用
-独立密钥与轮换流程。完整的共享契约见 Permit 的
-[`docs/framework-integration.md`](https://github.com/turinglambdaai/permit/blob/main/docs/framework-integration.md)。
+Glaze 不拥有 entitlement、trial、activation、seat、subscription、payment、account——这些归 [Permit](https://github.com/turinglambdaai/permit)：它是产品的并列依赖（`product -> Glaze`、`product -> Permit`），永远不是 Glaze 的依赖（`Glaze -X-> Permit`）。Glaze 的更新制品签名、OS 代码签名与 Permit 凭证签名属于不同信任域，必须分钥分轮换流程。权威契约在 Permit 的 [`docs/framework-integration.md`](https://github.com/turinglambdaai/permit/blob/main/docs/framework-integration.md)，此处只保留摘要，不要复述。产品可以用 Glaze 的通用 secure-storage 保存 Permit 凭证、本地 trial 状态或 `installation_id`，数据语义仍归产品与 Permit；也不要重新加入 `glaze/license`、授权 CLI 或框架内置商业策略。
 
 ### 最重要的产品契约：GUI-first
 
