@@ -893,6 +893,75 @@ frozen: @racketmodname[glaze/deeplink] (OS URL-scheme handover) and
 any release without a compat baseline; a module graduates into its layer
 after surviving a release cycle unchanged under real product usage.}
 
+@section[#:tag "typed-declarations"]{Typed Command Declarations}
+
+@defmodule[glaze/types]
+
+Typed declarations give a route's parameters and results one expression
+that both types them in the keel command schema and validates the wire
+value — the declaration is the validation. Descriptors are accepted
+anywhere @racket[define-api-routes] takes a predicate:
+
+@racketblock[
+(define Item (grecord 'Item "id" GInt64 "name" GString))
+
+(define-api-routes api
+  [(POST "api/counter/bump")
+   (bump [delta GInt64 1])
+   (begin (bump! delta) (hasheq 'count (unbox count)))]
+  [(GET "api/items/:id" #:returns Item)
+   (item id)
+   (hasheq 'id id)])
+]
+
+The scalar descriptors are @racket[GNull], @racket[GBool],
+@racket[GInt64], @racket[GFloat64], @racket[GString], @racket[GBytes]
+(a base64 string on the wire), and @racket[GValue] (any jsexpr).
+Combinators are @racket[glist], @racket[goptional], and @racket[gmap].
+Named types — @racket[(grecord 'Item "id" GInt64 ...)] and
+@racket[(genum 'Color 'red 'green 'blue)] — are referenced by value:
+using @racket[Item] inside another declaration @emph{is} the reference,
+and named types render as TypeScript interfaces and unions.
+
+Wire conventions: @tt{null} is JSON null, unknown object keys are
+tolerated so newer clients keep working against older apps, and a wire
+value that fails its descriptor is a typed @tt{invalid-args} error
+naming the parameter — both transports share the same validator
+(@racket[validate-type] / @racket[validate-jsexpr]).
+
+@defproc[(grecord [name symbol?] [field string?] [type type-descriptor?] ... ...) grecord?]{}
+@defproc[(genum [name symbol?] [case symbol?] ...) genum?]{}
+@defproc[(glist [element type-descriptor?]) type-descriptor?]{}
+@defproc[(goptional [element type-descriptor?]) type-descriptor?]{}
+@defproc[(gmap [value-type type-descriptor?]) type-descriptor?]{}
+@defproc[(validate-type [descriptor type-descriptor?] [value jsexpr?])
+         (values boolean? any/c)]{
+Wire check; on failure the second value names the offending position.
+}
+@defproc[(validate-jsexpr [type any/c] [value jsexpr?])
+         (values boolean? any/c)]{
+The same check for plain keel types, used by the invoke pipeline for
+schema commands declared without descriptors.
+}
+
+Declared types surface in three places automatically: @tt{/glaze/hello}
+carries real keel types for every typed command,
+@tt{/glaze/api.d.ts} (served by both transports) carries the generated
+TypeScript client declaration —
+@racket[generate-ts-declarations] renders it — and
+@racket[glaze/schema-compat] classifies an old app-schema against a new
+one:
+
+@defmodule[glaze/schema-compat]
+
+@defproc[(schema-compat? [v any/c]) boolean?]{}
+@defproc[(schema-compat-report [old any/c] [new any/c]) (hash/c symbol? any/c)]{
+Deterministic compatibility report between two app schemas: every
+breaking change (removed command, renamed parameter, changed wire type)
+is named, so @racket[raco glaze schema check] can gate a release.
+}
+@defproc[(command-compatible? [old any/c] [new any/c]) boolean?]{}
+
 @section[#:tag "native-transport"]{Native Transport}
 
 @defmodule[glaze/native-transport]
