@@ -266,8 +266,9 @@ myapp/
 
 Capability 是显式启用、默认拒绝的安全边界。一旦向 `run-app` 传入
 `#:capability`，每条 API 路由都必须声明 `#:permission`；未声明或未授权的
-路由直接返回 403，handler 不会执行。`run-app` 会自动生成 API token 并通过
-一次性 bootstrap URL 绑定到 WebView。
+路由直接返回 403，handler 不会执行。HTTP 适配器下，`run-app` 会自动生成 API token 并通过
+一次性 bootstrap URL 绑定到 WebView；原生 GLZ1 模式无需向页面暴露 token，
+但仍执行 capability 权限检查。
 
 ```racket
 (define main-capability
