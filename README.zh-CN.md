@@ -19,7 +19,7 @@ Racket 自带的 `racket/gui` 可以用，但很难做出现代化的产品级 U
 - **Racket 写逻辑** —— 完整的宏系统、contracts、模式匹配
 - **Web 写界面** —— Tailwind、Svelte、React 或任何 Web 框架
 - **真正的桌面外壳** —— 系统原生窗口 + 嵌入式 WebView
-- **JSON API 桥接** —— 页面用普通 `fetch("/api/...")` 调用 Racket
+- **类型化 API 桥接** —— 生成的 JS 客户端经原生 GLZ1 或显式 HTTP 适配器调用 Racket
 - **运行时权限能力** —— API 路由默认拒绝，并支持文件路径与命令参数范围
 - **受限文件系统插件** —— 文本/二进制、目录、元数据、复制/移动/删除
 - **受限 Shell 插件** —— 有界输出、超时、可管理的后台子进程
@@ -41,13 +41,13 @@ Glaze 明确采用 **GUI-first** 设计。原生 WebView 运行时缺失或初�
 | 后端语言 | Racket | Rust | JS/Node | Go |
 | 原生工具链 | **无需**（纯 FFI） | Rust + cargo | 无 | Go + WebView2 依赖 |
 | 二进制体积 | 极小 | 小 | 100 MB+ | 小 |
-| 前后端桥接 | HTTP JSON 路由（`fetch`） | `invoke()` IPC | Node API | 绑定层 |
+| 前后端桥接 | 原生 GLZ1 + HTTP 适配器 | `invoke()` IPC | Node API | 绑定层 |
 | 运行时权限 | 路由权限 + 资源范围 | Capabilities + permissions | 应用自行实现 | 应用自行实现 |
 | WebView 后端 | WebView2 / WKWebView / WebKitGTK | 系统 WebView | 自带 Chromium | WebView2/WKWebView |
 | WebView 缺失时 | **明确失败 + 安装指引** | 前置依赖错误 | 不适用（自带） | 前置依赖错误 |
 | Agent 友好的 UI 验证（title/url/截图） | **内置** | 需 WebDriver | 需 CDP | 有限 |
 
-三个平台的 WebView 后端均通过真窗口 CI e2e（open、加载、截图、导航、关闭、on-close）。剩余诚实差距：GLZ1 仍运行在本机 HTTP/SSE 上，还不是原生 WebView 消息通道；Linux 需要桌面会话或 Xvfb。
+三个平台的 WebView 后端均通过真窗口 CI e2e（open、加载、截图、导航、关闭、on-close）。原生 GLZ1 WebView 消息通道已覆盖三个平台；0.x 的 `run-app` 默认仍使用原生 WebView 内的 HTTP 适配器。Linux 需要桌面会话或 Xvfb。
 
 ## 平台支持状态
 
@@ -130,7 +130,9 @@ racket main.rkt
 raco glaze dev
 ```
 
-会打开一个真正的原生桌面窗口，由本地 Racket 服务驱动。如果缺少 WebView2 / WebKitGTK 等依赖，启动会停止并告诉你需要安装什么，绝不会改成浏览器页面继续运行。
+会打开原生桌面窗口：脚手架默认使用 HTTP 适配器，也可显式启用原生 GLZ1。依赖缺失时会提示修复，不会退回系统浏览器。
+
+**下一步：** 按照[完整入门教程](docs/getting-started.md)添加类型化 Racket 路由、JS 调用、schema 基线和原生验证，再构建应用。
 
 > 想直接从 GitHub 检出安装而不走包索引？
 > ```bash
@@ -145,6 +147,8 @@ raco glaze dev
 raco glaze init <name>   # 创建原生 Glaze 桌面项目
 raco glaze inspect --json # 读取项目、编辑点与验证契约
 raco glaze doctor --json  # 检查包与原生 WebView 就绪状态
+raco glaze schema write   # 有意变更 API 时写入基线
+raco glaze schema check --json # 检查 API 兼容性
 raco glaze dev           # 运行当前项目的原生桌面应用
 raco glaze verify        # 断言 title/URL 并捕获原生窗口截图
 raco glaze build         # 构建可分发包（exe + 内置资源）
@@ -189,28 +193,34 @@ raco glaze build --name myapp --sign 40HEXCHARS --installer
 
 ## 项目结构
 
-一个新的 Glaze 项目结构如下：
+`raco glaze init myapp` 生成的项目目录：
 
-```
+```text
 myapp/
-├── main.rkt          # Racket 入口
+├── main.rkt           # 导出 api，在 module+ main 中启动
+├── glaze.rktd         # schema 模块、绑定与基线路径
+├── glaze-schema.json  # 版本化 API 基线，需提交版本控制
+├── AGENTS.md          # Agent 编辑和验收边界
+├── verify.rkt         # 原生窗口 title/URL/PNG 验证
 └── public/
-    └── index.html    # 前端页面
+    └── index.html     # HTML/CSS/JS 前端
 ```
 
-`raco glaze init` 现在生成的入口就是原生窗口应用。`run-app` 故意放在顶层，这样源码直接运行、`raco glaze dev` 和 `raco glaze build` 的打包 wrapper 都会启动同一套应用逻辑：
+`main.rkt` 导出 `api` 路由列表，并在 `module+ main` 中启动，避免 schema 检查意外打开窗口：
 
 ```racket
 #lang racket/base
-
-(require racket/runtime-path
-         glaze)
-
+(require racket/runtime-path glaze)
 (define-runtime-path public "public")
-
-(run-app #:public-dir public
-         #:title "myapp")
+(define api '())
+(provide api)
+(module+ main
+  (run-app #:public-dir public
+           #:api api
+           #:title "myapp"))
 ```
+
+从这里加入 `define-api-routes`、通过 `glaze.api.*` 调用并更新 schema 的完整流程，请参考[入门教程](docs/getting-started.md)。
 
 ## API
 
