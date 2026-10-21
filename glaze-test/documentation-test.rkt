@@ -53,6 +53,25 @@
                       (find-relative-path repository-root source)
                       destination)))
 
+(define newcomer-guide (build-path docs-root "getting-started.md"))
+(define guide-content (file->string newcomer-guide))
+(for ([expected (in-list '("raco glaze init" "glaze.rktd" "glaze-schema.json"
+                           "AGENTS.md" "verify.rkt" "module+ main"
+                           "define-api-routes" "glaze.api.greet"
+                           "raco glaze schema check --json"
+                           "raco glaze verify" "raco glaze build"))])
+  (check-true (string-contains? guide-content expected)
+              (format "canonical guide must include ~a" expected)))
+
+(for ([readme (in-list '("README.md" "README.zh-CN.md"))])
+  (define path (build-path repository-root readme))
+  (define content (file->string path))
+  (check-not-false (member "docs/getting-started.md" (link-destinations path))
+                   (format "~a must link newcomer guide" readme))
+  (check-false (string-contains? content "GLZ1 still runs over loopback HTTP/SSE"))
+  (check-false (string-contains? content "GLZ1 仍运行在本机 HTTP/SSE"))
+  (check-false (string-contains? content "`run-app` 故意放在顶层")))
+
 (define mapped-guides
   (for/list ([destination (in-list (link-destinations docs-map))])
     (car (string-split destination "#"))))
