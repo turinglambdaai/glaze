@@ -82,11 +82,10 @@
 ;; The Chinese quick-start command overview must stay aligned with the
 ;; update-signing commands advertised by the actual CLI dispatcher.
 (define chinese-readme (file->string (build-path repository-root "README.zh-CN.md")))
-(for ([cmd (in-list '("raco glaze updater-keygen"
-                      "raco glaze update-sign"
-                      "raco glaze update-verify"
-                      "raco glaze manifest-sign"
-                      "raco glaze manifest-verify"))])
+(for ([cmd (in-list '("raco glaze updater-keygen" "raco glaze update-sign"
+                                                  "raco glaze update-verify"
+                                                  "raco glaze manifest-sign"
+                                                  "raco glaze manifest-verify"))])
   (check-true (string-contains? chinese-readme cmd)
               (format "Chinese README must mention CLI command ~a" cmd)))
 
