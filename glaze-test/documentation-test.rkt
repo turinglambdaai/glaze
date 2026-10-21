@@ -75,6 +75,8 @@
                    (format "~a must link newcomer guide" readme))
   (check-false (string-contains? content "GLZ1 still runs over loopback HTTP/SSE"))
   (check-false (string-contains? content "GLZ1 仍运行在本机 HTTP/SSE"))
+  (check-false (string-contains? content "The embedded frontend calls Racket with plain"))
+  (check-false (string-contains? content "嵌入式前端用普通 `fetch"))
   (check-false (string-contains? content "`run-app` 故意放在顶层")))
 
 (define mapped-guides
