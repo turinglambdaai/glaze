@@ -68,6 +68,11 @@
   (check-true (string-contains? guide-content expected)
               (format "canonical guide must include ~a" expected)))
 
+;; The tutorial must teach a type descriptor, not only runtime validation:
+;; plain string? predicates are excluded from the generated command schema.
+(check-true (string-contains? guide-content "[name GString \"World\"]"))
+(check-false (string-contains? guide-content "[name string? \"World\"]"))
+
 (for ([readme (in-list '("README.md" "README.zh-CN.md"))])
   (define path (build-path repository-root readme))
   (define content (file->string path))
