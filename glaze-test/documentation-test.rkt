@@ -79,6 +79,17 @@
   (check-false (string-contains? content "嵌入式前端用普通 `fetch"))
   (check-false (string-contains? content "`run-app` 故意放在顶层")))
 
+;; The Chinese quick-start command overview must stay aligned with the
+;; update-signing commands advertised by the actual CLI dispatcher.
+(define chinese-readme (file->string (build-path repository-root "README.zh-CN.md")))
+(for ([cmd (in-list '("raco glaze updater-keygen"
+                      "raco glaze update-sign"
+                      "raco glaze update-verify"
+                      "raco glaze manifest-sign"
+                      "raco glaze manifest-verify"))])
+  (check-true (string-contains? chinese-readme cmd)
+              (format "Chinese README must mention CLI command ~a" cmd)))
+
 (define mapped-guides
   (for/list ([destination (in-list (link-destinations docs-map))])
     (car (string-split destination "#"))))
