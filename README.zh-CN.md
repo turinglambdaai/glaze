@@ -251,7 +251,7 @@ myapp/
 
 ## JavaScript 桥接
 
-嵌入式前端用普通 `fetch("/api/...")` 调 Racket。本地 HTTP 桥接也方便用 `curl` 等开发工具独立测试。
+嵌入式前端优先使用 `/glaze/api.js` 提供的传输中立客户端（`glaze.api.*`）调用 Racket 路由：`#:transport 'native` 通过 WebView 原生 GLZ1 消息通道通信，不向前端开放本地 TCP 端口；显式使用 HTTP 适配器时才经同源 `fetch`，也可以用 `curl` 测试。类型化路由与前端调用示例见[完整入门教程](docs/getting-started.md)。
 
 ```racket
 (require glaze)
