@@ -152,6 +152,11 @@ raco glaze schema check --json # 检查 API 兼容性
 raco glaze dev           # 运行当前项目的原生桌面应用
 raco glaze verify        # 断言 title/URL 并捕获原生窗口截图
 raco glaze build         # 构建可分发包（exe + 内置资源）
+raco glaze updater-keygen # 生成 Ed25519 更新签名密钥对
+raco glaze update-sign    # 签名更新制品
+raco glaze update-verify  # 校验更新制品签名
+raco glaze manifest-sign  # 校验并签名更新清单
+raco glaze manifest-verify # 校验已签名更新清单
 raco glaze help          # 显示帮助
 ```
 
