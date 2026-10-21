@@ -53,7 +53,7 @@ Replace `main.rkt` with:
 
 (define-api-routes api
   [(POST "api/greet")
-   (greet [name string? "World"])
+   (greet [name GString "World"])
    (hasheq 'message (string-append "Hello, " name "!"))])
 (provide api)
 
@@ -63,7 +63,7 @@ Replace `main.rkt` with:
            #:title "myapp"))
 ```
 
-`name` is checked with `string?`; the same route declaration creates the client binding `glaze.api.greet`. There is no need to manually maintain an API-client mapping.
+`GString` is a Glaze type descriptor: it checks `name` as a string at runtime **and** records the parameter as a string in the generated GLZ1 application schema. Unlike a plain `string?` predicate, it produces a typed command contract. The same declaration creates the client binding `glaze.api.greet`; there is no manual API-client mapping.
 
 ## 4. Call the route from your page
 
