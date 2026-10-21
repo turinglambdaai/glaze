@@ -331,7 +331,7 @@ Low-level utility for opening an external URL in the user's default browser (for
 
 ## JavaScript Bridge
 
-The embedded frontend calls Racket with plain `fetch("/api/...")` — Glaze's answer to Tauri's `invoke()`. The local HTTP bridge is easy to exercise independently with developer tools such as `curl`.
+The embedded frontend uses the generated, transport-neutral JavaScript client (`/glaze/api.js`, `glaze.api.*`) to invoke Racket routes. With `#:transport 'native`, GLZ1 messages cross the WebView's native message handler without exposing a loopback TCP port; with the explicit HTTP adapter, the same routes use same-origin `fetch` and can also be tested with tools such as `curl`. The [first-app walkthrough](docs/getting-started.md) shows a typed route and its generated client call.
 
 ```racket
 (require glaze)
