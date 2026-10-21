@@ -9,6 +9,8 @@
 | [`agent-verify.rkt`](agent-verify.rkt) | 无人值守验证 | agent 工作流：轮询断言 + 截图 + 退出码 |
 | [`tray-demo.rkt`](tray-demo.rkt) | 跨平台托盘 | make-tray/菜单/tooltip 动态更新 |
 
+新应用从[完整入门教程](../docs/getting-started.md)开始；本页示例仅展示独立功能，统一教程涵盖 `init`、类型化 API、schema 检查、真窗口验证与构建。
+
 ## 快速开始
 
 ```bash
