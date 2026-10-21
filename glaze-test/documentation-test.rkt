@@ -55,11 +55,16 @@
 
 (define newcomer-guide (build-path docs-root "getting-started.md"))
 (define guide-content (file->string newcomer-guide))
-(for ([expected (in-list '("raco glaze init" "glaze.rktd" "glaze-schema.json"
-                           "AGENTS.md" "verify.rkt" "module+ main"
-                           "define-api-routes" "glaze.api.greet"
-                           "raco glaze schema check --json"
-                           "raco glaze verify" "raco glaze build"))])
+(for ([expected (in-list '("raco glaze init" "glaze.rktd"
+                                             "glaze-schema.json"
+                                             "AGENTS.md"
+                                             "verify.rkt"
+                                             "module+ main"
+                                             "define-api-routes"
+                                             "glaze.api.greet"
+                                             "raco glaze schema check --json"
+                                             "raco glaze verify"
+                                             "raco glaze build"))])
   (check-true (string-contains? guide-content expected)
               (format "canonical guide must include ~a" expected)))
 
