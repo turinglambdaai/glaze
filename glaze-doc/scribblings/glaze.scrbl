@@ -1032,7 +1032,10 @@ observe that the page really loaded through the controlled origin.
 }
 
 @defproc[(native-transport-shutdown! [t native-transport?]) void?]{
-Stops the dispatcher and event threads. Idempotent.
+Idempotently stops the dispatcher and event thread, closes registered
+stream-writer ports, and suppresses later page deliveries. Native and deferred
+messages submitted after stopping are ignored. Already-running route handlers
+remain owned by the application's custodian and are terminated by app teardown.
 }
 
 @defproc[(native-app-origin) string?]{

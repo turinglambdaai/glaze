@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   owners and direct tests; public import paths and behavior remain compatible.
   HTTP no longer imports the native carrier aggregation module to obtain
   command semantics.
+- Deterministic native transport shutdown: `native-transport-shutdown!`
+  idempotently transitions the transport to stopped, rejects messages and
+  stream registrations submitted afterwards, closes and clears every active
+  stream port, and joins transport-owned stream writer threads before
+  returning. Cancellation and shutdown share one serialized stop path, and a
+  forced writer stop unwinds as a stop signal instead of printing an
+  uncaught-break report. Delivery and application handler ownership are
+  unchanged.
 - A repository-local AI implementation contract gives ZCode and other agents a
   single-source work queue, file ownership rules, validation ladder, and stop
   conditions for architecture-sensitive changes.

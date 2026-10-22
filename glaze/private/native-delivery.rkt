@@ -75,35 +75,82 @@
           (loop (subbytes tail 1))]
          [else tail])])))
 
-;; Drain one web-server streaming response into native frames. The caller owns
-;; active-streams and uses it for cancellation (id -> output port); this helper
-;; registers only for the duration of the stream and always sends open before
-;; chunks and end after the pipe reaches EOF.
-(define (deliver-stream-response! response id active-streams deliver!)
+(define (close-port/quietly close-port port)
+  (with-handlers ([exn:fail? (lambda (_) (void))])
+    (close-port port)))
+
+;; Drain one web-server streaming response into native frames. The transport
+;; owns the active-stream registry and can supply synchronized registration
+;; callbacks so shutdown and cancel never race an unsynchronized hash mutation.
+;; The optional defaults preserve the original private helper call shape.
+(define (deliver-stream-response!
+         response
+         id
+         active-streams
+         deliver!
+         #:start-stream! [start-stream!
+                          (lambda (stream-id port writer-thunk)
+                            (hash-set! active-streams stream-id port)
+                            (thread writer-thunk))]
+         #:unregister-stream! [unregister-stream!
+                               (lambda (stream-id port)
+                                 (when (eq? (hash-ref active-streams stream-id #f) port)
+                                   (hash-remove! active-streams stream-id)))]
+         #:unregister-writer! [unregister-writer! (lambda (_stream-id _writer-thread) (void))])
   (define out (response-output response))
   (define-values (pin pout) (make-pipe))
-  (hash-set! active-streams id pout)
-  (thread (lambda ()
-            ;; Match the HTTP adapter: a writer exception truncates the body. Closing
-            ;; the pipe still lets the reader produce the terminal frame.
-            (with-handlers ([exn:fail? void])
-              (out pout))
-            (close-output-port pout)))
-  (deliver! (stream-open-delivery id))
-  (let drain ([pending #""])
-    (define buf (make-bytes 4096))
-    (define n (read-bytes-avail! buf pin))
-    (cond
-      [(eof-object? n)
-       (hash-remove! active-streams id)
-       (unless (zero? (bytes-length pending))
-         (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\uFFFD))))
-       (deliver! (stream-end-delivery id))]
-      [(and (exact-nonnegative-integer? n) (> n 0))
-       (drain (deliver-utf8! id (bytes-append pending (subbytes buf 0 n)) deliver!))]
-      [else
-       (hash-remove! active-streams id)
-       (deliver! (stream-end-delivery id))]))
+  ;; start-stream! atomically registers the port and starts its writer. A
+  ;; transport can reject the start if shutdown has already begun.
+  (define writer-thread
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (close-port/quietly close-input-port pin)
+                                 (close-port/quietly close-output-port pout)
+                                 (unregister-stream! id pout)
+                                 (raise e))])
+      (start-stream!
+       id
+       pout
+       (lambda ()
+         (dynamic-wind void
+                       (lambda ()
+                         ;; Match the HTTP adapter: a writer exception truncates the body.
+                         ;; Shutdown/cancel may close or break this writer concurrently;
+                         ;; the transport's break is a stop signal, not an app error,
+                         ;; so it must unwind here instead of reaching the default
+                         ;; uncaught-exception handler's stderr report.
+                         (with-handlers ([exn:break? void]
+                                         [exn:fail? void])
+                           (out pout)))
+                       (lambda ()
+                         (close-port/quietly close-output-port pout)
+                         (unregister-writer! id (current-thread))))))))
+  (if (not writer-thread)
+      (begin
+        ;; Shutdown won before registration; never run the response writer or
+        ;; emit an open frame.
+        (close-port/quietly close-input-port pin)
+        (close-port/quietly close-output-port pout))
+      (dynamic-wind
+       void
+       (lambda ()
+         (deliver! (stream-open-delivery id))
+         (let drain ([pending #""])
+           (define buf (make-bytes 4096))
+           (define n (read-bytes-avail! buf pin))
+           (cond
+             [(eof-object? n)
+              (unless (zero? (bytes-length pending))
+                (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\uFFFD))))
+              (deliver! (stream-end-delivery id))]
+             [(and (exact-nonnegative-integer? n) (> n 0))
+              (drain (deliver-utf8! id (bytes-append pending (subbytes buf 0 n)) deliver!))]
+             [else (deliver! (stream-end-delivery id))])))
+       (lambda ()
+         ;; Close ports before removing the registration so shutdown always
+         ;; sees a writer until it can no longer produce output.
+         (close-port/quietly close-input-port pin)
+         (close-port/quietly close-output-port pout)
+         (unregister-stream! id pout))))
   (void))
 
 (define (event-delivery seq name data)
