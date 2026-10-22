@@ -134,10 +134,9 @@
 (define (native-transport-stop-stream-writer-record! record)
   ;; Cancellation and shutdown can race; only one caller may break/kill a
   ;; writer so a second break cannot interrupt its cleanup thunk.
-  (call-with-semaphore (native-stream-writer-stop-lock record)
-                       (lambda ()
-                         (native-transport-stop-stream-writer-thread!
-                          (native-stream-writer-thread record)))))
+  (call-with-semaphore
+   (native-stream-writer-stop-lock record)
+   (lambda () (native-transport-stop-stream-writer-thread! (native-stream-writer-thread record)))))
 
 (define (native-transport-stop-stream-writer! t body)
   (define id (and (hash? body) (hash-ref body 'id #f)))
@@ -300,17 +299,16 @@
             (lambda (delivery) (native-transport-deliver! t delivery))
             #:start-stream!
             (lambda (stream-id port writer-thunk)
-              (call-with-semaphore (native-transport-lifecycle-lock t)
-                                   (lambda ()
-                                     (if (eq? (unbox (native-transport-state-box t)) 'running)
-                                         (let* ([writer (thread writer-thunk)]
-                                                [record (native-stream-writer writer (make-semaphore 1))])
-                                           (hash-set! streams stream-id port)
-                                           (hash-set! (unbox (native-transport-stream-writers-box t))
-                                                      stream-id
-                                                      record)
-                                           writer)
-                                         #f))))
+              (call-with-semaphore
+               (native-transport-lifecycle-lock t)
+               (lambda ()
+                 (if (eq? (unbox (native-transport-state-box t)) 'running)
+                     (let* ([writer (thread writer-thunk)]
+                            [record (native-stream-writer writer (make-semaphore 1))])
+                       (hash-set! streams stream-id port)
+                       (hash-set! (unbox (native-transport-stream-writers-box t)) stream-id record)
+                       writer)
+                     #f))))
             #:unregister-stream!
             (lambda (stream-id port)
               (call-with-semaphore (native-transport-lifecycle-lock t)
@@ -323,7 +321,8 @@
                                    (lambda ()
                                      (define writers (unbox (native-transport-stream-writers-box t)))
                                      (define record (hash-ref writers stream-id #f))
-                                     (when (and record (eq? (native-stream-writer-thread record) writer))
+                                     (when (and record
+                                                (eq? (native-stream-writer-thread record) writer))
                                        (hash-remove! writers stream-id))))))]
           ;; Full envelopes use one delivery frame.
           [else

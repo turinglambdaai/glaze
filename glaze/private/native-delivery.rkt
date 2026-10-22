@@ -114,8 +114,12 @@
          (dynamic-wind void
                        (lambda ()
                          ;; Match the HTTP adapter: a writer exception truncates the body.
-                         ;; Shutdown/cancel may close or kill this writer concurrently.
-                         (with-handlers ([exn:fail? void])
+                         ;; Shutdown/cancel may close or break this writer concurrently;
+                         ;; the transport's break is a stop signal, not an app error,
+                         ;; so it must unwind here instead of reaching the default
+                         ;; uncaught-exception handler's stderr report.
+                         (with-handlers ([exn:break? void]
+                                         [exn:fail? void])
                            (out pout)))
                        (lambda ()
                          (close-port/quietly close-output-port pout)
