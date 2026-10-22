@@ -100,7 +100,7 @@
          deferred-box) ; box of (listof string) — FFI-stack message stash
   #:transparent)
 
-(struct native-stream-writer (port thread stop-lock) #:transparent)
+(struct native-stream-writer (thread stop-lock) #:transparent)
 
 (define (bump-stat! t key)
   (define box (native-transport-stats-box t))
@@ -134,9 +134,10 @@
 (define (native-transport-stop-stream-writer-record! record)
   ;; Cancellation and shutdown can race; only one caller may break/kill a
   ;; writer so a second break cannot interrupt its cleanup thunk.
-  (call-with-semaphore
-   (native-stream-writer-stop-lock record)
-   (lambda () (native-transport-stop-stream-writer-thread! (native-stream-writer-thread record)))))
+  (call-with-semaphore (native-stream-writer-stop-lock record)
+                       (lambda ()
+                         (native-transport-stop-stream-writer-thread!
+                          (native-stream-writer-thread record)))))
 
 (define (native-transport-stop-stream-writer! t body)
   (define id (and (hash? body) (hash-ref body 'id #f)))
@@ -303,7 +304,7 @@
                                    (lambda ()
                                      (if (eq? (unbox (native-transport-state-box t)) 'running)
                                          (let* ([writer (thread writer-thunk)]
-                                                [record (native-stream-writer port writer (make-semaphore 1))])
+                                                [record (native-stream-writer writer (make-semaphore 1))])
                                            (hash-set! streams stream-id port)
                                            (hash-set! (unbox (native-transport-stream-writers-box t))
                                                       stream-id
