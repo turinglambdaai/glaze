@@ -136,9 +136,9 @@
       (lambda ()
         ;; Always unregister and close the reader, even if a host delivery
         ;; callback raises or shutdown interrupts this stream.
-        (unregister-stream! id)
         (close-port/quietly close-input-port pin)
-        (close-port/quietly close-output-port pout)))])
+        (close-port/quietly close-output-port pout)
+        (unregister-stream! id)))])
   (void))
 
 (define (event-delivery seq name data)
