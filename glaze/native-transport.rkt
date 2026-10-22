@@ -177,9 +177,13 @@
   ;; This is called re-entrantly on macOS's FFI callback stack. Never acquire a
   ;; semaphore here: that can deschedule an atomic callback and kill the host.
   ;; The platform pump thread also owns the matching take-deferred! operation.
+  (define b (native-transport-deferred-box t))
   (when (eq? (unbox (native-transport-state-box t)) 'running)
-    (define b (native-transport-deferred-box t))
-    (set-box! b (cons raw (unbox b))))
+    (set-box! b (cons raw (unbox b)))
+    ;; Shutdown may race this non-blocking callback from another thread. Recheck
+    ;; after the pointer swap so a late append cannot retain stale work.
+    (unless (eq? (unbox (native-transport-state-box t)) 'running)
+      (set-box! b '())))
   (void))
 
 (define (native-transport-take-deferred! t)
