@@ -87,58 +87,64 @@
                                   id
                                   active-streams
                                   deliver!
-                                  #:register-stream!
-                                  [register-stream!
-                                   (lambda (stream-id port)
+                                  #:start-stream!
+                                  [start-stream!
+                                   (lambda (stream-id port writer-thunk)
                                      (hash-set! active-streams stream-id port)
-                                     #t)]
+                                     (thread writer-thunk))]
                                   #:unregister-stream!
                                   [unregister-stream!
                                    (lambda (stream-id)
-                                     (hash-remove! active-streams stream-id))])
+                                     (hash-remove! active-streams stream-id))]
+                                  #:unregister-writer!
+                                  [unregister-writer!
+                                   (lambda (_stream-id _writer-thread) (void))])
   (define out (response-output response))
   (define-values (pin pout) (make-pipe))
-  (cond
-    ;; Shutdown may win after dispatch has produced a streaming response but
-    ;; before it is registered. In that case do not start the writer or emit
-    ;; an open frame; release both ends and let the request worker return.
-    [(not (register-stream! id pout))
-     (close-port/quietly close-input-port pin)
-     (close-port/quietly close-output-port pout)]
-    [else
-     (thread
-      (lambda ()
-        (dynamic-wind
-         void
-         (lambda ()
-           ;; Match the HTTP adapter: a writer exception truncates the body.
-           ;; Shutdown/cancel may close the port concurrently, so the final
-           ;; close is deliberately idempotent.
-           (with-handlers ([exn:fail? void])
-             (out pout)))
-         (lambda ()
-           (close-port/quietly close-output-port pout)))))
-     (dynamic-wind
-      void
-      (lambda ()
-        (deliver! (stream-open-delivery id))
-        (let drain ([pending #""])
-          (define buf (make-bytes 4096))
-          (define n (read-bytes-avail! buf pin))
-          (cond
-            [(eof-object? n)
-             (unless (zero? (bytes-length pending))
-               (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\uFFFD))))
-             (deliver! (stream-end-delivery id))]
-            [(and (exact-nonnegative-integer? n) (> n 0))
-             (drain (deliver-utf8! id (bytes-append pending (subbytes buf 0 n)) deliver!))]
-            [else (deliver! (stream-end-delivery id))])))
-      (lambda ()
-        ;; Always unregister and close the reader, even if a host delivery
-        ;; callback raises or shutdown interrupts this stream.
+  ;; start-stream! atomically registers the port and starts its writer. A
+  ;; transport can reject the start if shutdown has already begun.
+  (define writer-thread
+    (start-stream!
+     id
+     pout
+     (lambda ()
+       (dynamic-wind
+        void
+        (lambda ()
+          ;; Match the HTTP adapter: a writer exception truncates the body.
+          ;; Shutdown/cancel may close or kill this writer concurrently.
+          (with-handlers ([exn:fail? void])
+            (out pout)))
+        (lambda ()
+          (close-port/quietly close-output-port pout)
+          (unregister-writer! id (current-thread))))))
+  (if (not writer-thread)
+      (begin
+        ;; Shutdown won before registration; never run the response writer or
+        ;; emit an open frame.
         (close-port/quietly close-input-port pin)
-        (close-port/quietly close-output-port pout)
-        (unregister-stream! id)))])
+        (close-port/quietly close-output-port pout))
+      (dynamic-wind
+       void
+       (lambda ()
+         (deliver! (stream-open-delivery id))
+         (let drain ([pending #""])
+           (define buf (make-bytes 4096))
+           (define n (read-bytes-avail! buf pin))
+           (cond
+             [(eof-object? n)
+              (unless (zero? (bytes-length pending))
+                (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\uFFFD))))
+              (deliver! (stream-end-delivery id))]
+             [(and (exact-nonnegative-integer? n) (> n 0))
+              (drain (deliver-utf8! id (bytes-append pending (subbytes buf 0 n)) deliver!))]
+             [else (deliver! (stream-end-delivery id))])))
+       (lambda ()
+         ;; Close ports before removing the registration so shutdown always
+         ;; sees a writer until it can no longer produce output.
+         (close-port/quietly close-input-port pin)
+         (close-port/quietly close-output-port pout)
+         (unregister-stream! id))))
   (void))
 
 (define (event-delivery seq name data)
