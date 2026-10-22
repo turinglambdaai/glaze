@@ -29,6 +29,13 @@ A Glaze application is @bold{native-GUI only}. If its native WebView cannot
 start, application startup fails with platform-specific installation or repair
 guidance. Glaze never substitutes a system-browser tab for the desktop window.
 
+The @hyperlink["https://github.com/turinglambdaai/glaze/blob/main/docs/getting-started.md"]{canonical first-app guide}
+covers the generated @filepath{glaze.rktd}, typed Racket route, generated
+JavaScript caller, schema baseline, native-window verification and build.
+Generated startup belongs inside @racket[module+ main], not at the top level.
+The 0.x scaffold defaults to the HTTP adapter within a native WebView;
+packaged apps can opt into native GLZ1 transport.
+
 @section{Application Lifecycle}
 
 @defmodule[glaze/app]
@@ -1422,6 +1429,11 @@ the NSIS Add/Remove Programs identity.
 @verbatim{
  raco glaze init <name>                Create a native desktop project
  raco glaze dev                        Run the project's native main.rkt
+  raco glaze inspect --json            Inspect project paths
+  raco glaze doctor --json             Diagnose WebView readiness
+  raco glaze schema check --json       Check API compatibility
+  raco glaze schema write              Explicitly update API baseline
+  raco glaze verify                    Verify real native window
  raco glaze build                      Build a distributable / installer
  raco glaze help                       Show help
 }

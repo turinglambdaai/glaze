@@ -19,7 +19,7 @@ You get:
 - **Racket for logic** — the full power of Racket's macro system, contracts, pattern matching
 - **Web for UI** — Tailwind, Svelte, React, or any web framework
 - **Native desktop shell** — a real OS window with an embedded system WebView
-- **JSON API bridge** — the page calls Racket with plain `fetch("/api/...")`
+- **Typed API bridge** — generated JavaScript invokes Racket over native GLZ1 or an explicit HTTP adapter
 - **Runtime capabilities** — default-deny route permissions with path and command scopes
 - **Scoped filesystem plugin** — text/binary I/O, directories, metadata, copy/move/remove
 - **Scoped shell plugin** — bounded command output, timeouts, managed background processes
@@ -41,13 +41,13 @@ Glaze is deliberately **GUI-first**. If the required native WebView runtime is m
 | Backend language | Racket | Rust | JS/Node | Go |
 | Native toolchain needed | **none** (pure FFI) | Rust + cargo | none | Go + WebView2 deps |
 | Binary size | tiny (Racket exe + assets) | small | 100 MB+ | small |
-| Frontend→backend | HTTP JSON routes (`fetch`) | `invoke()` IPC | Node APIs | bindings |
+| Frontend→backend | Native GLZ1 + HTTP adapter | `invoke()` IPC | Node APIs | bindings |
 | Runtime authority | Route permissions + resource scopes | Capabilities + permissions | app-defined | app-defined |
 | WebView backends | WebView2 / WKWebView / WebKitGTK | system WebView | bundled Chromium | WebView2/WKWebView |
 | Missing WebView behavior | **fail fast + install guidance** | prerequisite error | n/a (bundled) | prerequisite error |
 | Agent-friendly UI verification (`title`/`url`/screenshot) | **built-in** | via WebDriver | via CDP | limited |
 
-All three WebView backends pass the real-window CI e2e (open, load, capture, navigate, close, on-close). Remaining honest gaps: GLZ1 still runs over loopback HTTP/SSE rather than a native WebView message transport, and Linux needs a desktop session or Xvfb.
+All three WebView backends pass the real-window CI e2e (open, load, capture, navigate, close, on-close). Native GLZ1 transport is implemented on Windows, macOS and Linux. The 0.x `run-app` default remains the HTTP adapter inside a native WebView; Linux needs a graphical session or Xvfb.
 
 ## Platform status
 
@@ -111,7 +111,9 @@ racket main.rkt
 raco glaze dev
 ```
 
-A native desktop window opens and hosts the frontend served by the local Racket server. If the required WebView runtime is missing, startup stops and tells you what to install instead of opening Chrome/Edge/Safari.
+A native desktop window opens using the default HTTP adapter, or native GLZ1 when explicitly selected. Missing WebView runtimes produce repair guidance, never a browser fallback.
+
+**Next:** follow the [canonical first-app tutorial](docs/getting-started.md) to add a typed Racket route, call it from JavaScript, check the schema, verify the real window, and build the app.
 
 > Prefer installing straight from a GitHub checkout instead of the catalog?
 > ```bash
@@ -329,7 +331,7 @@ Low-level utility for opening an external URL in the user's default browser (for
 
 ## JavaScript Bridge
 
-The embedded frontend calls Racket with plain `fetch("/api/...")` — Glaze's answer to Tauri's `invoke()`. The local HTTP bridge is easy to exercise independently with developer tools such as `curl`.
+The embedded frontend uses the generated, transport-neutral JavaScript client (`/glaze/api.js`, `glaze.api.*`) to invoke Racket routes. With `#:transport 'native`, GLZ1 messages cross the WebView's native message handler without exposing a loopback TCP port; with the explicit HTTP adapter, the same routes use same-origin `fetch` and can also be tested with tools such as `curl`. The [first-app walkthrough](docs/getting-started.md) shows a typed route and its generated client call.
 
 ```racket
 (require glaze)
