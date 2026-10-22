@@ -549,7 +549,7 @@
            (streaming-response
             (lambda (out)
               (async-channel-put late-stream-writer-started 'started)
-              (display "must-not-start" out)))))
+              (display "must-not-start" out))))))
    #:public-dir shutdown-dir))
 (native-transport-set-deliver! t6 (lambda (delivery) (async-channel-put late-stream-deliveries delivery)))
 (native-transport-message!
