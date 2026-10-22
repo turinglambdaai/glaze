@@ -257,7 +257,7 @@
             (lambda (stream-id)
               (call-with-semaphore
                (native-transport-lifecycle-lock t)
-               (lambda () (hash-remove! streams stream-id))))]
+               (lambda () (hash-remove! streams stream-id)))))]
           ;; Full envelopes use one delivery frame.
           [else
            (bump-stat! t 'responses-delivered)
