@@ -93,7 +93,7 @@
          stats-box ; box of immutable hash — served/delivered counters
          threads-box ; box of (listof thread?) — dispatcher + event thread
          streams-box ; box of (hash id -> output-port) — active streams
-         stream-writers-box ; box of (hash id -> writer thread)
+         stream-writers-box ; box of (hash id -> (cons output-port thread))
          lifecycle-lock ; serializes stop, stream registry, and delivery gates
          state-box ; 'running, 'stopping, or 'stopped (protected by lifecycle-lock)
          shutdown-done ; broadcast event for concurrent idempotent shutdown callers
@@ -122,28 +122,37 @@
 
 (define (native-transport-stop-stream-writer! t body)
   (define id (and (hash? body) (hash-ref body 'id #f)))
-  (define writer
+  (define snapshot
     (and (string? id)
          (call-with-semaphore
           (native-transport-lifecycle-lock t)
           (lambda ()
             (and (eq? (unbox (native-transport-state-box t)) 'running)
-                 (hash-ref (unbox (native-transport-stream-writers-box t)) id #f))))))
+                 (cons
+                  (hash-ref (unbox (native-transport-stream-writers-box t)) id #f)
+                  (hash-ref (unbox (native-transport-streams-box t)) id #f)))))))
+  (define record (and snapshot (car snapshot)))
+  (define port (and snapshot (cdr snapshot)))
+  (define writer (and record (cdr record)))
   (when writer
     ;; Do not hold lifecycle-lock while killing: the writer's dynamic-wind
     ;; cleanup unregisters itself under that same lock.
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (kill-thread writer))
-    (thread-wait writer)
-    ;; If cancellation interrupted the writer's own unregister thunk, retire
-    ;; its stale registry entry after the thread has definitely terminated.
+    (thread-wait writer))
+  (when snapshot
     (call-with-semaphore
      (native-transport-lifecycle-lock t)
      (lambda ()
        (define writers (unbox (native-transport-stream-writers-box t)))
-       (when (eq? (hash-ref writers id #f) writer)
-         (hash-remove! writers id))))
-  (void)))
+       (define streams (unbox (native-transport-streams-box t)))
+       (when (eq? (hash-ref writers id #f) record)
+         (hash-remove! writers id))
+       ;; If the writer has already finished, retire its still-registered port
+       ;; too. Port identity protects a newer stream that reused the same id.
+       (when (and port (eq? (hash-ref streams id #f) port))
+         (hash-remove! streams id)))))
+  (void))
 
 (define (start-native-transport #:api routes
                                 #:authority [authority #f]
@@ -288,7 +297,7 @@
                        (hash-set! streams stream-id port)
                        (hash-set! (unbox (native-transport-stream-writers-box t))
                                   stream-id
-                                  writer)
+                                  (cons port writer))
                        writer)
                      #f))))
             #:unregister-stream!
@@ -302,7 +311,8 @@
                (native-transport-lifecycle-lock t)
                (lambda ()
                  (define writers (unbox (native-transport-stream-writers-box t)))
-                 (when (eq? (hash-ref writers stream-id #f) writer)
+                 (define record (hash-ref writers stream-id #f))
+                 (when (and record (eq? (cdr record) writer))
                    (hash-remove! writers stream-id))))))]
           ;; Full envelopes use one delivery frame.
           [else
@@ -373,7 +383,7 @@
           (define streams (unbox (native-transport-streams-box t)))
           (define stream-writers (unbox (native-transport-stream-writers-box t)))
           (define ports (hash-values streams))
-          (define writers (hash-values stream-writers))
+          (define writers (map cdr (hash-values stream-writers)))
           (set-box! (native-transport-state-box t) 'stopping)
           (set-box! (native-transport-threads-box t) '())
           (hash-clear! streams)
