@@ -519,7 +519,7 @@
 (for ([i (in-range 3)]) (semaphore-post race-gate))
 (define race-outcomes
   (for/list ([i (in-range 3)]) (sync/timeout 5 race-results)))
-(check-equal? (sort race-outcomes symbol<?)
+(check-equal? (sort (filter symbol? race-outcomes) symbol<?)
               '(cancel-submitted shutdown-1 shutdown-2)
               "cancel and concurrent shutdown callers all settle")
 (thread-wait cancel-thread)
