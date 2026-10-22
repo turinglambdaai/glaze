@@ -424,8 +424,8 @@
               (lambda ()
                 (let loop ()
                   (async-channel-put started 'tick)
-                  (display "tick" out)
-                  (flush-output out)
+                  ;; Deliberately ignore the port: closing it alone cannot stop
+                  ;; this writer, so transport shutdown must own the thread.
                   (sleep 0.01)
                   (loop)))
               (lambda () (async-channel-put finished 'finished)))))))))
