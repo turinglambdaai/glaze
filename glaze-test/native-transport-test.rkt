@@ -467,6 +467,35 @@
 (sleep 0.05)
 (check-false (unbox shutdown-late-delivery?) "no callback begins after shutdown returns")
 
+;; Cancellation alone must kill a stream writer that never writes to its
+;; output port; closing the pipe by itself would leave this loop alive.
+(define cancel-only-started (make-async-channel))
+(define cancel-only-finished (make-async-channel))
+(define cancel-only-deliveries (make-async-channel))
+(define t7
+  (start-native-transport
+   #:api (make-shutdown-stream-routes cancel-only-started cancel-only-finished)
+   #:public-dir shutdown-dir))
+(native-transport-set-deliver!
+ t7
+ (lambda (delivery) (async-channel-put cancel-only-deliveries delivery)))
+(native-transport-message!
+ t7
+ (jsexpr->string (hasheq 'glz 1 'id "cancel-only" 'path "api/shutdown-stream")))
+(define cancel-only-open (sync/timeout 5 cancel-only-deliveries))
+(check-true (and cancel-only-open
+                  (string-contains? (native-delivery-js cancel-only-open) "__glz1StreamOpen"))
+            "non-writing stream opens")
+(check-not-false (sync/timeout 5 cancel-only-started) "non-writing stream writer starts")
+(native-transport-message!
+ t7
+ (jsexpr->string (hasheq 'glz 1 'op "cancel" 'id "cancel-only")))
+(define cancel-only-frames (collect-stream-frames cancel-only-deliveries))
+(check-true (string-contains? (last cancel-only-frames) "__glz1End")
+            "cancel still emits the stream terminal frame")
+(check-not-false (sync/timeout 5 cancel-only-finished) "cancel terminates a non-writing writer")
+(check-not-exn (lambda () (native-transport-shutdown! t7)))
+
 ;; Cancellation and two concurrent shutdown callers may race; all must settle,
 ;; and the active writer must terminate whichever operation wins the lock.
 (define race-started (make-async-channel))
