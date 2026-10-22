@@ -530,6 +530,38 @@
 (check-false (unbox race-late-delivery?) "no callback begins after racing shutdown returns")
 (check-not-exn (lambda () (native-transport-shutdown! t5)) "racing shutdown remains idempotent")
 
+;; If shutdown wins before a streaming response registers, the late
+;; registration is rejected: the writer never starts and no open frame leaks.
+(define late-stream-entered (make-async-channel))
+(define late-stream-release (make-semaphore 0))
+(define late-stream-returned (make-async-channel))
+(define late-stream-writer-started (make-async-channel))
+(define late-stream-deliveries (make-async-channel))
+(define t6
+  (start-native-transport
+   #:api
+   (list
+    (GET "api/late-stream"
+         (lambda (_req)
+           (async-channel-put late-stream-entered 'entered)
+           (sync late-stream-release)
+           (async-channel-put late-stream-returned 'returning)
+           (streaming-response
+            (lambda (out)
+              (async-channel-put late-stream-writer-started 'started)
+              (display "must-not-start" out)))))
+   #:public-dir shutdown-dir))
+(native-transport-set-deliver! t6 (lambda (delivery) (async-channel-put late-stream-deliveries delivery)))
+(native-transport-message!
+ t6
+ (jsexpr->string (hasheq 'glz 1 'id "late-stream" 'path "api/late-stream")))
+(check-not-false (sync/timeout 5 late-stream-entered) "late stream route enters before shutdown")
+(check-not-exn (lambda () (native-transport-shutdown! t6)) "shutdown may win before stream registration")
+(semaphore-post late-stream-release)
+(check-not-false (sync/timeout 5 late-stream-returned) "blocked route is released after shutdown")
+(check-false (sync/timeout 0.1 late-stream-writer-started) "late stream writer is never started")
+(check-false (sync/timeout 0.1 late-stream-deliveries) "late stream emits no frame after shutdown")
+
 (delete-directory/files shutdown-dir)
 
 (delete-directory/files stream-dir)
