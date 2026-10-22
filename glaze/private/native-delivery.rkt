@@ -94,8 +94,9 @@
                                      (thread writer-thunk))]
                                   #:unregister-stream!
                                   [unregister-stream!
-                                   (lambda (stream-id)
-                                     (hash-remove! active-streams stream-id))]
+                                   (lambda (stream-id port)
+                                     (when (eq? (hash-ref active-streams stream-id #f) port)
+                                       (hash-remove! active-streams stream-id))]
                                   #:unregister-writer!
                                   [unregister-writer!
                                    (lambda (_stream-id _writer-thread) (void))])
@@ -109,7 +110,7 @@
           (lambda (e)
             (close-port/quietly close-input-port pin)
             (close-port/quietly close-output-port pout)
-            (unregister-stream! id)
+            (unregister-stream! id pout)
             (raise e))])
       (start-stream!
        id
@@ -151,7 +152,7 @@
          ;; sees a writer until it can no longer produce output.
          (close-port/quietly close-input-port pin)
          (close-port/quietly close-output-port pout)
-         (unregister-stream! id))))
+         (unregister-stream! id pout))))
   (void)))
 
 (define (event-delivery seq name data)
