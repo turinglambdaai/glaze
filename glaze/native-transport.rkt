@@ -118,6 +118,17 @@
                            ((unbox (native-transport-deliver-box t)) delivery))))
   (void))
 
+(define (native-transport-stop-stream-writer-thread! writer)
+  ;; Prefer a break so response-body dynamic-wind cleanup can run. A writer
+  ;; that ignores breaks is force-terminated after a bounded grace period.
+  (unless (thread-dead? writer)
+    (with-handlers ([exn:fail? (lambda (_) (void))])
+      (break-thread writer))
+    (unless (sync/timeout 0.05 (thread-dead-evt writer))
+      (with-handlers ([exn:fail? (lambda (_) (void))])
+        (kill-thread writer))))
+  (thread-wait writer))
+
 (define (native-transport-stop-stream-writer! t body)
   (define id (and (hash? body) (hash-ref body 'id #f)))
   (define snapshot
@@ -133,11 +144,9 @@
   (define port (and snapshot (cdr snapshot)))
   (define writer (and record (cdr record)))
   (when writer
-    ;; Do not hold lifecycle-lock while killing: the writer's dynamic-wind
-    ;; cleanup unregisters itself under that same lock.
-    (with-handlers ([exn:fail? (lambda (_) (void))])
-      (kill-thread writer))
-    (thread-wait writer))
+    ;; Do not hold lifecycle-lock while stopping: the writer's cleanup
+    ;; unregisters itself under that same lock.
+    (native-transport-stop-stream-writer-thread! writer))
   (when port
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (close-output-port port)))
@@ -387,11 +396,10 @@
      (dynamic-wind
       void
       (lambda ()
-        ;; Closing the registered writer ports makes streaming-response
-        ;; writers unwind; delivery gates suppress any late terminal frames.
+        ;; Give writers a chance to unwind their response-body cleanup.
+        ;; Non-cooperative writers are force-terminated after a bounded grace.
         (for ([writer (in-list writers)])
-          (with-handlers ([exn:fail? (lambda (_) (void))])
-            (kill-thread writer)))
+          (native-transport-stop-stream-writer-thread! writer))
         (for ([port (in-list ports)])
           (with-handlers ([exn:fail? (lambda (_) (void))])
             (close-output-port port)))
