@@ -93,6 +93,7 @@
          stats-box ; box of immutable hash — served/delivered counters
          threads-box ; box of (listof thread?) — dispatcher + event thread
          streams-box ; box of (hash id -> output-port) — active streams
+         stream-writers-box ; box of (hash id -> writer thread)
          lifecycle-lock ; serializes stop, stream registry, and delivery gates
          state-box ; 'running, 'stopping, or 'stopped (protected by lifecycle-lock)
          shutdown-done ; broadcast event for concurrent idempotent shutdown callers
@@ -119,6 +120,23 @@
        ((unbox (native-transport-deliver-box t)) delivery))))
   (void))
 
+(define (native-transport-stop-stream-writer! t body)
+  (define id (and (hash? body) (hash-ref body 'id #f)))
+  (define writer
+    (and (string? id)
+         (call-with-semaphore
+          (native-transport-lifecycle-lock t)
+          (lambda ()
+            (and (eq? (unbox (native-transport-state-box t)) 'running)
+                 (hash-ref (unbox (native-transport-stream-writers-box t)) id #f)))))
+  (when writer
+    ;; Do not hold lifecycle-lock while killing: the writer's dynamic-wind
+    ;; cleanup unregisters itself under that same lock.
+    (with-handlers ([exn:fail? (lambda (_) (void))])
+      (kill-thread writer))
+    (thread-wait writer))
+  (void))
+
 (define (start-native-transport #:api routes
                                 #:authority [authority #f]
                                 #:events [bus #f]
@@ -140,6 +158,7 @@
      (box
       (hasheq 'resources-served 0 'messages-received 0 'responses-delivered 0 'events-delivered 0))
      (box '())
+     (box (make-hash))
      (box (make-hash))
      (make-semaphore 1)
      (box 'running)
@@ -228,11 +247,13 @@
             ;; active-stream hash. Serialize it with stream registration and
             ;; shutdown; normal route handlers remain concurrent.
             (if (and (hash? body) (equal? (hash-ref body 'op #f) "cancel"))
-                (call-with-semaphore
-                 (native-transport-lifecycle-lock t)
-                 (lambda ()
-                   (and (eq? (unbox (native-transport-state-box t)) 'running)
-                        (dispatch))))
+                (begin
+                  (native-transport-stop-stream-writer! t body)
+                  (call-with-semaphore
+                   (native-transport-lifecycle-lock t)
+                   (lambda ()
+                     (and (eq? (unbox (native-transport-state-box t)) 'running)
+                          (dispatch)))))
                 (dispatch))])
       (when response
         (cond
@@ -249,21 +270,32 @@
             id
             streams
             (lambda (delivery) (native-transport-deliver! t delivery))
-            #:register-stream!
-            (lambda (stream-id port)
+            #:start-stream!
+            (lambda (stream-id port writer-thunk)
               (call-with-semaphore
                (native-transport-lifecycle-lock t)
                (lambda ()
                  (if (eq? (unbox (native-transport-state-box t)) 'running)
-                     (begin
+                     (let ([writer (thread writer-thunk)])
                        (hash-set! streams stream-id port)
-                       #t)
+                       (hash-set! (unbox (native-transport-stream-writers-box t))
+                                  stream-id
+                                  writer)
+                       writer)
                      #f))))
             #:unregister-stream!
             (lambda (stream-id)
               (call-with-semaphore
                (native-transport-lifecycle-lock t)
-               (lambda () (hash-remove! streams stream-id)))))]
+               (lambda () (hash-remove! streams stream-id))))
+            #:unregister-writer!
+            (lambda (stream-id writer)
+              (call-with-semaphore
+               (native-transport-lifecycle-lock t)
+               (lambda ()
+                 (define writers (unbox (native-transport-stream-writers-box t)))
+                 (when (eq? (hash-ref writers stream-id #f) writer)
+                   (hash-remove! writers stream-id)))))]
           ;; Full envelopes use one delivery frame.
           [else
            (bump-stat! t 'responses-delivered)
@@ -322,7 +354,7 @@
 (define (native-transport-shutdown! t)
   ;; Exactly one caller owns cleanup; concurrent callers wait for its
   ;; completion, and later calls return immediately.
-  (define-values (action threads ports)
+  (define-values (action threads ports writers)
     (call-with-semaphore
      (native-transport-lifecycle-lock t)
      (lambda ()
@@ -330,14 +362,17 @@
          [(running)
           (define threads (unbox (native-transport-threads-box t)))
           (define streams (unbox (native-transport-streams-box t)))
+          (define stream-writers (unbox (native-transport-stream-writers-box t)))
           (define ports (hash-values streams))
+          (define writers (hash-values stream-writers))
           (set-box! (native-transport-state-box t) 'stopping)
           (set-box! (native-transport-threads-box t) '())
           (hash-clear! streams)
+          (hash-clear! stream-writers)
           (set-box! (native-transport-deferred-box t) '())
-          (values 'owner threads ports)]
-         [(stopping) (values 'wait '() '())]
-         [else (values 'done '() '())]))))
+          (values 'owner threads ports writers)]
+         [(stopping) (values 'wait '() '() '())]
+         [else (values 'done '() '() '())]))))
   (case action
     [(owner)
      (dynamic-wind
@@ -345,9 +380,14 @@
       (lambda ()
         ;; Closing the registered writer ports makes streaming-response
         ;; writers unwind; delivery gates suppress any late terminal frames.
+        (for ([writer (in-list writers)])
+          (with-handlers ([exn:fail? (lambda (_) (void))])
+            (kill-thread writer)))
         (for ([port (in-list ports)])
           (with-handlers ([exn:fail? (lambda (_) (void))])
             (close-output-port port)))
+        (for ([writer (in-list writers)])
+          (thread-wait writer))
         (let* ([dispatcher (and (pair? threads) (car threads))]
                [event-thread
                 (and (native-transport-bus t)
