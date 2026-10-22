@@ -190,12 +190,14 @@
   (call-with-semaphore
    (native-transport-lifecycle-lock t)
    (lambda ()
-     (if (eq? (unbox (native-transport-state-box t)) 'running)
-         (let* ([b (native-transport-deferred-box t)]
-                [batch (reverse (unbox b))])
-           (set-box! b '())
-           batch)
-         '()))))
+     (let ([b (native-transport-deferred-box t)])
+       (if (eq? (unbox (native-transport-state-box t)) 'running)
+           (let ([batch (reverse (unbox b))])
+             (set-box! b '())
+             batch)
+           (begin
+             (set-box! b '())
+             '())))))
 
 ;; Parse a raw message-handler payload (a JSON text from the page) and answer
 ;; through the host's deliver! hook. Parse failures become typed envelopes,
