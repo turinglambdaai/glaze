@@ -134,7 +134,15 @@
     ;; cleanup unregisters itself under that same lock.
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (kill-thread writer))
-    (thread-wait writer))
+    (thread-wait writer)
+    ;; If cancellation interrupted the writer's own unregister thunk, retire
+    ;; its stale registry entry after the thread has definitely terminated.
+    (call-with-semaphore
+     (native-transport-lifecycle-lock t)
+     (lambda ()
+       (define writers (unbox (native-transport-stream-writers-box t)))
+       (when (eq? (hash-ref writers id #f) writer)
+         (hash-remove! writers id))))
   (void))
 
 (define (start-native-transport #:api routes
