@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-23
+
 ### Added
 
 - Extend the family boundary to Commerce: online payment orchestration and
