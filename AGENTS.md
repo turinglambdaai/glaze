@@ -444,3 +444,9 @@ raco test glaze-test/
 - tray / sys 的“可选能力降级”和主 WebView 的“必须成功”要明确区分；
 - 打包、签名失败不能假装成功；
 - 文档、示例、CLI scaffold 与真实运行行为必须保持一致。
+
+## 组合定位（Portfolio placement）
+
+- 轨道与授权：基础设施（产品线放大器，非利润中心）；授权形态：MIT；商业归属：全开源。
+- 组合归属唯一权威：[PORTFOLIO.md](https://github.com/turinglambdaai/turinglambdaai.github.io/blob/master/PORTFOLIO.md)（turinglambdaai.github.io 仓库）。改归属/授权先改权威档，再同步本节。
+- 纪律：价格只进本仓 `PRICING.md`，且收费开始时才发布；README 与产品站不做价格预告。
