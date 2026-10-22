@@ -125,7 +125,7 @@
               (out pout)))
           (lambda ()
             (close-port/quietly close-output-port pout)
-            (unregister-writer! id (current-thread)))))))
+            (unregister-writer! id (current-thread))))))))
   (if (not writer-thread)
       (begin
         ;; Shutdown won before registration; never run the response writer or
