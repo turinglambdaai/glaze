@@ -75,10 +75,6 @@
           (loop (subbytes tail 1))]
          [else tail])])))
 
-;; Drain one web-server streaming response into native frames. The caller owns
-;; active-streams and uses it for cancellation (id -> output port); this helper
-;; registers only for the duration of the stream and always sends open before
-;; chunks and end after the pipe reaches EOF.
 (define (close-port/quietly close-port port)
   (with-handlers ([exn:fail? (lambda (_) (void))])
     (close-port port)))
