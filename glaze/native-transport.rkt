@@ -303,7 +303,7 @@
                (lambda ()
                  (define writers (unbox (native-transport-stream-writers-box t)))
                  (when (eq? (hash-ref writers stream-id #f) writer)
-                   (hash-remove! writers stream-id)))))]
+                   (hash-remove! writers stream-id))))))]
           ;; Full envelopes use one delivery frame.
           [else
            (bump-stat! t 'responses-delivered)
