@@ -140,6 +140,9 @@
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (kill-thread writer))
     (thread-wait writer))
+  (when port
+    (with-handlers ([exn:fail? (lambda (_) (void))])
+      (close-output-port port)))
   (when snapshot
     (call-with-semaphore
      (native-transport-lifecycle-lock t)
