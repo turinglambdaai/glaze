@@ -145,7 +145,7 @@
          (close-port/quietly close-input-port pin)
          (close-port/quietly close-output-port pout)
          (unregister-stream! id))))
-  (void))
+  (void)))
 
 (define (event-delivery seq name data)
   (define batch
