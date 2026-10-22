@@ -96,7 +96,7 @@
                                   [unregister-stream!
                                    (lambda (stream-id port)
                                      (when (eq? (hash-ref active-streams stream-id #f) port)
-                                       (hash-remove! active-streams stream-id))]
+                                       (hash-remove! active-streams stream-id))) ]
                                   #:unregister-writer!
                                   [unregister-writer!
                                    (lambda (_stream-id _writer-thread) (void))])
