@@ -353,7 +353,7 @@
           (when dispatcher
             (with-handlers ([exn:fail? (lambda (_) (void))])
               (kill-thread dispatcher))
-            (thread-wait dispatcher)))
+            (thread-wait dispatcher))))
       (lambda ()
         (call-with-semaphore
          (native-transport-lifecycle-lock t)
