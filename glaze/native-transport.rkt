@@ -357,8 +357,9 @@
 (define (native-transport-count-resource! t)
   (bump-stat! t 'resources-served))
 
-;; Stop the dispatcher and event threads. In-flight handler threads were
-;; spawned under the caller's custodian and die with it (run-app teardown).
+;; Stop transport-owned dispatcher/event/stream-writer threads and suppress
+;; late deliveries. Ordinary route handlers remain under the caller's
+;; custodian and are terminated by app teardown.
 (define (native-transport-shutdown! t)
   ;; Exactly one caller owns cleanup; concurrent callers wait for its
   ;; completion, and later calls return immediately.
