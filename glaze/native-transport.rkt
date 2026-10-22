@@ -174,12 +174,12 @@
 ;; same thread on every platform (the pump thread owns the run loop /
 ;; event pump that reenters), so plain pointer swaps are race-free.
 (define (native-transport-message-deferred! t raw)
-  (call-with-semaphore
-   (native-transport-lifecycle-lock t)
-   (lambda ()
-     (when (eq? (unbox (native-transport-state-box t)) 'running)
-       (define b (native-transport-deferred-box t))
-       (set-box! b (cons raw (unbox b))))))
+  ;; This is called re-entrantly on macOS's FFI callback stack. Never acquire a
+  ;; semaphore here: that can deschedule an atomic callback and kill the host.
+  ;; The platform pump thread also owns the matching take-deferred! operation.
+  (when (eq? (unbox (native-transport-state-box t)) 'running)
+    (define b (native-transport-deferred-box t))
+    (set-box! b (cons raw (unbox b))))
   (void))
 
 (define (native-transport-take-deferred! t)
