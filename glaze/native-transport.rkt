@@ -105,19 +105,17 @@
   (set-box! box (hash-update (unbox box) key add1 0)))
 
 (define (native-transport-running? t)
-  (call-with-semaphore
-   (native-transport-lifecycle-lock t)
-   (lambda () (eq? (unbox (native-transport-state-box t)) 'running))))
+  (call-with-semaphore (native-transport-lifecycle-lock t)
+                       (lambda () (eq? (unbox (native-transport-state-box t)) 'running))))
 
 ;; All page-facing deliveries pass this gate. The callback is kept inside the
 ;; lifecycle lock so shutdown cannot return while an earlier delivery is still
 ;; in flight; callbacks should enqueue host/UI work rather than re-enter stop.
 (define (native-transport-deliver! t delivery)
-  (call-with-semaphore
-   (native-transport-lifecycle-lock t)
-   (lambda ()
-     (when (eq? (unbox (native-transport-state-box t)) 'running)
-       ((unbox (native-transport-deliver-box t)) delivery))))
+  (call-with-semaphore (native-transport-lifecycle-lock t)
+                       (lambda ()
+                         (when (eq? (unbox (native-transport-state-box t)) 'running)
+                           ((unbox (native-transport-deliver-box t)) delivery))))
   (void))
 
 (define (native-transport-stop-stream-writer! t body)
@@ -128,8 +126,7 @@
           (native-transport-lifecycle-lock t)
           (lambda ()
             (and (eq? (unbox (native-transport-state-box t)) 'running)
-                 (let ([record
-                        (hash-ref (unbox (native-transport-stream-writers-box t)) id #f)]
+                 (let ([record (hash-ref (unbox (native-transport-stream-writers-box t)) id #f)]
                        [port (hash-ref (unbox (native-transport-streams-box t)) id #f)])
                    (and (or record port) (cons record port))))))))
   (define record (and snapshot (car snapshot)))
@@ -145,17 +142,16 @@
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (close-output-port port)))
   (when snapshot
-    (call-with-semaphore
-     (native-transport-lifecycle-lock t)
-     (lambda ()
-       (define writers (unbox (native-transport-stream-writers-box t)))
-       (define streams (unbox (native-transport-streams-box t)))
-       (when (eq? (hash-ref writers id #f) record)
-         (hash-remove! writers id))
-       ;; If the writer has already finished, retire its still-registered port
-       ;; too. Port identity protects a newer stream that reused the same id.
-       (when (and port (eq? (hash-ref streams id #f) port))
-         (hash-remove! streams id)))))
+    (call-with-semaphore (native-transport-lifecycle-lock t)
+                         (lambda ()
+                           (define writers (unbox (native-transport-stream-writers-box t)))
+                           (define streams (unbox (native-transport-streams-box t)))
+                           (when (eq? (hash-ref writers id #f) record)
+                             (hash-remove! writers id))
+                           ;; If the writer has already finished, retire its still-registered port
+                           ;; too. Port identity protects a newer stream that reused the same id.
+                           (when (and port (eq? (hash-ref streams id #f) port))
+                             (hash-remove! streams id)))))
   (void))
 
 (define (start-native-transport #:api routes
@@ -227,17 +223,16 @@
   (void))
 
 (define (native-transport-take-deferred! t)
-  (call-with-semaphore
-   (native-transport-lifecycle-lock t)
-   (lambda ()
-     (let ([b (native-transport-deferred-box t)])
-       (if (eq? (unbox (native-transport-state-box t)) 'running)
-           (let ([batch (reverse (unbox b))])
-             (set-box! b '())
-             batch)
-           (begin
-             (set-box! b '())
-             '()))))))
+  (call-with-semaphore (native-transport-lifecycle-lock t)
+                       (lambda ()
+                         (let ([b (native-transport-deferred-box t)])
+                           (if (eq? (unbox (native-transport-state-box t)) 'running)
+                               (let ([batch (reverse (unbox b))])
+                                 (set-box! b '())
+                                 batch)
+                               (begin
+                                 (set-box! b '())
+                                 '()))))))
 
 ;; Parse a raw message-handler payload (a JSON text from the page) and answer
 ;; through the host's deliver! hook. Parse failures become typed envelopes,
@@ -245,46 +240,40 @@
 (define (handle-raw-message! t raw)
   (when (native-transport-running? t)
     (bump-stat! t 'messages-received)
-    (let* ([body
-            (with-handlers ([exn:fail? (lambda (_) (hasheq))])
-              (cond
-                [(not (string? raw)) (hasheq)]
-                [else (string->jsexpr raw)]))]
-           [dispatch
-            (lambda ()
-              (with-handlers
-                  ([exn:fail?
-                    (lambda (e)
-                      ((current-glaze-error-reporter) e "glz1:native")
-                      (glz1-error-envelope #f 'internal "internal error" 'null))])
-                (dispatch-bridge body
-                                 (native-transport-routes t)
-                                 (native-transport-authority t)
-                                 (native-transport-table t)
-                                 route->js-name
-                                 (unbox (native-transport-streams-box t)))))]
-           [response
-            ;; Cancellation is the only bridge operation that touches the
-            ;; active-stream hash. Serialize it with stream registration and
-            ;; shutdown; normal route handlers remain concurrent.
-            (if (and (hash? body) (equal? (hash-ref body 'op #f) "cancel"))
-                (begin
-                  (native-transport-stop-stream-writer! t body)
-                  (call-with-semaphore
-                   (native-transport-lifecycle-lock t)
-                   (lambda ()
-                     (and (eq? (unbox (native-transport-state-box t)) 'running)
-                          (dispatch)))))
-                (dispatch))])
+    (let* ([body (with-handlers ([exn:fail? (lambda (_) (hasheq))])
+                   (cond
+                     [(not (string? raw)) (hasheq)]
+                     [else (string->jsexpr raw)]))]
+           [dispatch (lambda ()
+                       (with-handlers ([exn:fail?
+                                        (lambda (e)
+                                          ((current-glaze-error-reporter) e "glz1:native")
+                                          (glz1-error-envelope #f 'internal "internal error" 'null))])
+                         (dispatch-bridge body
+                                          (native-transport-routes t)
+                                          (native-transport-authority t)
+                                          (native-transport-table t)
+                                          route->js-name
+                                          (unbox (native-transport-streams-box t)))))]
+           ;; Cancellation is the only bridge operation that touches the
+           ;; active-stream hash. Serialize it with stream registration and
+           ;; shutdown; normal route handlers remain concurrent.
+           [response (if (and (hash? body) (equal? (hash-ref body 'op #f) "cancel"))
+                         (begin
+                           (native-transport-stop-stream-writer! t body)
+                           (call-with-semaphore (native-transport-lifecycle-lock t)
+                                                (lambda ()
+                                                  (and (eq? (unbox (native-transport-state-box t))
+                                                            'running)
+                                                       (dispatch)))))
+                         (dispatch))])
       (when response
         (cond
           ;; A streaming response is framed by the reader thread while the
           ;; writer runs independently; registration is atomic with shutdown.
           [(response? response)
            (bump-stat! t 'responses-delivered)
-           (define id (and (hash? body)
-                           (let ([v (hash-ref body 'id #f)])
-                             (and (string? v) v))))
+           (define id (and (hash? body) (let ([v (hash-ref body 'id #f)]) (and (string? v) v))))
            (define streams (unbox (native-transport-streams-box t)))
            (deliver-stream-response!
             response
@@ -293,33 +282,30 @@
             (lambda (delivery) (native-transport-deliver! t delivery))
             #:start-stream!
             (lambda (stream-id port writer-thunk)
-              (call-with-semaphore
-               (native-transport-lifecycle-lock t)
-               (lambda ()
-                 (if (eq? (unbox (native-transport-state-box t)) 'running)
-                     (let ([writer (thread writer-thunk)])
-                       (hash-set! streams stream-id port)
-                       (hash-set! (unbox (native-transport-stream-writers-box t))
-                                  stream-id
-                                  (cons port writer))
-                       writer)
-                     #f))))
+              (call-with-semaphore (native-transport-lifecycle-lock t)
+                                   (lambda ()
+                                     (if (eq? (unbox (native-transport-state-box t)) 'running)
+                                         (let ([writer (thread writer-thunk)])
+                                           (hash-set! streams stream-id port)
+                                           (hash-set! (unbox (native-transport-stream-writers-box t))
+                                                      stream-id
+                                                      (cons port writer))
+                                           writer)
+                                         #f))))
             #:unregister-stream!
             (lambda (stream-id port)
-              (call-with-semaphore
-               (native-transport-lifecycle-lock t)
-               (lambda ()
-                 (when (eq? (hash-ref streams stream-id #f) port)
-                   (hash-remove! streams stream-id)))))
+              (call-with-semaphore (native-transport-lifecycle-lock t)
+                                   (lambda ()
+                                     (when (eq? (hash-ref streams stream-id #f) port)
+                                       (hash-remove! streams stream-id)))))
             #:unregister-writer!
             (lambda (stream-id writer)
-              (call-with-semaphore
-               (native-transport-lifecycle-lock t)
-               (lambda ()
-                 (define writers (unbox (native-transport-stream-writers-box t)))
-                 (define record (hash-ref writers stream-id #f))
-                 (when (and record (eq? (cdr record) writer))
-                   (hash-remove! writers stream-id))))))]
+              (call-with-semaphore (native-transport-lifecycle-lock t)
+                                   (lambda ()
+                                     (define writers (unbox (native-transport-stream-writers-box t)))
+                                     (define record (hash-ref writers stream-id #f))
+                                     (when (and record (eq? (cdr record) writer))
+                                       (hash-remove! writers stream-id))))))]
           ;; Full envelopes use one delivery frame.
           [else
            (bump-stat! t 'responses-delivered)
@@ -351,11 +337,10 @@
 (define (native-transport-message! t raw)
   ;; Enqueue and shutdown share one lock: messages submitted after stopping are
   ;; ignored, while an earlier accepted message may be abandoned at teardown.
-  (call-with-semaphore
-   (native-transport-lifecycle-lock t)
-   (lambda ()
-     (when (eq? (unbox (native-transport-state-box t)) 'running)
-       (async-channel-put (native-transport-inbox t) raw))))
+  (call-with-semaphore (native-transport-lifecycle-lock t)
+                       (lambda ()
+                         (when (eq? (unbox (native-transport-state-box t)) 'running)
+                           (async-channel-put (native-transport-inbox t) raw))))
   (void))
 
 ;; The host wiring installs this once it has a WebView handle: deliver! runs
@@ -380,24 +365,23 @@
   ;; Exactly one caller owns cleanup; concurrent callers wait for its
   ;; completion, and later calls return immediately.
   (define-values (action threads ports writers)
-    (call-with-semaphore
-     (native-transport-lifecycle-lock t)
-     (lambda ()
-       (case (unbox (native-transport-state-box t))
-         [(running)
-          (define threads (unbox (native-transport-threads-box t)))
-          (define streams (unbox (native-transport-streams-box t)))
-          (define stream-writers (unbox (native-transport-stream-writers-box t)))
-          (define ports (hash-values streams))
-          (define writers (map cdr (hash-values stream-writers)))
-          (set-box! (native-transport-state-box t) 'stopping)
-          (set-box! (native-transport-threads-box t) '())
-          (hash-clear! streams)
-          (hash-clear! stream-writers)
-          (set-box! (native-transport-deferred-box t) '())
-          (values 'owner threads ports writers)]
-         [(stopping) (values 'wait '() '() '())]
-         [else (values 'done '() '() '())]))))
+    (call-with-semaphore (native-transport-lifecycle-lock t)
+                         (lambda ()
+                           (case (unbox (native-transport-state-box t))
+                             [(running)
+                              (define threads (unbox (native-transport-threads-box t)))
+                              (define streams (unbox (native-transport-streams-box t)))
+                              (define stream-writers (unbox (native-transport-stream-writers-box t)))
+                              (define ports (hash-values streams))
+                              (define writers (map cdr (hash-values stream-writers)))
+                              (set-box! (native-transport-state-box t) 'stopping)
+                              (set-box! (native-transport-threads-box t) '())
+                              (hash-clear! streams)
+                              (hash-clear! stream-writers)
+                              (set-box! (native-transport-deferred-box t) '())
+                              (values 'owner threads ports writers)]
+                             [(stopping) (values 'wait '() '() '())]
+                             [else (values 'done '() '() '())]))))
   (case action
     [(owner)
      (dynamic-wind
@@ -414,10 +398,7 @@
         (for ([writer (in-list writers)])
           (thread-wait writer))
         (let* ([dispatcher (and (pair? threads) (car threads))]
-               [event-thread
-                (and (native-transport-bus t)
-                     (pair? (cdr threads))
-                     (cadr threads))])
+               [event-thread (and (native-transport-bus t) (pair? (cdr threads)) (cadr threads))])
           (when event-thread
             (async-channel-put (native-transport-control t) 'shutdown)
             (thread-wait event-thread))
@@ -426,9 +407,8 @@
               (kill-thread dispatcher))
             (thread-wait dispatcher))))
       (lambda ()
-        (call-with-semaphore
-         (native-transport-lifecycle-lock t)
-         (lambda () (set-box! (native-transport-state-box t) 'stopped)))
+        (call-with-semaphore (native-transport-lifecycle-lock t)
+                             (lambda () (set-box! (native-transport-state-box t) 'stopped)))
         (semaphore-post (native-transport-shutdown-done t))))]
     [(wait) (sync (semaphore-peek-evt (native-transport-shutdown-done t)))]
     [else (void)])

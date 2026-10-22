@@ -83,49 +83,43 @@
 ;; owns the active-stream registry and can supply synchronized registration
 ;; callbacks so shutdown and cancel never race an unsynchronized hash mutation.
 ;; The optional defaults preserve the original private helper call shape.
-(define (deliver-stream-response! response
-                                  id
-                                  active-streams
-                                  deliver!
-                                  #:start-stream!
-                                  [start-stream!
-                                   (lambda (stream-id port writer-thunk)
-                                     (hash-set! active-streams stream-id port)
-                                     (thread writer-thunk))]
-                                  #:unregister-stream!
-                                  [unregister-stream!
-                                   (lambda (stream-id port)
-                                     (when (eq? (hash-ref active-streams stream-id #f) port)
-                                       (hash-remove! active-streams stream-id)))]
-                                  #:unregister-writer!
-                                  [unregister-writer!
-                                   (lambda (_stream-id _writer-thread) (void))])
+(define (deliver-stream-response!
+         response
+         id
+         active-streams
+         deliver!
+         #:start-stream! [start-stream!
+                          (lambda (stream-id port writer-thunk)
+                            (hash-set! active-streams stream-id port)
+                            (thread writer-thunk))]
+         #:unregister-stream! [unregister-stream!
+                               (lambda (stream-id port)
+                                 (when (eq? (hash-ref active-streams stream-id #f) port)
+                                   (hash-remove! active-streams stream-id)))]
+         #:unregister-writer! [unregister-writer! (lambda (_stream-id _writer-thread) (void))])
   (define out (response-output response))
   (define-values (pin pout) (make-pipe))
   ;; start-stream! atomically registers the port and starts its writer. A
   ;; transport can reject the start if shutdown has already begun.
   (define writer-thread
-    (with-handlers
-        ([exn:fail?
-          (lambda (e)
-            (close-port/quietly close-input-port pin)
-            (close-port/quietly close-output-port pout)
-            (unregister-stream! id pout)
-            (raise e))])
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (close-port/quietly close-input-port pin)
+                                 (close-port/quietly close-output-port pout)
+                                 (unregister-stream! id pout)
+                                 (raise e))])
       (start-stream!
        id
        pout
        (lambda ()
-         (dynamic-wind
-          void
-          (lambda ()
-            ;; Match the HTTP adapter: a writer exception truncates the body.
-            ;; Shutdown/cancel may close or kill this writer concurrently.
-            (with-handlers ([exn:fail? void])
-              (out pout)))
-          (lambda ()
-            (close-port/quietly close-output-port pout)
-            (unregister-writer! id (current-thread))))))))
+         (dynamic-wind void
+                       (lambda ()
+                         ;; Match the HTTP adapter: a writer exception truncates the body.
+                         ;; Shutdown/cancel may close or kill this writer concurrently.
+                         (with-handlers ([exn:fail? void])
+                           (out pout)))
+                       (lambda ()
+                         (close-port/quietly close-output-port pout)
+                         (unregister-writer! id (current-thread))))))))
   (if (not writer-thread)
       (begin
         ;; Shutdown won before registration; never run the response writer or
