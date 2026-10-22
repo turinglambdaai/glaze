@@ -413,7 +413,7 @@
 
 ;; ---- shutdown owns active stream writers and delivery lifecycle ----
 
-(define (make-shutdown-stream-routes started finished)
+(define (make-shutdown-stream-routes started finished [ticks #f])
   (list
    (GET "api/shutdown-stream"
         (lambda (_req)
@@ -423,6 +423,7 @@
               void
               (lambda ()
                 (let loop ()
+                  (when ticks (set-box! ticks (add1 (unbox ticks))))
                   (async-channel-put started 'tick)
                   ;; Deliberately ignore the port: closing it alone cannot stop
                   ;; this writer, so transport shutdown must own the thread.
@@ -441,9 +442,10 @@
 (define shutdown-deliveries (make-async-channel))
 (define shutdown-returned? (box #f))
 (define shutdown-late-delivery? (box #f))
+(define shutdown-ticks (box 0))
 (define t4
   (start-native-transport
-   #:api (make-shutdown-stream-routes shutdown-started shutdown-finished)
+   #:api (make-shutdown-stream-routes shutdown-started shutdown-finished shutdown-ticks)
    #:public-dir shutdown-dir))
 (native-transport-set-deliver!
  t4
@@ -461,7 +463,9 @@
 (check-not-false (sync/timeout 5 shutdown-started) "stream writer starts before shutdown")
 (check-not-exn (lambda () (native-transport-shutdown! t4)) "shutdown closes active stream")
 (set-box! shutdown-returned? #t)
-(check-not-false (sync/timeout 5 shutdown-finished) "shutdown unblocks and finishes stream writer")
+(define shutdown-ticks-after (unbox shutdown-ticks))
+(sleep 0.05)
+(check-equal? (unbox shutdown-ticks) shutdown-ticks-after "shutdown terminates the non-writing stream thread")
 (check-not-exn (lambda () (native-transport-shutdown! t4)) "active stream shutdown is idempotent")
 (native-transport-message! t4 (jsexpr->string (hasheq 'glz 1 'id "late" 'path "api/ping")))
 (sleep 0.05)
@@ -472,9 +476,10 @@
 (define cancel-only-started (make-async-channel))
 (define cancel-only-finished (make-async-channel))
 (define cancel-only-deliveries (make-async-channel))
+(define cancel-only-ticks (box 0))
 (define t7
   (start-native-transport
-   #:api (make-shutdown-stream-routes cancel-only-started cancel-only-finished)
+   #:api (make-shutdown-stream-routes cancel-only-started cancel-only-finished cancel-only-ticks)
    #:public-dir shutdown-dir))
 (native-transport-set-deliver!
  t7
@@ -493,7 +498,9 @@
 (define cancel-only-frames (collect-stream-frames cancel-only-deliveries))
 (check-true (string-contains? (last cancel-only-frames) "__glz1End")
             "cancel still emits the stream terminal frame")
-(check-not-false (sync/timeout 5 cancel-only-finished) "cancel terminates a non-writing writer")
+(define cancel-only-ticks-after (unbox cancel-only-ticks))
+(sleep 0.05)
+(check-equal? (unbox cancel-only-ticks) cancel-only-ticks-after "cancel terminates a non-writing writer")
 (check-not-exn (lambda () (native-transport-shutdown! t7)))
 
 ;; Cancellation and two concurrent shutdown callers may race; all must settle,
@@ -503,9 +510,10 @@
 (define race-deliveries (make-async-channel))
 (define race-returned? (box #f))
 (define race-late-delivery? (box #f))
+(define race-ticks (box 0))
 (define t5
   (start-native-transport
-   #:api (make-shutdown-stream-routes race-started race-finished)
+   #:api (make-shutdown-stream-routes race-started race-finished race-ticks)
    #:public-dir shutdown-dir))
 (native-transport-set-deliver!
  t5
@@ -554,8 +562,9 @@
 (thread-wait cancel-thread)
 (thread-wait shutdown-thread-1)
 (thread-wait shutdown-thread-2)
-(check-not-false (sync/timeout 5 race-finished) "racing shutdown closes stream writer")
+(define race-ticks-after (unbox race-ticks))
 (sleep 0.05)
+(check-equal? (unbox race-ticks) race-ticks-after "racing shutdown terminates the non-writing stream thread")
 (check-false (unbox race-late-delivery?) "no callback begins after racing shutdown returns")
 (check-not-exn (lambda () (native-transport-shutdown! t5)) "racing shutdown remains idempotent")
 
