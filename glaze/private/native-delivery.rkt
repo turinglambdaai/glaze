@@ -79,31 +79,70 @@
 ;; active-streams and uses it for cancellation (id -> output port); this helper
 ;; registers only for the duration of the stream and always sends open before
 ;; chunks and end after the pipe reaches EOF.
-(define (deliver-stream-response! response id active-streams deliver!)
+(define (close-port/quietly close-port port)
+  (with-handlers ([exn:fail? (lambda (_) (void))])
+    (close-port port)))
+
+;; Drain one web-server streaming response into native frames. The transport
+;; owns the active-stream registry and can supply synchronized registration
+;; callbacks so shutdown and cancel never race an unsynchronized hash mutation.
+;; The optional defaults preserve the original private helper call shape.
+(define (deliver-stream-response! response
+                                  id
+                                  active-streams
+                                  deliver!
+                                  #:register-stream!
+                                  [register-stream!
+                                   (lambda (stream-id port)
+                                     (hash-set! active-streams stream-id port)
+                                     #t)]
+                                  #:unregister-stream!
+                                  [unregister-stream!
+                                   (lambda (stream-id)
+                                     (hash-remove! active-streams stream-id))])
   (define out (response-output response))
   (define-values (pin pout) (make-pipe))
-  (hash-set! active-streams id pout)
-  (thread (lambda ()
-            ;; Match the HTTP adapter: a writer exception truncates the body. Closing
-            ;; the pipe still lets the reader produce the terminal frame.
-            (with-handlers ([exn:fail? void])
-              (out pout))
-            (close-output-port pout)))
-  (deliver! (stream-open-delivery id))
-  (let drain ([pending #""])
-    (define buf (make-bytes 4096))
-    (define n (read-bytes-avail! buf pin))
-    (cond
-      [(eof-object? n)
-       (hash-remove! active-streams id)
-       (unless (zero? (bytes-length pending))
-         (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\uFFFD))))
-       (deliver! (stream-end-delivery id))]
-      [(and (exact-nonnegative-integer? n) (> n 0))
-       (drain (deliver-utf8! id (bytes-append pending (subbytes buf 0 n)) deliver!))]
-      [else
-       (hash-remove! active-streams id)
-       (deliver! (stream-end-delivery id))]))
+  (cond
+    ;; Shutdown may win after dispatch has produced a streaming response but
+    ;; before it is registered. In that case do not start the writer or emit
+    ;; an open frame; release both ends and let the request worker return.
+    [(not (register-stream! id pout))
+     (close-port/quietly close-input-port pin)
+     (close-port/quietly close-output-port pout)]
+    [else
+     (thread
+      (lambda ()
+        (dynamic-wind
+         void
+         (lambda ()
+           ;; Match the HTTP adapter: a writer exception truncates the body.
+           ;; Shutdown/cancel may close the port concurrently, so the final
+           ;; close is deliberately idempotent.
+           (with-handlers ([exn:fail? void])
+             (out pout)))
+         (lambda ()
+           (close-port/quietly close-output-port pout)))))
+     (dynamic-wind
+      void
+      (lambda ()
+        (deliver! (stream-open-delivery id))
+        (let drain ([pending #""])
+          (define buf (make-bytes 4096))
+          (define n (read-bytes-avail! buf pin))
+          (cond
+            [(eof-object? n)
+             (unless (zero? (bytes-length pending))
+               (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\\uFFFD))))
+             (deliver! (stream-end-delivery id))]
+            [(and (exact-nonnegative-integer? n) (> n 0))
+             (drain (deliver-utf8! id (bytes-append pending (subbytes buf 0 n)) deliver!))]
+            [else (deliver! (stream-end-delivery id))])))
+      (lambda ()
+        ;; Always unregister and close the reader, even if a host delivery
+        ;; callback raises or shutdown interrupts this stream.
+        (unregister-stream! id)
+        (close-port/quietly close-input-port pin)
+        (close-port/quietly close-output-port pout)))])
   (void))
 
 (define (event-delivery seq name data)
