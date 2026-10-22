@@ -305,10 +305,12 @@
                        writer)
                      #f))))
             #:unregister-stream!
-            (lambda (stream-id)
+            (lambda (stream-id port)
               (call-with-semaphore
                (native-transport-lifecycle-lock t)
-               (lambda () (hash-remove! streams stream-id))))
+               (lambda ()
+                 (when (eq? (hash-ref streams stream-id #f) port)
+                   (hash-remove! streams stream-id)))))
             #:unregister-writer!
             (lambda (stream-id writer)
               (call-with-semaphore
