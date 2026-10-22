@@ -197,7 +197,7 @@
              batch)
            (begin
              (set-box! b '())
-             '())))))
+             '()))))))
 
 ;; Parse a raw message-handler payload (a JSON text from the page) and answer
 ;; through the host's deliver! hook. Parse failures become typed envelopes,
