@@ -132,7 +132,7 @@
           (cond
             [(eof-object? n)
              (unless (zero? (bytes-length pending))
-               (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\\uFFFD))))
+               (deliver! (stream-chunk-delivery id (bytes->string/utf-8 pending #\uFFFD))))
              (deliver! (stream-end-delivery id))]
             [(and (exact-nonnegative-integer? n) (> n 0))
              (drain (deliver-utf8! id (bytes-append pending (subbytes buf 0 n)) deliver!))]
