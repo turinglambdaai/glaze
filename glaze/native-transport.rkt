@@ -93,12 +93,14 @@
          stats-box ; box of immutable hash — served/delivered counters
          threads-box ; box of (listof thread?) — dispatcher + event thread
          streams-box ; box of (hash id -> output-port) — active streams
-         stream-writers-box ; box of (hash id -> (cons output-port thread))
+         stream-writers-box ; box of (hash id -> native-stream-writer)
          lifecycle-lock ; serializes stop, stream registry, and delivery gates
          state-box ; 'running, 'stopping, or 'stopped (protected by lifecycle-lock)
          shutdown-done ; broadcast event for concurrent idempotent shutdown callers
          deferred-box) ; box of (listof string) — FFI-stack message stash
   #:transparent)
+
+(struct native-stream-writer (port thread stop-lock) #:transparent)
 
 (define (bump-stat! t key)
   (define box (native-transport-stats-box t))
@@ -129,6 +131,13 @@
         (kill-thread writer))))
   (thread-wait writer))
 
+(define (native-transport-stop-stream-writer-record! record)
+  ;; Cancellation and shutdown can race; only one caller may break/kill a
+  ;; writer so a second break cannot interrupt its cleanup thunk.
+  (call-with-semaphore
+   (native-stream-writer-stop-lock record)
+   (lambda () (native-transport-stop-stream-writer-thread! (native-stream-writer-thread record)))))
+
 (define (native-transport-stop-stream-writer! t body)
   (define id (and (hash? body) (hash-ref body 'id #f)))
   (define snapshot
@@ -142,11 +151,10 @@
                    (and (or record port) (cons record port))))))))
   (define record (and snapshot (car snapshot)))
   (define port (and snapshot (cdr snapshot)))
-  (define writer (and record (cdr record)))
-  (when writer
+  (when record
     ;; Do not hold lifecycle-lock while stopping: the writer's cleanup
     ;; unregisters itself under that same lock.
-    (native-transport-stop-stream-writer-thread! writer))
+    (native-transport-stop-stream-writer-record! record))
   (when port
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (close-output-port port)))
@@ -294,11 +302,12 @@
               (call-with-semaphore (native-transport-lifecycle-lock t)
                                    (lambda ()
                                      (if (eq? (unbox (native-transport-state-box t)) 'running)
-                                         (let ([writer (thread writer-thunk)])
+                                         (let* ([writer (thread writer-thunk)]
+                                                [record (native-stream-writer port writer (make-semaphore 1))])
                                            (hash-set! streams stream-id port)
                                            (hash-set! (unbox (native-transport-stream-writers-box t))
                                                       stream-id
-                                                      (cons port writer))
+                                                      record)
                                            writer)
                                          #f))))
             #:unregister-stream!
@@ -313,7 +322,7 @@
                                    (lambda ()
                                      (define writers (unbox (native-transport-stream-writers-box t)))
                                      (define record (hash-ref writers stream-id #f))
-                                     (when (and record (eq? (cdr record) writer))
+                                     (when (and record (eq? (native-stream-writer-thread record) writer))
                                        (hash-remove! writers stream-id))))))]
           ;; Full envelopes use one delivery frame.
           [else
@@ -382,7 +391,7 @@
                               (define streams (unbox (native-transport-streams-box t)))
                               (define stream-writers (unbox (native-transport-stream-writers-box t)))
                               (define ports (hash-values streams))
-                              (define writers (map cdr (hash-values stream-writers)))
+                              (define writers (hash-values stream-writers))
                               (set-box! (native-transport-state-box t) 'stopping)
                               (set-box! (native-transport-threads-box t) '())
                               (hash-clear! streams)
@@ -398,13 +407,11 @@
       (lambda ()
         ;; Give writers a chance to unwind their response-body cleanup.
         ;; Non-cooperative writers are force-terminated after a bounded grace.
-        (for ([writer (in-list writers)])
-          (native-transport-stop-stream-writer-thread! writer))
+        (for ([record (in-list writers)])
+          (native-transport-stop-stream-writer-record! record))
         (for ([port (in-list ports)])
           (with-handlers ([exn:fail? (lambda (_) (void))])
             (close-output-port port)))
-        (for ([writer (in-list writers)])
-          (thread-wait writer))
         (let* ([dispatcher (and (pair? threads) (car threads))]
                [event-thread (and (native-transport-bus t) (pair? (cdr threads)) (cadr threads))])
           (when event-thread
