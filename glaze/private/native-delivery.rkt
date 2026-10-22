@@ -104,20 +104,27 @@
   ;; start-stream! atomically registers the port and starts its writer. A
   ;; transport can reject the start if shutdown has already begun.
   (define writer-thread
-    (start-stream!
-     id
-     pout
-     (lambda ()
-       (dynamic-wind
-        void
-        (lambda ()
-          ;; Match the HTTP adapter: a writer exception truncates the body.
-          ;; Shutdown/cancel may close or kill this writer concurrently.
-          (with-handlers ([exn:fail? void])
-            (out pout)))
-        (lambda ()
-          (close-port/quietly close-output-port pout)
-          (unregister-writer! id (current-thread))))))
+    (with-handlers
+        ([exn:fail?
+          (lambda (e)
+            (close-port/quietly close-input-port pin)
+            (close-port/quietly close-output-port pout)
+            (unregister-stream! id)
+            (raise e))])
+      (start-stream!
+       id
+       pout
+       (lambda ()
+         (dynamic-wind
+          void
+          (lambda ()
+            ;; Match the HTTP adapter: a writer exception truncates the body.
+            ;; Shutdown/cancel may close or kill this writer concurrently.
+            (with-handlers ([exn:fail? void])
+              (out pout)))
+          (lambda ()
+            (close-port/quietly close-output-port pout)
+            (unregister-writer! id (current-thread)))))))
   (if (not writer-thread)
       (begin
         ;; Shutdown won before registration; never run the response writer or
