@@ -128,7 +128,7 @@
           (native-transport-lifecycle-lock t)
           (lambda ()
             (and (eq? (unbox (native-transport-state-box t)) 'running)
-                 (hash-ref (unbox (native-transport-stream-writers-box t)) id #f)))))
+                 (hash-ref (unbox (native-transport-stream-writers-box t)) id #f))))))
   (when writer
     ;; Do not hold lifecycle-lock while killing: the writer's dynamic-wind
     ;; cleanup unregisters itself under that same lock.
