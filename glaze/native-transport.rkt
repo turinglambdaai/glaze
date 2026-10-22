@@ -362,15 +362,3 @@
     [(wait) (sync (semaphore-peek-evt (native-transport-shutdown-done t)))]
     [else (void)])
   (void))
-
-  ;; Idempotent: the host close path and run-app teardown both call this.
-  ;; With no event bus nobody consumes the control channel, so a second
-  ;; put would block forever on a full channel — only fire when threads
-  ;; are still registered.
-  (define threads (unbox (native-transport-threads-box t)))
-  (unless (null? threads)
-    (async-channel-put (native-transport-control t) 'shutdown)
-    (for ([th (in-list threads)])
-      (with-handlers ([exn:fail? (lambda (_) (void))])
-        (kill-thread th)))
-    (set-box! (native-transport-threads-box t) '())))
