@@ -261,7 +261,7 @@
           ;; Full envelopes use one delivery frame.
           [else
            (bump-stat! t 'responses-delivered)
-           (native-transport-deliver! t (response-delivery response))]))))
+           (native-transport-deliver! t (response-delivery response))])))))
 
 (define (event-loop t ch)
   (define bus (native-transport-bus t))
