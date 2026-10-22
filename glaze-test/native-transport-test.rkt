@@ -428,7 +428,7 @@
                   (flush-output out)
                   (sleep 0.01)
                   (loop)))
-              (lambda () (async-channel-put finished 'finished))))))))
+              (lambda () (async-channel-put finished 'finished)))))))))
 
 (define shutdown-dir (make-temporary-file "glaze-native-shutdown-~a" 'directory))
 (call-with-output-file (build-path shutdown-dir "index.html")
