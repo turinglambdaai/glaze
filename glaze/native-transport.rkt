@@ -143,7 +143,7 @@
        (define writers (unbox (native-transport-stream-writers-box t)))
        (when (eq? (hash-ref writers id #f) writer)
          (hash-remove! writers id))))
-  (void))
+  (void)))
 
 (define (start-native-transport #:api routes
                                 #:authority [authority #f]
