@@ -131,7 +131,7 @@
                  (let ([record
                         (hash-ref (unbox (native-transport-stream-writers-box t)) id #f)]
                        [port (hash-ref (unbox (native-transport-streams-box t)) id #f)])
-                   (and (or record port) (cons record port)))))))
+                   (and (or record port) (cons record port))))))))
   (define record (and snapshot (car snapshot)))
   (define port (and snapshot (cdr snapshot)))
   (define writer (and record (cdr record)))
