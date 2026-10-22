@@ -179,7 +179,7 @@
    (lambda ()
      (when (eq? (unbox (native-transport-state-box t)) 'running)
        (define b (native-transport-deferred-box t))
-       (set-box! b (cons raw (unbox b)))))
+       (set-box! b (cons raw (unbox b))))))
   (void))
 
 (define (native-transport-take-deferred! t)
@@ -216,7 +216,7 @@
                                  (native-transport-authority t)
                                  (native-transport-table t)
                                  route->js-name
-                                 (unbox (native-transport-streams-box t))))]
+                                 (unbox (native-transport-streams-box t)))))]
            [response
             ;; Cancellation is the only bridge operation that touches the
             ;; active-stream hash. Serialize it with stream registration and
