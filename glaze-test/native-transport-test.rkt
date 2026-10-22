@@ -282,10 +282,28 @@
 (check-not-exn (lambda () (native-transport-shutdown! t)))
 (check-not-exn (lambda () (native-transport-shutdown! t2)))
 
+;; The event subscription is gone and no page callback runs after shutdown.
+(bus-broadcast! bus 'after-shutdown (hasheq 'value 8))
+(check-false (sync/timeout 0.1 delivered2) "events are not delivered after shutdown")
+(check-not-exn (lambda () (native-transport-shutdown! t2)) "event shutdown is idempotent")
+
 ;; stats are observable
 (define stats (native-transport-stats t))
 (check-true (>= (hash-ref stats 'messages-received 0) 2) "messages were counted")
 (check-true (>= (hash-ref stats 'responses-delivered 0) 2) "responses were counted")
+
+;; Closed transports ignore new native and deferred messages without queuing
+;; work or reopening their dispatcher.
+(define messages-before-closed-send
+  (hash-ref (native-transport-stats t) 'messages-received 0))
+(native-transport-message! t (jsexpr->string (hasheq 'glz 1 'id "after-close" 'path "api/ping")))
+(native-transport-message-deferred! t "deferred-after-close")
+(check-equal? (native-transport-take-deferred! t) '() "closed transport drops deferred messages")
+(sleep 0.05)
+(check-equal? (hash-ref (native-transport-stats t) 'messages-received 0)
+              messages-before-closed-send
+              "closed transport does not queue new native messages")
+(check-not-exn (lambda () (native-transport-shutdown! t)) "shutdown is idempotent")
 
 (delete-directory/files capture-dir)
 
@@ -392,4 +410,126 @@
             "generated client exposes invokeStream")
 
 (check-not-exn (lambda () (native-transport-shutdown! t3)))
+
+;; ---- shutdown owns active stream writers and delivery lifecycle ----
+
+(define (make-shutdown-stream-routes started finished)
+  (list
+   (GET "api/shutdown-stream"
+        (lambda (_req)
+          (streaming-response
+           (lambda (out)
+             (dynamic-wind
+              void
+              (lambda ()
+                (let loop ()
+                  (async-channel-put started 'tick)
+                  (display "tick" out)
+                  (flush-output out)
+                  (sleep 0.01)
+                  (loop)))
+              (lambda () (async-channel-put finished 'finished))))))))
+
+(define shutdown-dir (make-temporary-file "glaze-native-shutdown-~a" 'directory))
+(call-with-output-file (build-path shutdown-dir "index.html")
+  (lambda (o) (display "<html>shutdown</html>" o)))
+
+;; Shutting down an active stream closes its writer, clears its registration,
+;; and prevents a callback from starting after shutdown returns.
+(define shutdown-started (make-async-channel))
+(define shutdown-finished (make-async-channel))
+(define shutdown-deliveries (make-async-channel))
+(define shutdown-returned? (box #f))
+(define shutdown-late-delivery? (box #f))
+(define t4
+  (start-native-transport
+   #:api (make-shutdown-stream-routes shutdown-started shutdown-finished)
+   #:public-dir shutdown-dir))
+(native-transport-set-deliver!
+ t4
+ (lambda (delivery)
+   (when (unbox shutdown-returned?)
+     (set-box! shutdown-late-delivery? #t))
+   (async-channel-put shutdown-deliveries delivery)))
+(native-transport-message!
+ t4
+ (jsexpr->string (hasheq 'glz 1 'id "shutdown-stream" 'path "api/shutdown-stream")))
+(define shutdown-open (sync/timeout 5 shutdown-deliveries))
+(check-true (and shutdown-open
+                  (string-contains? (native-delivery-js shutdown-open) "__glz1StreamOpen"))
+            "active stream opens before shutdown")
+(check-not-false (sync/timeout 5 shutdown-started) "stream writer starts before shutdown")
+(check-not-exn (lambda () (native-transport-shutdown! t4)) "shutdown closes active stream")
+(set-box! shutdown-returned? #t)
+(check-not-false (sync/timeout 5 shutdown-finished) "shutdown unblocks and finishes stream writer")
+(check-not-exn (lambda () (native-transport-shutdown! t4)) "active stream shutdown is idempotent")
+(native-transport-message! t4 (jsexpr->string (hasheq 'glz 1 'id "late" 'path "api/ping")))
+(sleep 0.05)
+(check-false (unbox shutdown-late-delivery?) "no callback begins after shutdown returns")
+
+;; Cancellation and two concurrent shutdown callers may race; all must settle,
+;; and the active writer must terminate whichever operation wins the lock.
+(define race-started (make-async-channel))
+(define race-finished (make-async-channel))
+(define race-deliveries (make-async-channel))
+(define race-returned? (box #f))
+(define race-late-delivery? (box #f))
+(define t5
+  (start-native-transport
+   #:api (make-shutdown-stream-routes race-started race-finished)
+   #:public-dir shutdown-dir))
+(native-transport-set-deliver!
+ t5
+ (lambda (delivery)
+   (when (unbox race-returned?)
+     (set-box! race-late-delivery? #t))
+   (async-channel-put race-deliveries delivery)))
+(native-transport-message!
+ t5
+ (jsexpr->string (hasheq 'glz 1 'id "race-stream" 'path "api/shutdown-stream")))
+(define race-open (sync/timeout 5 race-deliveries))
+(check-true (and race-open
+                  (string-contains? (native-delivery-js race-open) "__glz1StreamOpen"))
+            "race stream opens")
+(check-not-false (sync/timeout 5 race-started) "race stream writer starts")
+(define race-gate (make-semaphore 0))
+(define race-results (make-async-channel))
+(define cancel-thread
+  (thread
+   (lambda ()
+     (sync race-gate)
+     (native-transport-message!
+      t5
+      (jsexpr->string (hasheq 'glz 1 'op "cancel" 'id "race-stream")))
+     (async-channel-put race-results 'cancel-submitted))))
+(define shutdown-thread-1
+  (thread
+   (lambda ()
+     (sync race-gate)
+     (native-transport-shutdown! t5)
+     (set-box! race-returned? #t)
+     (async-channel-put race-results 'shutdown-1))))
+(define shutdown-thread-2
+  (thread
+   (lambda ()
+     (sync race-gate)
+     (native-transport-shutdown! t5)
+     (set-box! race-returned? #t)
+     (async-channel-put race-results 'shutdown-2))))
+(for ([i (in-range 3)]) (semaphore-post race-gate))
+(define race-outcomes
+  (for/list ([i (in-range 3)]) (sync/timeout 5 race-results)))
+(check-equal? (sort race-outcomes symbol<?)
+              '(cancel-submitted shutdown-1 shutdown-2)
+              "cancel and concurrent shutdown callers all settle")
+(thread-wait cancel-thread)
+(thread-wait shutdown-thread-1)
+(thread-wait shutdown-thread-2)
+(check-not-false (sync/timeout 5 race-finished) "racing shutdown closes stream writer")
+(sleep 0.05)
+(check-false (unbox race-late-delivery?) "no callback begins after racing shutdown returns")
+(check-not-exn (lambda () (native-transport-shutdown! t5)) "racing shutdown remains idempotent")
+
+(delete-directory/files shutdown-dir)
+
 (delete-directory/files stream-dir)
