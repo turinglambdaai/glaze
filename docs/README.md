@@ -17,3 +17,7 @@ This directory has one owner for each durable decision. New documents must link 
 - [Releasing](RELEASING.md): framework release procedure and provenance requirements.
 
 The generated HTML site under `docs/index.html` is product-facing material. The Racket API reference lives under `glaze-doc/scribblings/`. Durable engineering decisions belong in the Markdown owners above, then user-facing material should link to or summarize them.
+
+## Adoption and support
+
+[English guide](USING.md) · [简体中文](USING.zh-CN.md): fit, maturity, upgrade boundaries and support. This user path links to the existing canonical technical owners above.

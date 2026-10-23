@@ -10,6 +10,12 @@ Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web f
 
 <p align="center"><img src="docs/showcase.png" alt="Glaze Showcase — every capability in one window" width="720"></p>
 
+## Start here
+
+Choose Glaze for a Racket backend and a shared HTML/CSS/JS interface inside native system WebViews. A real desktop window is mandatory; there is no external-browser fallback. Product data/permissions and service policy remain application-owned.
+
+[Fit, maturity, upgrades and support](docs/USING.md) · [简体中文](docs/USING.zh-CN.md)
+
 ## Why Glaze?
 
 Racket's `racket/gui` works but is hard to style into a modern product-grade UI. Glaze takes a different approach: Racket serves the local application frontend and displays it inside a **native desktop window** backed by the OS WebView — WebView2 on Windows, WKWebView on macOS, and WebKitGTK on Linux.

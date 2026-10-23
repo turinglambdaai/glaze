@@ -27,6 +27,12 @@
             display: block;
         }
     </style>
+<style id="product-start-style">
+.product-start{max-width:1120px;margin:64px auto;padding:32px 24px;border-top:1px solid var(--border,#aaa);font:inherit;line-height:1.65}
+.product-start h2{font-size:clamp(1.7rem,3vw,2.4rem);letter-spacing:-.025em;margin:0 0 16px}.product-start h3{font-size:1.05rem;margin:0 0 10px}.product-start p{margin:0 0 16px;max-width:74ch}.product-start-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px;margin:28px 0}.product-start a{text-decoration:underline;text-underline-offset:4px;overflow-wrap:anywhere}.product-start a:focus-visible{outline:2px solid currentColor;outline-offset:5px}.product-start .start-links{display:flex;gap:16px 24px;flex-wrap:wrap}.product-start .start-status{font-weight:600}.product-start .start-limits{font-size:.95em}
+html:lang(en) .reader-zh,html:lang(zh) .reader-en{display:none!important}@media(max-width:700px){.product-start{margin:40px auto;padding:24px 20px}.product-start-grid{grid-template-columns:1fr;gap:18px}}
+</style>
+<style>.lang-menu li.lang-choice{padding:0}.lang-menu .lang-choice button{display:block;width:100%;padding:8px 12px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.lang-menu .lang-choice button:focus-visible{outline:2px solid currentColor;outline-offset:-2px;border-radius:4px}</style>
 </head>
 
 <body>
@@ -59,8 +65,8 @@
                         <span id="current-lang-label" data-en="English" data-zh="简体中文">English</span>
                     </button>
                     <ul class="lang-menu">
-                        <li onclick="setLanguage('en')">English</li>
-                        <li onclick="setLanguage('zh')">简体中文</li>
+                        <li class="lang-choice"><button type="button" onclick="setLanguage('en')">English</button></li>
+                        <li class="lang-choice"><button type="button" onclick="setLanguage('zh')">简体中文</button></li>
                     </ul>
                 </li>
             </ul>
@@ -258,7 +264,8 @@
     </section>
 
     <!-- Footer -->
-    <footer>
+    <section id="adoption" class="product-start"><h2 class="reader-en " lang="en">Build one verifiable result.</h2><h2 class="reader-zh " lang="zh">先完成一个可验证的结果。</h2><p class="reader-en " lang="en">Choose Glaze for a Racket backend and a shared HTML/CSS/JS interface inside native system WebViews. A real desktop window is mandatory; there is no external-browser fallback. Product data/permissions and service policy remain application-owned.</p><p class="reader-zh " lang="zh">需要 Racket 后端与共享 HTML/CSS/JS 界面，并运行于系统原生 WebView 时选择 Glaze。必须使用真实桌面窗口，不提供外部浏览器回退；产品数据、权限和服务政策归应用。</p><p class="reader-en " lang="en">Racket CS 9.0+. Windows needs WebView2 Runtime, macOS needs an interactive WKWebView session, and Linux needs GTK 3/WebKitGTK plus a graphical session. Native GLZ1 exists on all desktops; the 0.x run-app default remains the HTTP adapter in a native WebView.</p><p class="reader-zh " lang="zh">需要 Racket CS 9.0+。Windows 需要 WebView2 Runtime，macOS 需要交互式 WKWebView 会话，Linux 需要 GTK 3/WebKitGTK 和图形会话。桌面各端已有原生 GLZ1；0.x 的 run-app 默认仍是在原生 WebView 中使用 HTTP 适配器。</p><p class="reader-en " lang="en">Follow the typed-route tutorial, review schema changes and verify an observable action in your own packaged window. The generated title/URL/screenshot probe is a starting point, not proof of your product flow. Check focus, IME, scale, accessibility, dialogs and cancellation on every supported WebView.</p><p class="reader-zh " lang="zh">按类型化路由教程操作，审阅 schema 变更，并在自己的打包窗口验证可观察操作。生成的标题、URL 和截图探测仅是起点，不能证明产品流程。每个支持的 WebView 都需检查焦点、输入法、缩放、无障碍、对话框和取消。</p><div class="start-links"><a class="reader-en" lang="en" href="https://github.com/turinglambdaai/glaze/blob/main/docs/USING.md">Getting started, compatibility &amp; support</a><a class="reader-zh" lang="zh" href="https://github.com/turinglambdaai/glaze/blob/main/docs/USING.zh-CN.md">入门、兼容与支持</a></div></section>
+<footer>
         <div class="footer-content">
             <div class="footer-brand">
                 <svg width="22" height="22" viewBox="0 0 512 512" fill="none">
