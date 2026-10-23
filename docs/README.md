@@ -11,7 +11,7 @@ This directory has one owner for each durable decision. New documents must link 
 
 ## Developer and product contracts
 
-- [Getting started](getting-started.md): canonical install, scaffold, typed route, schema, native verification, and build tutorial.
+- [Getting started](getting-started.md) / [简体中文](getting-started.zh-CN.md): canonical install, scaffold, typed route, schema, native verification, and build tutorial.
 - [Agent-native workflow](agent-native.md): project inspection, diagnosis, editing, and native-window verification.
 - [GUI-first contract](gui-first.md): why application startup requires a native WebView and never falls back to a browser tab.
 - [Releasing](RELEASING.md): framework release procedure and provenance requirements.

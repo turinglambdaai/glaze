@@ -132,7 +132,7 @@ raco glaze dev
 
 会打开原生桌面窗口：脚手架默认使用 HTTP 适配器，也可显式启用原生 GLZ1。依赖缺失时会提示修复，不会退回系统浏览器。
 
-**下一步：** 按照[完整入门教程](docs/getting-started.md)添加类型化 Racket 路由、JS 调用、schema 基线和原生验证，再构建应用。
+**下一步：** 按照[完整入门教程](docs/getting-started.zh-CN.md)添加类型化 Racket 路由、JS 调用、schema 基线和原生验证，再构建应用。
 
 > 想直接从 GitHub 检出安装而不走包索引？
 > ```bash
@@ -225,7 +225,7 @@ myapp/
            #:title "myapp"))
 ```
 
-从这里加入 `define-api-routes`、通过 `glaze.api.*` 调用并更新 schema 的完整流程，请参考[入门教程](docs/getting-started.md)。
+从这里加入 `define-api-routes`、通过 `glaze.api.*` 调用并更新 schema 的完整流程，请参考[入门教程](docs/getting-started.zh-CN.md)。
 
 ## API
 
@@ -256,7 +256,7 @@ myapp/
 
 ## JavaScript 桥接
 
-嵌入式前端优先使用 `/glaze/api.js` 提供的传输中立客户端（`glaze.api.*`）调用 Racket 路由：`#:transport 'native` 通过 WebView 原生 GLZ1 消息通道通信，不向前端开放本地 TCP 端口；显式使用 HTTP 适配器时才经同源 `fetch`，也可以用 `curl` 测试。类型化路由与前端调用示例见[完整入门教程](docs/getting-started.md)。
+嵌入式前端优先使用 `/glaze/api.js` 提供的传输中立客户端（`glaze.api.*`）调用 Racket 路由：`#:transport 'native` 通过 WebView 原生 GLZ1 消息通道通信，不向前端开放本地 TCP 端口；显式使用 HTTP 适配器时才经同源 `fetch`，也可以用 `curl` 测试。类型化路由与前端调用示例见[完整入门教程](docs/getting-started.zh-CN.md)。
 
 ```racket
 (require glaze)

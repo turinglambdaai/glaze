@@ -445,11 +445,9 @@ raco test glaze-test/
 - 打包、签名失败不能假装成功；
 - 文档、示例、CLI scaffold 与真实运行行为必须保持一致。
 
-## 组合定位（Portfolio placement）
+## Portfolio placement
 
-- 轨道与授权：基础设施（产品线放大器，非利润中心）；授权形态：MIT；商业归属：全开源。
-- 组合归属唯一权威：[PORTFOLIO.md](https://github.com/turinglambdaai/turinglambdaai.github.io/blob/master/PORTFOLIO.md)（turinglambdaai.github.io 仓库）。改归属/授权先改权威档，再同步本节。
-- 纪律：价格只进本仓 `PRICING.md`，且收费开始时才发布；README 与产品站不做价格预告。
+This is open-source infrastructure under the repository's existing LICENSE, not a product paywall or pricing authority. Portfolio decisions live in [PORTFOLIO](https://github.com/turinglambdaai/turinglambdaai.github.io/blob/master/PORTFOLIO.md); product-specific commercial rules stay in the product repository.
 
 ## Product delivery coordination
 
@@ -458,3 +456,7 @@ Keep the implementation queue in `docs/1.0-plan.md` and preserve this library's 
 boundary. Products own interaction meaning, commercial policy and user data;
 do not add those policies to a framework facade.
 
+
+## Documentation languages
+
+Default public entry points and technical references are English. Maintain complete Chinese README/getting-started user paths with reciprocal links; preserve commands, API names and protocol semantics. Update both languages when a public user path changes. Technical references remain one normative source; Chinese guides explain and link to them. Follow the [family language policy](https://github.com/turinglambdaai/turinglambdaai.github.io/blob/master/docs/DOCUMENTATION-LANGUAGES.md). Historical internal notes need not all be translated.

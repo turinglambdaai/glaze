@@ -1,5 +1,7 @@
 # Getting started: your first Glaze desktop app
 
+**English** · [简体中文](getting-started.zh-CN.md)
+
 This is the **canonical** newcomer journey: installation, scaffolding, a typed Racket API, its JavaScript caller, schema review, real-window verification, and a build. Other introductions should link here rather than duplicate these steps.
 
 ## 1. Install Glaze and check your platform

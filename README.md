@@ -729,3 +729,5 @@ The tray is an optional integration. If its backend is unavailable it may degrad
 ## License
 
 Licensed under the [MIT License](LICENSE).
+
+Chinese onboarding: [完整中文入门](docs/getting-started.zh-CN.md); the English tutorial remains [Getting started](docs/getting-started.md).
