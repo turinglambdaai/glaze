@@ -2,11 +2,13 @@
 
 (require racket/file
          racket/list
+         racket/path
          racket/port
          racket/string
          racket/system
          rackunit
-         glaze/build)
+         glaze/build
+         glaze/private/linux-package)
 
 ;; ---- package name / version sanitization ----
 
@@ -164,3 +166,55 @@
     (check-true (string-contains? listing "usr/bin/rpmtest"))
     (check-true (string-contains? listing "usr/lib/rpmtest")))
   (delete-directory/files dist))
+
+;; ---- staging tree (pure file work; no packaging tools required) ----
+
+(define stage-dist (make-temporary-file "glaze-stagetree-dist-~a" 'directory))
+(make-directory* (build-path stage-dist "bin"))
+(make-directory* (build-path stage-dist "lib"))
+(call-with-output-file (build-path stage-dist "bin" "StageApp")
+                       (lambda (out) (display "#!/bin/sh\necho ok\n" out))
+                       #:exists 'replace)
+(file-or-directory-permissions (build-path stage-dist "bin" "StageApp") #o755)
+(call-with-output-file (build-path stage-dist "lib" "data.txt")
+                       (lambda (out) (display "payload" out))
+                       #:exists 'replace)
+;; Installer-shaped entries in dist must never be staged into the package.
+(call-with-output-file (build-path stage-dist "stageapp.deb")
+                       (lambda (out) (display "decoy" out))
+                       #:exists 'replace)
+(make-directory* (build-path stage-dist "AppDir"))
+(call-with-output-file (build-path stage-dist "AppDir" "junk")
+                       (lambda (out) (display "decoy" out))
+                       #:exists 'replace)
+
+(define stage-root (linux-staging-tree stage-dist "StageApp"))
+(check-not-false stage-root "the staging tree requires a launcher to exist")
+(when stage-root
+  (dynamic-wind
+   void
+   (lambda ()
+     (check-true (file-exists? (build-path stage-root "usr" "lib" "StageApp" "bin" "StageApp")))
+     (check-equal? (file->string (build-path stage-root "usr" "lib" "StageApp" "lib" "data.txt"))
+                   "payload")
+     (check-false (file-exists? (build-path stage-root "usr" "lib" "StageApp" "stageapp.deb"))
+                  "installer artifacts are not staged")
+     (check-false (directory-exists? (build-path stage-root "usr" "lib" "StageApp" "AppDir"))
+                  "the AppDir work directory is not staged")
+     (define wrapper (file->string (build-path stage-root "usr" "bin" "StageApp")))
+     (check-true (string-contains? wrapper "exec /usr/lib/StageApp/bin/StageApp \"$@\""))
+     (check-true (file-exists?
+                  (build-path stage-root "usr" "share" "applications" "StageApp.desktop")))
+     (check-true
+      (string-contains?
+       (file->string (build-path stage-root "usr" "share" "applications" "StageApp.desktop"))
+       "Icon=stageapp")
+      "the desktop entry names the sanitized hicolor icon stem")
+     (check-equal?
+      (file->bytes
+       (build-path stage-root "usr" "share" "icons" "hicolor" "64x64" "apps" "stageapp.png"))
+      (icon-png-bytes)
+      "the staged icon is the generated placeholder PNG"))
+   (lambda ()
+     (delete-directory/files stage-root)
+     (delete-directory/files stage-dist))))

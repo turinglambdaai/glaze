@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; Deterministic Windows installer identity and source templates. Toolchain
-;; execution remains in glaze/build.
+;; execution is owned by glaze/private/windows-installer.
 
 (require file/sha1
          racket/file

@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; Deterministic Linux package metadata and the generated fallback icon. The
-;; actual toolchain invocation/staging remains owned by glaze/build.
+;; actual toolchain invocation/staging is owned by glaze/private/linux-package.
 
 (require racket/list
          racket/path
