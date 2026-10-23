@@ -73,10 +73,15 @@
 (check-true (string-contains? guide-content "[name GString \"World\"]"))
 (check-false (string-contains? guide-content "[name string? \"World\"]"))
 
-(for ([readme (in-list '("README.md" "README.zh-CN.md"))])
+;; Each README must link its language's canonical newcomer guide: the
+;; English tutorial for README.md and the full Chinese translation for
+;; README.zh-CN.md.
+(for ([readme+guide (in-list '(("README.md" "docs/getting-started.md")
+                               ("README.zh-CN.md" "docs/getting-started.zh-CN.md")))])
+  (define readme (car readme+guide))
   (define path (build-path repository-root readme))
   (define content (file->string path))
-  (check-not-false (member "docs/getting-started.md" (link-destinations path))
+  (check-not-false (member (cadr readme+guide) (link-destinations path))
                    (format "~a must link newcomer guide" readme))
   (check-false (string-contains? content "GLZ1 still runs over loopback HTTP/SSE"))
   (check-false (string-contains? content "GLZ1 仍运行在本机 HTTP/SSE"))

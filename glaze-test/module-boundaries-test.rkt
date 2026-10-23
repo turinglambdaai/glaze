@@ -30,6 +30,22 @@
                (format "implementation modules must not import a public facade: ~a"
                        (find-relative-path implementation-root source))))
 
+;; Private build owners point inward: staging, signing, and installer-format
+;; modules may share helpers and metadata owners, but they never import the
+;; glaze/build orchestrator (or any other parent aggregation module) that
+;; requires them, or loading one owner would re-enable the whole build graph.
+(define private-root-reference "../glaze/private")
+(define private-root (simplify-path private-root-reference #t))
+(define parent-aggregate-import-rx #px"\"[.][.]/(?:build|main)[.]rkt\"")
+(for ([source (in-list (find-files (lambda (path)
+                                     (and (file-exists? path)
+                                          (regexp-match? #rx#"[.]rkt$" (path->bytes path))
+                                          (not (regexp-match? #rx#"/compiled/" (path->bytes path)))))
+                                   private-root))])
+  (check-false (regexp-match? parent-aggregate-import-rx (file->string source))
+               (format "private build owner imports an aggregation module: ~a"
+                       (find-relative-path private-root source))))
+
 ;; Command implementations point inward to shared helpers and framework
 ;; modules. They must never reach back into the executable dispatcher or its
 ;; aggregate inspect/package commands, otherwise loading one command re-enables
