@@ -32,3 +32,361 @@ reordering, a newly required field/parameter, removal of a declared error, any
 change to an existing closed enum, or a GLZ1/schema-format change is breaking.
 The repair for a stale gate is either to restore compatibility or explicitly
 review and rewrite the baseline; CI must never update it automatically.
+
+<!-- reviewed-layer-classification:begin -->
+
+## Reviewed-layer export classification (G3-S1, 2026-10-23)
+
+Every export of the four reviewed layers carries exactly one tier from
+the table above. The classification test (`glaze-test/classification-test.rkt`)
+parses this section and fails when a reviewed-layer export is added, removed,
+duplicated, or left unclassified; `public-api-test.rkt` independently pins the
+raw export sets, so the two guards together mean the classification can never
+drift from reality in either direction.
+
+Tiers: **stable** keeps the SemVer compatibility promise; **expert-level** is
+documented, supported surface that the 1.0 curation may still narrow with a
+migration note; **private** rows carry a disposition — they are NOT blessed as
+permanent API and are scheduled for internalization or relocation during the
+G3 deprecation slice. No reviewed-layer export is currently experimental;
+`glaze/experimental` is outside this table by charter.
+
+### `glaze/window` — 47 exports
+
+| Export | Tier | Disposition |
+|---|---|---|
+| `all-webviews` | stable | |
+| `close-all-webviews!` | stable | |
+| `default-window-state-path` | stable | |
+| `normalize-window-state` | expert | pure helper for state authors |
+| `open-webview` | expert | raw entry; apps use open-window |
+| `open-window` | stable | |
+| `read-window-state` | stable | |
+| `screen-area` | stable | |
+| `screen-area-height` | stable | |
+| `screen-area-width` | stable | |
+| `screen-area-x` | stable | |
+| `screen-area-y` | stable | |
+| `screen-area?` | stable | |
+| `struct:screen-area` | stable | |
+| `struct:window-state` | stable | |
+| `wait-for-webviews` | stable | |
+| `webview-backend` | private | internalize behind glaze/webview; never public API |
+| `webview-capture!` | stable | |
+| `webview-close` | stable | |
+| `webview-closed?` | stable | |
+| `webview-diagnostic` | stable | |
+| `webview-focus!` | stable | |
+| `webview-handle` | private | internalize; raw backend handle |
+| `webview-install-guidance` | stable | |
+| `webview-last-error` | stable | |
+| `webview-navigate` | stable | |
+| `webview-restore-state!` | stable | |
+| `webview-save-state!` | stable | |
+| `webview-screen-area` | stable | |
+| `webview-set-fullscreen!` | stable | |
+| `webview-set-menu!` | stable | |
+| `webview-set-size!` | stable | |
+| `webview-set-title!` | stable | |
+| `webview-set-window-state!` | stable | |
+| `webview-supported?` | stable | |
+| `webview-title` | stable | |
+| `webview-url` | stable | |
+| `webview-window-state` | stable | |
+| `webview?` | stable | |
+| `window-state` | stable | |
+| `window-state-height` | stable | |
+| `window-state-maximized?` | stable | |
+| `window-state-width` | stable | |
+| `window-state-x` | stable | |
+| `window-state-y` | stable | |
+| `window-state?` | stable | |
+| `write-window-state!` | stable | |
+
+### `glaze/services` — 150 exports
+
+| Export | Tier | Disposition |
+|---|---|---|
+| `accelerator-permission` | stable | |
+| `accelerator?` | stable | |
+| `clipboard-get` | stable | |
+| `clipboard-set!` | stable | |
+| `default-dialog-backend` | private | internalize; backend handle |
+| `default-hotkey-backend` | private | internalize; backend handle |
+| `dialog-ask!` | stable | |
+| `dialog-backend?` | private | internalize; backend handle |
+| `dialog-message!` | stable | |
+| `dialog-supported?` | stable | |
+| `fs-copy!` | stable | |
+| `fs-create-dir!` | stable | |
+| `fs-exists?` | stable | |
+| `fs-move!` | stable | |
+| `fs-read-bytes` | stable | |
+| `fs-read-dir` | stable | |
+| `fs-read-text` | stable | |
+| `fs-remove!` | stable | |
+| `fs-stat` | stable | |
+| `fs-write-bytes!` | stable | |
+| `fs-write-text!` | stable | |
+| `glaze-logger-history` | expert | |
+| `glaze-logger?` | expert | |
+| `hotkey` | stable | |
+| `hotkey->string` | stable | |
+| `hotkey-backend?` | private | internalize; backend handle |
+| `hotkey-key` | stable | |
+| `hotkey-keys` | stable | |
+| `hotkey-modifiers` | stable | |
+| `hotkey-mods` | stable | |
+| `hotkey-register!` | stable | |
+| `hotkey-registered?` | stable | |
+| `hotkey-supported?` | stable | |
+| `hotkey-unregister!` | stable | |
+| `hotkey-unregister-all!` | stable | |
+| `hotkey=?` | stable | |
+| `hotkey?` | stable | |
+| `http-request` | stable | |
+| `id-allocator-clear!` | private | internalize; allocator internals |
+| `id-allocator-lookup` | private | internalize; allocator internals |
+| `id-allocator-next!` | private | internalize; allocator internals |
+| `id-allocator-register!` | private | internalize; allocator internals |
+| `load-store` | stable | |
+| `log-debug` | stable | |
+| `log-error` | stable | |
+| `log-info` | stable | |
+| `log-level?` | stable | |
+| `log-levels` | stable | |
+| `log-record` | expert | custom-sink authors |
+| `log-record-capability` | expert | |
+| `log-record-data` | expert | |
+| `log-record-level` | expert | |
+| `log-record-message` | expert | |
+| `log-record-source` | expert | |
+| `log-record-time` | expert | |
+| `log-sink` | expert | custom-sink authors |
+| `log-sink?` | expert | |
+| `log-trace` | stable | |
+| `log-warn` | stable | |
+| `make-dialog-backend` | private | internalize; backend constructor |
+| `make-dialog-routes` | expert | |
+| `make-file-log-sink` | stable | |
+| `make-filesystem-routes` | expert | route composition; apps use define-api-routes |
+| `make-glaze-logger` | stable | |
+| `make-global-shortcut-routes` | expert | |
+| `make-hotkey` | stable | |
+| `make-hotkey-backend` | private | internalize; backend constructor |
+| `make-http-routes` | expert | |
+| `make-id-allocator` | private | internalize; allocator internals |
+| `make-log-routes` | expert | |
+| `make-menu` | stable | |
+| `make-menu-item` | stable | |
+| `make-shell-routes` | expert | |
+| `make-sql-routes` | expert | |
+| `make-stderr-log-sink` | stable | |
+| `make-store-routes` | expert | |
+| `make-system-routes` | expert | |
+| `make-tray` | stable | |
+| `menu` | stable | |
+| `menu-item` | stable | |
+| `menu-item-accel` | stable | |
+| `menu-item-action` | stable | |
+| `menu-item-checked?` | stable | |
+| `menu-item-enabled?` | stable | |
+| `menu-item-id` | stable | |
+| `menu-item-label` | stable | |
+| `menu-item?` | stable | |
+| `menu-items` | stable | |
+| `menu-separator` | stable | |
+| `menu-separator?` | stable | |
+| `menu-title` | stable | |
+| `menu?` | stable | |
+| `notify!` | stable | |
+| `open-browser` | stable | |
+| `open-path` | stable | |
+| `open-sqlite-database` | stable | |
+| `pick-file` | stable | |
+| `pick-files` | stable | |
+| `pick-folder` | stable | |
+| `reveal-path` | stable | |
+| `save-file-dialog` | stable | |
+| `shell-output` | stable | |
+| `shell-process-close-input!` | expert | |
+| `shell-process-id` | expert | |
+| `shell-process-info` | expert | |
+| `shell-process-kill!` | expert | |
+| `shell-process-pid` | expert | |
+| `shell-process-wait` | expert | |
+| `shell-process-write!` | expert | |
+| `shell-process?` | expert | |
+| `shell-spawn!` | stable | |
+| `single-instance?` | stable | |
+| `sql-close!` | stable | |
+| `sql-database-path` | expert | |
+| `sql-database?` | expert | |
+| `sql-execute!` | stable | |
+| `sql-select` | stable | |
+| `store-clear!` | expert | |
+| `store-close!` | expert | |
+| `store-count` | expert | |
+| `store-delete!` | stable | |
+| `store-entries` | expert | |
+| `store-get` | stable | |
+| `store-has-key?` | stable | |
+| `store-keys` | expert | |
+| `store-path` | expert | |
+| `store-reload!` | expert | |
+| `store-reset!` | expert | |
+| `store-save!` | expert | |
+| `store-set!` | stable | |
+| `store-snapshot` | expert | |
+| `store-values` | expert | |
+| `store?` | stable | |
+| `string->hotkey` | stable | |
+| `struct:menu` | stable | |
+| `struct:menu-item` | stable | |
+| `sys-supported?` | stable | |
+| `system-hostname` | stable | |
+| `system-information` | stable | |
+| `tray-backend` | private | internalize; backend handle |
+| `tray-close` | stable | |
+| `tray-handle` | private | internalize; backend handle |
+| `tray-set-icon!` | stable | |
+| `tray-set-menu!` | stable | |
+| `tray-set-tooltip!` | stable | |
+| `tray-supported?` | stable | |
+| `tray?` | stable | |
+| `win-filter-string` | private | relocate to a private Win32 owner |
+| `wstr` | private | relocate to a private Win32 string-conversion owner |
+| `wstr-parts` | private | relocate to a private Win32 string-conversion owner |
+
+### `glaze/distribution` — 103 exports
+
+| Export | Tier | Disposition |
+|---|---|---|
+| `build-app` | stable | |
+| `channel-accepts-version?` | stable | |
+| `check-update` | stable | |
+| `copy-template` | private | internalize; package-template implementation |
+| `deb-arch-name` | expert | |
+| `deb-control` | expert | |
+| `default-entry-template` | expert | entry-generation customization |
+| `desktop-entry` | expert | |
+| `download-update` | stable | |
+| `embedded-public-dir` | private | internalize; packaging implementation |
+| `ensure-public-dir` | private | internalize; package-template implementation |
+| `execute-install-plan!` | stable | |
+| `fetch-update-manifest` | stable | |
+| `icon-png-bytes` | expert | |
+| `install-plan` | stable | |
+| `install-plan-backup-path` | stable | |
+| `install-plan-candidate` | stable | |
+| `install-plan-downloaded-path` | stable | |
+| `install-plan-install` | stable | |
+| `install-plan-restart` | stable | |
+| `install-plan-rollback` | stable | |
+| `install-plan?` | stable | |
+| `make-install-plan` | stable | |
+| `make-linux-installer` | stable | |
+| `make-replace-install-plan` | stable | |
+| `newer-version?` | stable | |
+| `openssl-available?` | stable | |
+| `openssl-path` | expert | point the suite at a specific openssl CLI |
+| `payload-bytes->update-manifest` | stable | |
+| `platform-backend-modules` | expert | for raco exe users bypassing build-app |
+| `public-dir-relative?` | private | internalize; security-check helper |
+| `public-key-fingerprint` | stable | |
+| `read-signed-update-manifest` | stable | |
+| `resolve-public-dir` | expert | custom-server composition |
+| `rpm-arch-name` | expert | |
+| `rpm-spec` | expert | |
+| `sanitize-package-name` | expert | |
+| `sanitize-package-version` | expert | |
+| `select-update` | stable | |
+| `semver-compare` | stable | |
+| `semver<=?` | stable | |
+| `semver<?` | stable | |
+| `semver=?` | stable | |
+| `semver>=?` | stable | |
+| `semver>?` | stable | |
+| `semver?` | stable | |
+| `sha256-file` | stable | |
+| `sha256-string` | stable | |
+| `sign-bytes` | stable | |
+| `sign-file` | stable | |
+| `signing-key-password-encrypted?` | expert | key-handling detail |
+| `signing-keygen` | stable | |
+| `struct:install-plan` | stable | |
+| `struct:update-artifact` | stable | |
+| `struct:update-candidate` | stable | |
+| `struct:update-manifest` | stable | |
+| `struct:updater-config` | stable | |
+| `update-artifact` | stable | |
+| `update-artifact-architecture` | stable | |
+| `update-artifact-arguments` | stable | |
+| `update-artifact-installer` | stable | |
+| `update-artifact-platform` | stable | |
+| `update-artifact-sha256` | stable | |
+| `update-artifact-signature` | stable | |
+| `update-artifact-size` | stable | |
+| `update-artifact-url` | stable | |
+| `update-artifact?` | stable | |
+| `update-candidate` | stable | |
+| `update-candidate-artifact` | stable | |
+| `update-candidate-manifest` | stable | |
+| `update-candidate?` | stable | |
+| `update-manifest` | stable | |
+| `update-manifest->payload-bytes` | stable | |
+| `update-manifest-application-id` | stable | |
+| `update-manifest-artifacts` | stable | |
+| `update-manifest-build` | stable | |
+| `update-manifest-channel` | stable | |
+| `update-manifest-minimum-version` | stable | |
+| `update-manifest-previous-version` | stable | |
+| `update-manifest-published-at` | stable | |
+| `update-manifest-rollback-allowed?` | stable | |
+| `update-manifest-rollout` | stable | |
+| `update-manifest-schema-version` | stable | |
+| `update-manifest-version` | stable | |
+| `update-manifest?` | stable | |
+| `updater-config` | stable | |
+| `updater-config-application-id` | stable | |
+| `updater-config-architecture` | stable | |
+| `updater-config-channel` | stable | |
+| `updater-config-current-version` | stable | |
+| `updater-config-expected-key-id` | stable | |
+| `updater-config-maximum-download-bytes` | stable | |
+| `updater-config-platform` | stable | |
+| `updater-config-public-key` | stable | |
+| `updater-config-rollout-bucket` | stable | |
+| `updater-config?` | stable | |
+| `valid-update-channel?` | stable | |
+| `verify-bytes` | stable | |
+| `verify-file-sha256` | stable | |
+| `verify-signature` | stable | |
+| `verify-signed-update-manifest` | stable | |
+| `verify-update-artifact!` | stable | |
+| `write-signed-update-manifest` | stable | |
+
+### `glaze/devtools` — 9 exports
+
+| Export | Tier | Disposition |
+|---|---|---|
+| `current-glaze-error-reporter` | expert | error-reporter parameterization |
+| `ffi-lib*` | expert | mandated FFI discovery entry (AGENTS.md) |
+| `ffi-lib-reason` | expert | |
+| `ffi-search-dirs` | expert | |
+| `generate-api-declarations` | stable | |
+| `path->mime-type` | expert | static-serving detail |
+| `start-dev-server` | stable | |
+| `start-server` | stable | |
+| `stop-server` | stable | |
+
+**Internalization backlog (private rows):** backend handles and
+constructors (`webview-backend`, `webview-handle`, `tray-backend`,
+`tray-handle`, dialog/hotkey backend trio), the id allocator, Win32 string
+conversion (`wstr`, `wstr-parts`, `win-filter-string`), and the
+package-template/assets internals (`copy-template`, `ensure-public-dir`,
+`embedded-public-dir`, `public-dir-relative?`). G3-S2 moves or wraps these
+behind `glaze/private` and ships deprecation notes; until then they remain
+reachable but are contractually non-permanent.
+
+<!-- reviewed-layer-classification:end -->
