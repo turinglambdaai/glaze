@@ -450,3 +450,11 @@ raco test glaze-test/
 - 轨道与授权：基础设施（产品线放大器，非利润中心）；授权形态：MIT；商业归属：全开源。
 - 组合归属唯一权威：[PORTFOLIO.md](https://github.com/turinglambdaai/turinglambdaai.github.io/blob/master/PORTFOLIO.md)（turinglambdaai.github.io 仓库）。改归属/授权先改权威档，再同步本节。
 - 纪律：价格只进本仓 `PRICING.md`，且收费开始时才发布；README 与产品站不做价格预告。
+
+## Product delivery coordination
+
+The [family delivery standard](https://github.com/turinglambdaai/turinglambdaai.github.io/blob/master/docs/PRODUCT-STANDARD.md) governs evidence and product handoff.
+Keep the implementation queue in `docs/1.0-plan.md` and preserve this library's domain
+boundary. Products own interaction meaning, commercial policy and user data;
+do not add those policies to a framework facade.
+
