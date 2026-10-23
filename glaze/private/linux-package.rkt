@@ -23,6 +23,13 @@
 (provide make-linux-installer
          linux-staging-tree)
 
+;; POSIX permission bits only exist on Unix hosts; Windows raises for
+;; anything beyond the write bits, and the staging tree is exercised
+;; cross-platform as pure file work.
+(define (set-executable-mode! path)
+  (unless (eq? (system-type 'os) 'windows)
+    (file-or-directory-permissions path #o755)))
+
 (define (make-linux-installer out-dir app-name version publisher identifier)
   (define dist (path->complete-path out-dir))
   (define artifacts
@@ -71,7 +78,7 @@
           wrapper
           (lambda (out) (fprintf out "#!/bin/sh\nexec /usr/lib/~a/bin/~a \"$@\"\n" app-name app-name))
           #:exists 'replace)
-         (file-or-directory-permissions wrapper #o755)
+         (set-executable-mode! wrapper)
          (define apps-dir (build-path root "usr" "share" "applications"))
          (make-directory* apps-dir)
          (call-with-output-file
@@ -200,7 +207,7 @@
                 (lambda (out)
                   (fprintf out "#!/bin/sh\nexec /usr/lib/~a/bin/~a \"$@\"\n" app-name app-name))
                 #:exists 'replace)
-               (file-or-directory-permissions (build-path appdir "AppRun") #o755)
+               (set-executable-mode! (build-path appdir "AppRun"))
                (define appimage-path (build-path dist (string-append app-name ".AppImage")))
                (define ok?
                  (case tool
