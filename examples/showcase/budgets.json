@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {"glob": "*.dmg", "max-bytes": 400000000},
+    {"glob": "*.msi", "max-bytes": 400000000},
+    {"glob": "*.AppImage", "max-bytes": 400000000},
+    {"glob": "*.deb", "max-bytes": 400000000},
+    {"glob": "*.rpm", "max-bytes": 400000000},
+    {"glob": "*", "max-bytes": 500000000}
+  ]
+}

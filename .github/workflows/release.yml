@@ -140,6 +140,37 @@ jobs:
           assert report["compatible"] is True
           PY
 
+      - name: Inventory the source package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The declared public surface must physically ship in the exact
+          # artifact the smoke just installed: every supported public
+          # module, the G3-S2 private owners behind them, the CLI, and the
+          # package metadata that carries the version (upgrade identity).
+          python - <<'PY'
+          import json, subprocess, sys, zipfile
+
+          zip_path = "release-assets/glaze-%s.zip" % __import__("os").environ["GLAZE_VERSION"]
+          names = set(zipfile.ZipFile(zip_path).namelist())
+
+          required = [
+              "glaze/main.rkt", "glaze/core.rkt", "glaze/window.rkt",
+              "glaze/services.rkt", "glaze/distribution.rkt",
+              "glaze/devtools.rkt", "glaze/experimental.rkt",
+              "glaze/private/id-allocator.rkt", "glaze/private/dialog-backend.rkt",
+              "glaze/private/hotkey-backend.rkt", "glaze/private/win32-strings.rkt",
+              "glaze/private/public-assets.rkt",
+              "glaze-cli/cli.rkt", "info.rkt",
+          ]
+          missing = [m for m in required if not any(n.endswith(m) for n in names)]
+          if missing:
+              print("missing from source package:", missing, file=sys.stderr)
+              sys.exit(1)
+          print("package contents inventory: %d entries, all %d required paths present"
+                % (len(names), len(required)))
+          PY
+
       - name: Upload source release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -186,6 +217,11 @@ jobs:
             throw "Glaze MSI was not produced: $msi"
           }
           wix msi validate $msi
+          # G4-S2: record what the packaged app weighs against the showcase
+          # budget file; a violation fails the release.
+          Push-Location examples/showcase
+          raco glaze measure size --budget budgets.json
+          Pop-Location
           New-Item -ItemType Directory -Path release-assets | Out-Null
           $asset = "glaze-${{ needs.source.outputs.version }}-windows-x64.msi"
           Move-Item -LiteralPath $msi -Destination (Join-Path release-assets $asset)
@@ -258,6 +294,8 @@ jobs:
           test -f dist/Glaze.deb
           test -f dist/Glaze.rpm
           test -f dist/Glaze.AppImage
+          # G4-S2: packaged-size budget gate (fails the release on violation).
+          raco glaze measure size --budget budgets.json
 
       - name: Stage Linux release assets
         run: |
@@ -307,6 +345,8 @@ jobs:
             --out dist \
             --installer
           test -f dist/Glaze.dmg
+          # G4-S2: packaged-size budget gate (fails the release on violation).
+          raco glaze measure size --budget budgets.json
 
       - name: Stage macOS release assets
         run: |
