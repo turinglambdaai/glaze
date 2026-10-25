@@ -6,6 +6,7 @@
          glaze-cli/inspect
          glaze-cli/private/build-command
          glaze-cli/private/init
+         glaze-cli/private/measure
          glaze-cli/private/run
          glaze-cli/private/schema
          glaze-cli/private/update-command)
@@ -27,6 +28,7 @@
   (displayln "  inspect       Show project edit/verification map (--json for agents)")
   (displayln "  schema        Write/check the committed application schema contract")
   (displayln "  verify        Run the project native UI verification script")
+  (displayln "  measure       Report packaged-app size/startup against budgets")
   (displayln "  help          Show this help")
   (displayln "")
   (displayln "Glaze requires a working native WebView. If it is missing or broken, startup")
@@ -75,6 +77,7 @@
      ["inspect" (exit (run-inspect #:json? (member "--json" rest)))]
      ["schema" (exit (run-schema-command rest))]
      ["verify" (exit (verify-app))]
+     ["measure" (measure-command rest)]
      ["build" (build-command rest)]
      ["updater-keygen" (updater-keygen-command rest)]
      ["update-sign" (updater-sign-command rest)]

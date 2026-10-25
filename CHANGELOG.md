@@ -49,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The exact source-package release smoke now loads every supported public
   module (`glaze`, `glaze/core`, the four reviewed layers, and
   `glaze/experimental`) from an isolated install of the release artifact.
+- `raco glaze measure size [--budget <file>]` and
+  `raco glaze measure startup` report what packaged apps weigh and whether
+  they boot, with JSON budget gates (first matching glob wins, violations
+  exit nonzero). `scripts/measure-baseline.rkt` records the framework
+  performance baseline (transport startup, invoke and stream throughput,
+  double-burst heap probe) as schema-versioned JSON; numbers are
+  informational — no runner-variance pass/fail thresholds
+  (docs/benchmarks.md). CI records per-platform baselines and sample-app
+  sizes; the release workflow inventories the exact source package and
+  gates showcase installer sizes against a budget file.
 - The WebView e2e suite now covers the full native-host conformance
   matrix (typed invoke, stream, cancel, events, per-window capability
   denial, navigation/serving policy, deterministic teardown) and runs it

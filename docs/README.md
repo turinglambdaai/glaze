@@ -15,6 +15,7 @@ This directory has one owner for each durable decision. New documents must link 
 - [Agent-native workflow](agent-native.md): project inspection, diagnosis, editing, and native-window verification.
 - [GUI-first contract](gui-first.md): why application startup requires a native WebView and never falls back to a browser tab.
 - [Releasing](RELEASING.md): framework release procedure and provenance requirements.
+- [Performance baseline](benchmarks.md): what the framework measures, the recorded baseline, and the honesty rules for comparing results.
 
 The generated HTML site under `docs/index.html` is product-facing material. The Racket API reference lives under `glaze-doc/scribblings/`. Durable engineering decisions belong in the Markdown owners above, then user-facing material should link to or summarize them.
 
