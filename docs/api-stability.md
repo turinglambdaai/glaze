@@ -35,7 +35,7 @@ review and rewrite the baseline; CI must never update it automatically.
 
 <!-- reviewed-layer-classification:begin -->
 
-## Reviewed-layer export classification (G3-S1, 2026-10-23)
+## Reviewed-layer export classification (G3-S2, 2026-10-25)
 
 Every export of the four reviewed layers carries exactly one tier from
 the table above. The classification test (`glaze-test/classification-test.rkt`)
@@ -46,12 +46,14 @@ drift from reality in either direction.
 
 Tiers: **stable** keeps the SemVer compatibility promise; **expert-level** is
 documented, supported surface that the 1.0 curation may still narrow with a
-migration note; **private** rows carry a disposition — they are NOT blessed as
-permanent API and are scheduled for internalization or relocation during the
-G3 deprecation slice. No reviewed-layer export is currently experimental;
-`glaze/experimental` is outside this table by charter.
+migration note; **private** names are NOT blessed as permanent API and no
+longer appear in the reviewed layers — G3-S2 internalized them behind
+`glaze/private` owners (or their raw backend owner modules) and registered
+them in the deprecated-shim table below. No reviewed-layer export is
+currently experimental; `glaze/experimental` is outside this table by
+charter.
 
-### `glaze/window` — 47 exports
+### `glaze/window` — 45 exports
 
 | Export | Tier | Disposition |
 |---|---|---|
@@ -71,13 +73,11 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `struct:screen-area` | stable | |
 | `struct:window-state` | stable | |
 | `wait-for-webviews` | stable | |
-| `webview-backend` | private | internalize behind glaze/webview; never public API |
 | `webview-capture!` | stable | |
 | `webview-close` | stable | |
 | `webview-closed?` | stable | |
 | `webview-diagnostic` | stable | |
 | `webview-focus!` | stable | |
-| `webview-handle` | private | internalize; raw backend handle |
 | `webview-install-guidance` | stable | |
 | `webview-last-error` | stable | |
 | `webview-navigate` | stable | |
@@ -103,7 +103,7 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `window-state?` | stable | |
 | `write-window-state!` | stable | |
 
-### `glaze/services` — 150 exports
+### `glaze/services` — 134 exports
 
 | Export | Tier | Disposition |
 |---|---|---|
@@ -111,10 +111,7 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `accelerator?` | stable | |
 | `clipboard-get` | stable | |
 | `clipboard-set!` | stable | |
-| `default-dialog-backend` | private | internalize; backend handle |
-| `default-hotkey-backend` | private | internalize; backend handle |
 | `dialog-ask!` | stable | |
-| `dialog-backend?` | private | internalize; backend handle |
 | `dialog-message!` | stable | |
 | `dialog-supported?` | stable | |
 | `fs-copy!` | stable | |
@@ -132,7 +129,6 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `glaze-logger?` | expert | |
 | `hotkey` | stable | |
 | `hotkey->string` | stable | |
-| `hotkey-backend?` | private | internalize; backend handle |
 | `hotkey-key` | stable | |
 | `hotkey-keys` | stable | |
 | `hotkey-modifiers` | stable | |
@@ -145,10 +141,6 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `hotkey=?` | stable | |
 | `hotkey?` | stable | |
 | `http-request` | stable | |
-| `id-allocator-clear!` | private | internalize; allocator internals |
-| `id-allocator-lookup` | private | internalize; allocator internals |
-| `id-allocator-next!` | private | internalize; allocator internals |
-| `id-allocator-register!` | private | internalize; allocator internals |
 | `load-store` | stable | |
 | `log-debug` | stable | |
 | `log-error` | stable | |
@@ -166,16 +158,13 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `log-sink?` | expert | |
 | `log-trace` | stable | |
 | `log-warn` | stable | |
-| `make-dialog-backend` | private | internalize; backend constructor |
 | `make-dialog-routes` | expert | |
 | `make-file-log-sink` | stable | |
 | `make-filesystem-routes` | expert | route composition; apps use define-api-routes |
 | `make-glaze-logger` | stable | |
 | `make-global-shortcut-routes` | expert | |
 | `make-hotkey` | stable | |
-| `make-hotkey-backend` | private | internalize; backend constructor |
 | `make-http-routes` | expert | |
-| `make-id-allocator` | private | internalize; allocator internals |
 | `make-log-routes` | expert | |
 | `make-menu` | stable | |
 | `make-menu-item` | stable | |
@@ -246,33 +235,25 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `sys-supported?` | stable | |
 | `system-hostname` | stable | |
 | `system-information` | stable | |
-| `tray-backend` | private | internalize; backend handle |
 | `tray-close` | stable | |
-| `tray-handle` | private | internalize; backend handle |
 | `tray-set-icon!` | stable | |
 | `tray-set-menu!` | stable | |
 | `tray-set-tooltip!` | stable | |
 | `tray-supported?` | stable | |
 | `tray?` | stable | |
-| `win-filter-string` | private | relocate to a private Win32 owner |
-| `wstr` | private | relocate to a private Win32 string-conversion owner |
-| `wstr-parts` | private | relocate to a private Win32 string-conversion owner |
 
-### `glaze/distribution` — 103 exports
+### `glaze/distribution` — 99 exports
 
 | Export | Tier | Disposition |
 |---|---|---|
 | `build-app` | stable | |
 | `channel-accepts-version?` | stable | |
 | `check-update` | stable | |
-| `copy-template` | private | internalize; package-template implementation |
 | `deb-arch-name` | expert | |
 | `deb-control` | expert | |
 | `default-entry-template` | expert | entry-generation customization |
 | `desktop-entry` | expert | |
 | `download-update` | stable | |
-| `embedded-public-dir` | private | internalize; packaging implementation |
-| `ensure-public-dir` | private | internalize; package-template implementation |
 | `execute-install-plan!` | stable | |
 | `fetch-update-manifest` | stable | |
 | `icon-png-bytes` | expert | |
@@ -292,7 +273,6 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `openssl-path` | expert | point the suite at a specific openssl CLI |
 | `payload-bytes->update-manifest` | stable | |
 | `platform-backend-modules` | expert | for raco exe users bypassing build-app |
-| `public-dir-relative?` | private | internalize; security-check helper |
 | `public-key-fingerprint` | stable | |
 | `read-signed-update-manifest` | stable | |
 | `resolve-public-dir` | expert | custom-server composition |
@@ -380,13 +360,42 @@ G3 deprecation slice. No reviewed-layer export is currently experimental;
 | `start-server` | stable | |
 | `stop-server` | stable | |
 
-**Internalization backlog (private rows):** backend handles and
-constructors (`webview-backend`, `webview-handle`, `tray-backend`,
-`tray-handle`, dialog/hotkey backend trio), the id allocator, Win32 string
-conversion (`wstr`, `wstr-parts`, `win-filter-string`), and the
-package-template/assets internals (`copy-template`, `ensure-public-dir`,
-`embedded-public-dir`, `public-dir-relative?`). G3-S2 moves or wraps these
-behind `glaze/private` and ships deprecation notes; until then they remain
-reachable but are contractually non-permanent.
+### Deprecated private-tier shims (G3-S2, introduced 0.18.0 — removal scheduled 0.19.0)
+
+The 22 private-tier names G3-S1 classified left the reviewed layers in
+G3-S2: their canonical homes are the `glaze/private` owners below (or, for
+the raw backend accessors and platform-bound default instances, the owner
+module that holds the underlying struct or native bindings). The legacy
+`glaze` facade keeps re-exporting each name for exactly one release cycle
+so 0.x consumers keep loading; import it only through the facade during
+that window and migrate before 0.19.0. The classification guard asserts
+each name has actually left its former layer and is still reachable
+through the facade; dropping a facade export before 0.19.0 fails that
+guard.
+
+| Export | Former layer | Canonical owner |
+|---|---|---|
+| `copy-template` | glaze/distribution | glaze/private/public-assets |
+| `default-dialog-backend` | glaze/services | glaze/dialogs (platform binding) |
+| `default-hotkey-backend` | glaze/services | glaze/global-shortcut (platform binding) |
+| `dialog-backend?` | glaze/services | glaze/private/dialog-backend |
+| `embedded-public-dir` | glaze/distribution | glaze/private/public-assets |
+| `ensure-public-dir` | glaze/distribution | glaze/private/public-assets |
+| `hotkey-backend?` | glaze/services | glaze/private/hotkey-backend |
+| `id-allocator-clear!` | glaze/services | glaze/private/id-allocator |
+| `id-allocator-lookup` | glaze/services | glaze/private/id-allocator |
+| `id-allocator-next!` | glaze/services | glaze/private/id-allocator |
+| `id-allocator-register!` | glaze/services | glaze/private/id-allocator |
+| `make-dialog-backend` | glaze/services | glaze/private/dialog-backend |
+| `make-hotkey-backend` | glaze/services | glaze/private/hotkey-backend |
+| `make-id-allocator` | glaze/services | glaze/private/id-allocator |
+| `public-dir-relative?` | glaze/distribution | glaze/private/public-assets |
+| `tray-backend` | glaze/services | glaze/tray/main (raw backend accessor) |
+| `tray-handle` | glaze/services | glaze/tray/main (raw backend accessor) |
+| `webview-backend` | glaze/window | glaze/webview/main (raw backend accessor) |
+| `webview-handle` | glaze/window | glaze/webview/main (raw backend accessor) |
+| `win-filter-string` | glaze/services | glaze/private/win32-strings |
+| `wstr` | glaze/services | glaze/private/win32-strings |
+| `wstr-parts` | glaze/services | glaze/private/win32-strings |
 
 <!-- reviewed-layer-classification:end -->

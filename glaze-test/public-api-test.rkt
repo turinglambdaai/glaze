@@ -75,13 +75,11 @@
                                 struct:screen-area
                                 struct:window-state
                                 wait-for-webviews
-                                webview-backend
                                 webview-capture!
                                 webview-close
                                 webview-closed?
                                 webview-diagnostic
                                 webview-focus!
-                                webview-handle
                                 webview-install-guidance
                                 webview-last-error
                                 webview-navigate
@@ -109,10 +107,7 @@
     (glaze/services (accelerator-permission accelerator?
                                             clipboard-get
                                             clipboard-set!
-                                            default-dialog-backend
-                                            default-hotkey-backend
                                             dialog-ask!
-                                            dialog-backend?
                                             dialog-message!
                                             dialog-supported?
                                             fs-copy!
@@ -130,7 +125,6 @@
                                             glaze-logger?
                                             hotkey
                                             hotkey->string
-                                            hotkey-backend?
                                             hotkey-key
                                             hotkey-keys
                                             hotkey-modifiers
@@ -143,10 +137,6 @@
                                             hotkey=?
                                             hotkey?
                                             http-request
-                                            id-allocator-clear!
-                                            id-allocator-lookup
-                                            id-allocator-next!
-                                            id-allocator-register!
                                             load-store
                                             log-debug
                                             log-error
@@ -164,16 +154,13 @@
                                             log-sink?
                                             log-trace
                                             log-warn
-                                            make-dialog-backend
                                             make-dialog-routes
                                             make-file-log-sink
                                             make-filesystem-routes
                                             make-glaze-logger
                                             make-global-shortcut-routes
                                             make-hotkey
-                                            make-hotkey-backend
                                             make-http-routes
-                                            make-id-allocator
                                             make-log-routes
                                             make-menu
                                             make-menu-item
@@ -244,27 +231,19 @@
                                             sys-supported?
                                             system-hostname
                                             system-information
-                                            tray-backend
                                             tray-close
-                                            tray-handle
                                             tray-set-icon!
                                             tray-set-menu!
                                             tray-set-tooltip!
                                             tray-supported?
-                                            tray?
-                                            win-filter-string
-                                            wstr
-                                            wstr-parts))
+                                            tray?))
     (glaze/distribution (build-app channel-accepts-version?
                                    check-update
-                                   copy-template
                                    deb-arch-name
                                    deb-control
                                    default-entry-template
                                    desktop-entry
                                    download-update
-                                   embedded-public-dir
-                                   ensure-public-dir
                                    execute-install-plan!
                                    fetch-update-manifest
                                    icon-png-bytes
@@ -284,7 +263,6 @@
                                    openssl-path
                                    payload-bytes->update-manifest
                                    platform-backend-modules
-                                   public-dir-relative?
                                    public-key-fingerprint
                                    read-signed-update-manifest
                                    resolve-public-dir

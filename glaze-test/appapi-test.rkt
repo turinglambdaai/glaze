@@ -13,6 +13,7 @@
          racket/string
          net/http-client
          glaze/dialogs
+         glaze/private/win32-strings
          glaze/deeplink
          glaze/autolaunch
          glaze/server

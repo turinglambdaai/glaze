@@ -20,7 +20,8 @@
 (require ffi/unsafe
          ffi/winapi
          racket/path
-         "tray-protocol.rkt")
+         "tray-protocol.rkt"
+         "../private/id-allocator.rkt")
 
 ;; Racket has no built-in string->bytes/utf-16; encode via the platform
 ;; converter. On Windows "platform-UTF-16" yields UTF-16LE. Falls back to

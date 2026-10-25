@@ -48,7 +48,8 @@
          racket/system
          racket/runtime-path
          "../native-transport.rkt"
-         "../tray/tray-protocol.rkt")
+         "../tray/tray-protocol.rkt"
+         "../private/id-allocator.rkt")
 
 (provide open-webview
          supported?

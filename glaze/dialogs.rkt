@@ -24,7 +24,9 @@
          racket/path
          racket/string
          racket/system
-         "api.rkt")
+         "api.rkt"
+         "private/dialog-backend.rkt"
+         "private/win32-strings.rkt")
 
 (provide dialog-supported?
          pick-file
@@ -33,43 +35,12 @@
          save-file-dialog
          dialog-message!
          dialog-ask!
-         make-dialog-backend
-         dialog-backend?
+         ;; platform-bound backend instance — owner-module export (the
+         ;; struct/constructor live in glaze/private/dialog-backend); the
+         ;; reviewed layer and the 1.0 snapshot no longer carry it, the
+         ;; legacy facade keeps it as a deprecated G3-S2 shim
          default-dialog-backend
-         make-dialog-routes
-         ;; pure helpers, exported for the test suite
-         win-filter-string
-         wstr
-         wstr-parts)
-
-;; ---- UTF-16 plumbing (Windows wide strings) ----
-
-(define utf16-converter (bytes-open-converter "UTF-8" "UTF-16LE"))
-
-;; platform string -> NUL-terminated UTF-16LE bytes.
-(define (wstr s)
-  (define in (string->bytes/utf-8 s))
-  (define-values (out consumed status) (bytes-convert utf16-converter in))
-  (unless (and (eq? status 'complete) (= consumed (bytes-length in)))
-    (error 'wstr "UTF-16 conversion failed"))
-  (bytes-append out (bytes 0 0)))
-
-;; UTF-16LE bytes -> list of strings split on NUL code units (2 zero bytes —
-;; unit-aware, so paths containing code units like U+0100 split correctly).
-(define (wstr-parts b)
-  (define cv (bytes-open-converter "UTF-16LE" "UTF-8"))
-  (let loop ([i 0]
-             [acc '()])
-    (if (>= (+ i 1) (bytes-length b))
-        (reverse acc)
-        (if (and (zero? (bytes-ref b i)) (zero? (bytes-ref b (+ i 1))))
-            (reverse acc) ; terminating NUL code unit
-            (let ([end (let loop2 ([j i])
-                         (if (and (zero? (bytes-ref b j)) (zero? (bytes-ref b (+ j 1))))
-                             j
-                             (loop2 (+ j 2))))])
-              (define-values (out consumed status) (bytes-convert cv (subbytes b i end)))
-              (loop (+ end 2) (cons (bytes->string/utf-8 out) acc)))))))
+         make-dialog-routes)
 
 ;; ---- platform dispatch ----
 
@@ -196,16 +167,6 @@
   (and
    comdlg32
    (get-ffi-obj "GetSaveFileNameW" comdlg32 (_fun _OPENFILENAMEW-pointer -> _bool) (lambda () #f))))
-
-;; Win32 filter encoding: "name\0patterns\0" pairs, whole blob
-;; double-NUL-terminated. "All files" is appended when no filter matches
-;; everything, so the user is never stuck.
-(define (win-filter-string filters)
-  (string-append (string-join (append (for/list ([f (in-list filters)])
-                                        (format "~a\0~a\0" (car f) (string-join (cdr f) ";")))
-                                      '("All files\0*.*\0"))
-                              "")
-                 "\0"))
 
 (define (win-open-dialog! title directory filters multiple? folder? save? default-name)
   (define getter (if save? GetSaveFileNameW GetOpenFileNameW))
@@ -481,21 +442,11 @@
 
 ;; ---- capability-gated frontend routes ----
 
-;; Backends are values so tests (and headless CI) can substitute a fake;
-;; default-dialog-backend wraps the native functions above. Dialogs are
-;; modal: while one is open, other Racket-side API/SSE traffic waits —
-;; the native panels already had this contract for direct callers.
-(struct dialog-backend (pick-file pick-files pick-folder save message! ask!))
-
-;; Explicit constructor: `provide` cannot forward-reference the implicit
-;; struct constructor (same shape as make-capability / make-hotkey-backend).
-(define (make-dialog-backend pick-file pick-files pick-folder save message! ask!)
-  (unless (andmap procedure? (list pick-file pick-files pick-folder save message! ask!))
-    (raise-argument-error 'make-dialog-backend
-                          "list of procedures"
-                          (list pick-file pick-files pick-folder save message! ask!)))
-  (dialog-backend pick-file pick-files pick-folder save message! ask!))
-
+;; default-dialog-backend wraps the native functions above; the backend
+;; struct and constructor live in glaze/private/dialog-backend so tests and
+;; headless CI can substitute a fake. Dialogs are modal: while one is open,
+;; other Racket-side API/SSE traffic waits — the native panels already had
+;; this contract for direct callers.
 (define default-dialog-backend
   (dialog-backend
    pick-file

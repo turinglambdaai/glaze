@@ -118,7 +118,14 @@ jobs:
           raco pkg install --auto --no-docs --name glaze \
             "$PWD/release-assets/glaze-${GLAZE_VERSION}.zip"
           PLTUSERHOME="$smoke_root/racket-user" \
-            racket -e '(require glaze glaze/server glaze/events)'
+            racket -e '(for ([m (quote (glaze
+                                        glaze/core
+                                        glaze/window
+                                        glaze/services
+                                        glaze/distribution
+                                        glaze/devtools
+                                        glaze/experimental))])
+                         (dynamic-require m #f))'
           PLTUSERHOME="$smoke_root/racket-user" raco glaze help >/dev/null
           cd "$smoke_root"
           PLTUSERHOME="$smoke_root/racket-user" raco glaze init schema-smoke
