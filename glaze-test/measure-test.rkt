@@ -88,17 +88,19 @@
                                                   (current-continuation-marks)))))))
 
    ;; launch-survival: a staged executable that sleeps survives its window;
-   ;; one that exits immediately fails.
-   (define (write-script name body)
-     (define path (build-path dist name))
+   ;; one that exits immediately fails. Windows CreateProcess launches only
+   ;; executable extensions, so the staged scripts get .bat names there and
+   ;; sh scripts elsewhere.
+   (define script-name (if (eq? (system-type 'os) 'windows) "sleeper.bat" "sleeper"))
+   (define (write-script body)
+     (define path (build-path dist script-name))
      (call-with-output-file path (lambda (out) (display body out)) #:exists 'replace)
      (file-or-directory-permissions path
                                     (bitwise-ior (file-or-directory-permissions path 'bits)
                                                  user-execute-bit))
      path)
    (define sleeper
-     (write-script "sleeper"
-                   (if (eq? (system-type 'os) 'windows)
+     (write-script (if (eq? (system-type 'os) 'windows)
                        "@echo off\r\nping -n 30 127.0.0.1 > nul\r\n"
                        "#!/bin/sh\nsleep 30\n")))
    (define elapsed (launch-survival! sleeper 0.5))
@@ -106,7 +108,6 @@
 
    (define quitter
      (write-script
-      "quitter"
       (if (eq? (system-type 'os) 'windows) "@echo off\r\nexit /b 0\r\n" "#!/bin/sh\nexit 0\n")))
    (check-exn exn:fail?
               (lambda () (launch-survival! quitter 0.5))
