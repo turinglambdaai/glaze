@@ -12,7 +12,8 @@
 (provide static-resource
          path->mime-type
          native-scheme-segments
-         native-app-origin)
+         native-app-origin
+         native-origin-url)
 
 ;; ---- shared static resources ----
 
@@ -95,5 +96,26 @@
 ;; The origin the page runs on, per platform (for e2e assertions).
 (define (native-app-origin)
   (if (eq? (system-type 'os) 'windows) "http://glaze.localhost/" "glaze://app/"))
+
+;; Map a requested app URL onto this platform's controlled origin,
+;; PRESERVING the path: open-app-window "glaze://app/restricted.html" must
+;; navigate to restricted.html, not the app root. WebView2 hosts get the
+;; http://glaze.localhost form (top-level navigation to custom schemes is
+;; refused), WebKit hosts keep the glaze scheme. Anything outside the app
+;; origin collapses to the root: a native window only ever serves app
+;; content.
+(define (native-origin-url url)
+  (define path
+    (cond
+      [(regexp-match #rx"^glaze://app/?(.*)" (or url ""))
+       =>
+       (lambda (m) (second m))]
+      [(regexp-match #rx"^https?://glaze[.]localhost/?(.*)" (or url ""))
+       =>
+       (lambda (m) (second m))]
+      [else ""]))
+  (if (eq? (system-type 'os) 'windows)
+      (string-append "http://glaze.localhost/" path)
+      (string-append "glaze://app/" path)))
 
 ;; ---- page-side bindings ----
