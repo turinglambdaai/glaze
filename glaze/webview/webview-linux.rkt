@@ -425,10 +425,14 @@
                      (lambda ()
                        (set-box! closed? #t)
                        (when native-transport
-                         (with-handlers ([exn:fail? (lambda (_) (void))])
-                           (native-transport-shutdown! native-transport))
                          (native-wiring-remove! (cast webview _pointer _uintptr))
-                         (native-wiring-remove! (cast ucm _pointer _uintptr)))
+                         (native-wiring-remove! (cast ucm _pointer _uintptr))
+                         ;; Shutdown joins the transport's threads; blocking
+                         ;; the GTK main-loop thread here deadlocks/crashes
+                         ;; the process, so it runs on its own thread.
+                         (thread (lambda ()
+                                   (with-handlers ([exn:fail? (lambda (_) (void))])
+                                     (native-transport-shutdown! native-transport)))))
                        (on-close)))
 
   (define wv (lin:webview window webview url closed? (box #f) #f (make-async-channel #f)))

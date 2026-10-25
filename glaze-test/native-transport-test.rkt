@@ -275,8 +275,21 @@
             "event delivery targets the page hook")
 (check-true (and event-js (string-contains? event-js "counter-changed"))
             "event delivery carries the name")
-(check-true (and event-js (string-contains? event-js "\"value\":7"))
-            "event delivery carries the payload")
+;; The client iterates the batch with ev[1] as the event name, so the
+;; payload is a batch — a JSON array of (seq name data) tuples — in both
+;; carriers; parse the json carrier and assert that shape.
+(define event-batch
+  (and event-d (hash-ref (string->jsexpr (native-delivery-json event-d)) 'events #f)))
+(check-equal? (and event-batch
+                   (list? event-batch)
+                   (= (length event-batch) 1)
+                   (hash? (third (car event-batch)))
+                   (hash-ref (third (car event-batch)) 'value #f))
+              7
+              "event delivery carries the payload as a one-event batch")
+(check-equal? (and event-batch (second (car event-batch)))
+              "counter-changed"
+              "event delivery batch names the event")
 
 ;; shutdown stops deliveries without raising
 (check-not-exn (lambda () (native-transport-shutdown! t)))

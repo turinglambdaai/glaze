@@ -71,6 +71,7 @@
       if (d && d.glz === 1 && d.stream === "open") { window.__glz1StreamOpen(d.id); }
       else if (d && d.glz === 1 && d.stream === "chunk") { window.__glz1Chunk(d.id, d.text); }
       else if (d && d.glz === 1 && d.stream === "end") { window.__glz1End(d.id); }
+      else if (d && d.glz === 1 && d.events) { window.__glz1Events(JSON.stringify(d.events)); }
       else if (d && d.glz === 1 && d.id) { window.__glz1Deliver(d.id, JSON.stringify(d)); }
     });
   }

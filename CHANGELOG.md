@@ -49,6 +49,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The exact source-package release smoke now loads every supported public
   module (`glaze`, `glaze/core`, the four reviewed layers, and
   `glaze/experimental`) from an isolated install of the release artifact.
+- The WebView e2e suite now covers the full native-host conformance
+  matrix (typed invoke, stream, cancel, events, per-window capability
+  denial, navigation/serving policy, deterministic teardown) and runs it
+  unchanged on all three platforms in CI.
+
+### Fixed
+
+- Native event delivery dropped every event on all three platforms: the
+  transport shipped a bare `(seq name data)` tuple while the page client
+  treats `__glz1Events` input as a batch of tuples, so the name lookup
+  never matched and events vanished silently. Events now ship as a
+  one-element batch through both carriers (a JSON-encoded string for
+  evaluateJavaScript-style hosts, a `glz`-enveloped `events` field for
+  WebView2's `PostWebMessageAsJson`), with the client message branch to
+  route it.
+- Closing a native-transport window whose transport carries an event bus
+  aborted the process on macOS and Linux: the window-close callback ran
+  the transport shutdown on the pump / main-loop thread, which cannot
+  block on the shutdown owner's thread joins. The close path now removes
+  the native wiring and defers the shutdown to its own thread.
 
 ## [0.17.0] - 2026-10-23
 
