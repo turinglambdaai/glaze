@@ -78,8 +78,7 @@
   (define current-heading #f)
   (for ([line (in-list (string-split section "\n"))])
     (cond
-      [(string-prefix? line "### ")
-       (set! current-heading (heading-name line))]
+      [(string-prefix? line "### ") (set! current-heading (heading-name line))]
       [(and current-heading (string-prefix? line "|"))
        (define parsed (parse-table-line line))
        (when parsed
@@ -92,8 +91,7 @@
 (define shim-heading-prefix "Deprecated private-tier shims")
 
 (define shim-heading
-  (findf (lambda (k) (string-prefix? k shim-heading-prefix))
-         (hash-keys classification)))
+  (findf (lambda (k) (string-prefix? k shim-heading-prefix)) (hash-keys classification)))
 
 ;; ---- the exact export computation shared with public-api-test.rkt ----
 
@@ -112,8 +110,7 @@
 
 (define live-exports
   (for/hash ([module-path (in-list reviewed-modules)])
-    (values module-path
-            (list->set (public-export-names module-path)))))
+    (values module-path (list->set (public-export-names module-path)))))
 
 (for ([module-path (in-list reviewed-modules)])
   (define module-name (format "~a" module-path))
@@ -129,8 +126,7 @@
       ;; set equality in both directions: an unclassified export, a phantom
       ;; row, a rename, or a removal all fail here
       (check-equal? classified-names
-                    (sort (map symbol->string
-                               (set->list (hash-ref live-exports module-path)))
+                    (sort (map symbol->string (set->list (hash-ref live-exports module-path)))
                           string<?)
                     "classification equals the live export surface")
       (for ([row (in-list classified-rows)])
@@ -147,7 +143,10 @@
 ;; ---- the deprecated private-shim register (G3-S2) ----
 
 ;; | `name` | former layer | canonical owner |
-(define shims (if shim-heading (hash-ref classification shim-heading '()) '()))
+(define shims
+  (if shim-heading
+      (hash-ref classification shim-heading '())
+      '()))
 
 (test-case "deprecated private-tier shims"
   (check-true (and shim-heading #t) "the shim register is present")
@@ -175,8 +174,7 @@
     (when former
       (check-false (set-member? (hash-ref live-exports former) (string->symbol name))
                    (format "shim ~a has actually left ~a" name former-layer)))
-    (check-false (equal? owner "")
-                 (format "shim ~a names a canonical owner" name)))
+    (check-false (equal? owner "") (format "shim ~a names a canonical owner" name)))
   ;; the one-release-cycle compatibility window: every shim must stay
   ;; reachable through the legacy facade until its removal release
   (define facade-exports (list->set (public-export-names 'glaze)))
