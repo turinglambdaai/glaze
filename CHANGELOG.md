@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- G3-S2 internalized the 22 private-tier reviewed-layer exports
+  (docs/api-stability.md): the 1.0 reviewed layers
+  (`glaze/window`, `glaze/services`, `glaze/distribution`) no longer
+  re-export them. Each name moved behind a `glaze/private` owner (or its
+  raw backend owner module for the struct accessors and platform-bound
+  default instances), and the legacy `glaze` facade keeps re-exporting
+  every name for one release cycle as a deprecated shim — removal is
+  scheduled for 0.19.0. Applications importing `glaze` keep working
+  unchanged; applications importing the reviewed layers that touch one of
+  these names must migrate to the canonical owner now. Mechanical
+  migration table:
+
+  | Export | Left layer | Canonical owner (0.18.0) | Facade shim removed |
+  |---|---|---|---|
+  | `copy-template` | `glaze/distribution` | `glaze/private/public-assets` | 0.19.0 |
+  | `default-dialog-backend` | `glaze/services` | `glaze/dialogs` (platform binding) | 0.19.0 |
+  | `default-hotkey-backend` | `glaze/services` | `glaze/global-shortcut` (platform binding) | 0.19.0 |
+  | `dialog-backend?` | `glaze/services` | `glaze/private/dialog-backend` | 0.19.0 |
+  | `embedded-public-dir` | `glaze/distribution` | `glaze/private/public-assets` | 0.19.0 |
+  | `ensure-public-dir` | `glaze/distribution` | `glaze/private/public-assets` | 0.19.0 |
+  | `hotkey-backend?` | `glaze/services` | `glaze/private/hotkey-backend` | 0.19.0 |
+  | `id-allocator-clear!` | `glaze/services` | `glaze/private/id-allocator` | 0.19.0 |
+  | `id-allocator-lookup` | `glaze/services` | `glaze/private/id-allocator` | 0.19.0 |
+  | `id-allocator-next!` | `glaze/services` | `glaze/private/id-allocator` | 0.19.0 |
+  | `id-allocator-register!` | `glaze/services` | `glaze/private/id-allocator` | 0.19.0 |
+  | `make-dialog-backend` | `glaze/services` | `glaze/private/dialog-backend` | 0.19.0 |
+  | `make-hotkey-backend` | `glaze/services` | `glaze/private/hotkey-backend` | 0.19.0 |
+  | `make-id-allocator` | `glaze/services` | `glaze/private/id-allocator` | 0.19.0 |
+  | `public-dir-relative?` | `glaze/distribution` | `glaze/private/public-assets` | 0.19.0 |
+  | `tray-backend` | `glaze/services` | `glaze/tray/main` (raw backend accessor) | 0.19.0 |
+  | `tray-handle` | `glaze/services` | `glaze/tray/main` (raw backend accessor) | 0.19.0 |
+  | `webview-backend` | `glaze/window` | `glaze/webview/main` (raw backend accessor) | 0.19.0 |
+  | `webview-handle` | `glaze/window` | `glaze/webview/main` (raw backend accessor) | 0.19.0 |
+  | `win-filter-string` | `glaze/services` | `glaze/private/win32-strings` | 0.19.0 |
+  | `wstr` | `glaze/services` | `glaze/private/win32-strings` | 0.19.0 |
+  | `wstr-parts` | `glaze/services` | `glaze/private/win32-strings` | 0.19.0 |
+
+- The exact source-package release smoke now loads every supported public
+  module (`glaze`, `glaze/core`, the four reviewed layers, and
+  `glaze/experimental`) from an isolated install of the release artifact.
+
 ## [0.17.0] - 2026-10-23
 
 ### Added

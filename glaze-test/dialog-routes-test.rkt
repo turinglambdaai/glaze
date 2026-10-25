@@ -10,6 +10,7 @@
          ffi/unsafe
          glaze/capability
          glaze/dialogs
+         glaze/private/dialog-backend
          glaze/server)
 
 ;; ---- fake backend ----

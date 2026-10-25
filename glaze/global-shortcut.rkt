@@ -13,13 +13,16 @@
          "api.rkt"
          "capability.rkt"
          "events.rkt"
-         "hotkey/main.rkt")
+         "hotkey/main.rkt"
+         "private/hotkey-backend.rkt")
 
 (provide string->hotkey
          hotkey->string
          accelerator?
-         make-hotkey-backend
-         hotkey-backend?
+         ;; platform-bound backend instance — owner-module export (the
+         ;; struct/constructor live in glaze/private/hotkey-backend); the
+         ;; reviewed layer and the 1.0 snapshot no longer carry it, the
+         ;; legacy facade keeps it as a deprecated G3-S2 shim
          default-hotkey-backend
          accelerator-permission
          make-global-shortcut-routes)
@@ -169,20 +172,10 @@
 
 ;; ---- backend injection ----
 
-;; Backends are values so tests (and apps with their own dispatch policy)
-;; can substitute a fake. default-hotkey-backend delegates to the platform
-;; backend selected by glaze/hotkey/main.
-(struct hotkey-backend (supported? register! unregister! unregister-all! registered?))
-
-;; Explicit constructor: `provide` cannot forward-reference the implicit
-;; struct constructor (same shape as make-capability in capability.rkt).
-(define (make-hotkey-backend supported? register! unregister! unregister-all! registered?)
-  (unless (andmap procedure? (list supported? register! unregister! unregister-all! registered?))
-    (raise-argument-error 'make-hotkey-backend
-                          "list of procedures"
-                          (list supported? register! unregister! unregister-all! registered?)))
-  (hotkey-backend supported? register! unregister! unregister-all! registered?))
-
+;; default-hotkey-backend delegates to the platform backend selected by
+;; glaze/hotkey/main; the backend struct and constructor live in
+;; glaze/private/hotkey-backend so tests and apps with their own dispatch
+;; policy can substitute a fake.
 (define default-hotkey-backend
   (hotkey-backend hotkey-supported?
                   hotkey-register!

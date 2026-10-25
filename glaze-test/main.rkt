@@ -4,6 +4,7 @@
          glaze/server
          glaze/browser
          glaze/assets
+         glaze/private/public-assets
          racket/file
          racket/port
          racket/string
@@ -83,7 +84,8 @@
 (check-equal? (procedure? open-browser) #t "open-browser is a procedure")
 
 ;; ---- Tray protocol tests (platform-agnostic) ----
-(require glaze/tray/tray-protocol)
+(require glaze/tray/tray-protocol
+         glaze/private/id-allocator)
 
 (define mi1 (make-menu-item "Quit" #:action (lambda () 'quit)))
 (check-equal? (menu-item-label mi1) "Quit")

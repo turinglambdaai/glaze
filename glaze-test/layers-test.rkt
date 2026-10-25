@@ -92,8 +92,7 @@
                               verify-file-sha256
                               semver?
                               newer-version?
-                              copy-template
-                              ensure-public-dir))])
+                              resolve-public-dir))])
   (check-not-exn (lambda () (dynamic-require 'glaze/distribution n))
                  (format "distribution layer missing: ~a" n)))
 

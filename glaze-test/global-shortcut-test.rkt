@@ -12,6 +12,7 @@
          glaze/capability
          glaze/events
          glaze/global-shortcut
+         glaze/private/hotkey-backend
          glaze/hotkey/main
          glaze/server)
 

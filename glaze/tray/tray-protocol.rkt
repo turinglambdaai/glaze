@@ -1,12 +1,10 @@
 #lang racket/base
 
-;; Platform-agnostic menu/tray protocol: menu data structures and an
-;; id-allocator for mapping native menu ids back to Racket callbacks.
-;; Platform backends translate these structs into native menus (Win32
-;; TrackPopupMenu / menu bar, NSMenu, GtkMenu) and invoke the matching
-;; callback when a menu id fires.
-
-(require racket/contract)
+;; Platform-agnostic menu/tray protocol: menu data structures shared by the
+;; tray and webview platform backends. Platform backends translate these
+;; structs into native menus (Win32 TrackPopupMenu / menu bar, NSMenu,
+;; GtkMenu) and invoke the matching callback when a menu id fires; native
+;; menu-id allocation lives in glaze/private/id-allocator.
 
 (provide (struct-out menu-item)
          make-menu-item
@@ -14,12 +12,7 @@
          menu-item?
          menu-separator?
          (struct-out menu)
-         make-menu
-         make-id-allocator
-         id-allocator-next!
-         id-allocator-register!
-         id-allocator-lookup
-         id-allocator-clear!)
+         make-menu)
 
 ;; A menu item. Separators have label #f and id #f. Normal items carry a label,
 ;; a stable id (string, user-provided for stable dispatch) and an action thunk.
@@ -46,35 +39,3 @@
 
 (define (make-menu title items)
   (menu title items))
-
-;; Id allocator: assigns increasing positive integers as native menu ids and
-;; keeps a hash from id -> action so the backend's message handler can dispatch.
-;; Backend ids must be positive integers that fit in the native menu id space
-;; (Win32 HMENU uses uintptr; Gtk uses gint; NSMenuItem uses tag NSInteger).
-(struct id-allocator (next-box table-sema table) #:transparent)
-
-(define (make-id-allocator)
-  (id-allocator (box 1) (make-semaphore 1) (make-hash)))
-
-(define (id-allocator-next! a)
-  (define b (id-allocator-next-box a))
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda ()
-                         (begin0 (unbox b)
-                           (set-box! b (add1 (unbox b)))))))
-
-(define (id-allocator-register! a action)
-  (define id (id-allocator-next! a))
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda () (hash-set! (id-allocator-table a) id action)))
-  id)
-
-(define (id-allocator-lookup a id)
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda () (hash-ref (id-allocator-table a) id (lambda () #f)))))
-
-(define (id-allocator-clear! a)
-  (call-with-semaphore (id-allocator-table-sema a)
-                       (lambda ()
-                         (hash-clear! (id-allocator-table a))
-                         (set-box! (id-allocator-next-box a) 1))))
