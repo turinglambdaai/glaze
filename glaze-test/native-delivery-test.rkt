@@ -10,6 +10,7 @@
          racket/string
          rackunit
          glaze/api
+         glaze/bridge
          glaze/private/native-delivery)
 
 (define (delivery-json delivery)
@@ -37,8 +38,16 @@
   (check-true (string-contains? (native-delivery-js delivery) "quote")))
 
 (test-case "events use one sequenced batch in both carriers"
+  ;; __glz1Events JSON.parses its argument, so the js carrier must pass a
+  ;; JSON-encoded string and the WebView2 carrier must route through the
+  ;; glz envelope's events field; a bare batch is silently dropped.
+  (define event (list 7 "counter-changed" (hasheq 'value 2)))
   (define delivery (event-delivery 7 'counter-changed (hasheq 'value 2)))
-  (check-equal? (delivery-json delivery) (list 7 "counter-changed" (hasheq 'value 2)))
+  ;; the client iterates the batch with ev[1] as the event name, so the
+  ;; payload is a batch (array of tuples), not a bare tuple
+  (check-equal? (delivery-json delivery) (hasheq 'glz glz1-version 'events (list event)))
+  (check-true (string-contains? (native-delivery-js delivery)
+                                (jsexpr->string (jsexpr->string (list event)))))
   (check-true (string-contains? (native-delivery-js delivery) "__glz1Events"))
   (check-exn exn:fail? (lambda () (event-delivery 8 'bad (lambda () 'not-json)))))
 

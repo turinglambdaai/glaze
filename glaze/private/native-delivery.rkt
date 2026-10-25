@@ -153,13 +153,23 @@
          (unregister-stream! id pout))))
   (void))
 
+;; Both carriers must hand the client a JSON-encoded STRING: __glz1Events
+;; JSON.parses its argument, so a bare array literal (js) or a bare posted
+;; array (json) is silently dropped. The js carrier double-encodes like
+;; response-delivery; the json carrier wraps the batch in a glz envelope so
+;; the WebView2 message handler can route it.
 (define (event-delivery seq name data)
+  ;; __glz1Events takes a BATCH — a JSON array of (seq name data) tuples —
+  ;; so the single event ships as a one-element batch and the transport
+  ;; can coalesce several tuples into one delivery later without touching
+  ;; the page contract.
   (define batch
-    (list seq
-          (if (symbol? name)
-              (symbol->string name)
-              name)
-          data))
-  (native-delivery
-   (string-append "window.__glz1Events && window.__glz1Events(" (jsexpr->string batch) ");")
-   (jsexpr->string batch)))
+    (list (list seq
+                (if (symbol? name)
+                    (symbol->string name)
+                    name)
+                data)))
+  (native-delivery (string-append "window.__glz1Events && window.__glz1Events("
+                                  (jsexpr->string (jsexpr->string batch))
+                                  ");")
+                   (jsexpr->string (hasheq 'glz glz1-version 'events batch))))

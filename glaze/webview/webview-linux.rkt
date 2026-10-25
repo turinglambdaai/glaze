@@ -225,6 +225,7 @@
 ;; the requesting webview); ucm pointer -> wiring (script messages).
 (struct native-wiring (transport env) #:transparent)
 (define native-wirings (make-hasheq))
+(define scheme-registered? #f)
 (define native-wirings-sema (make-semaphore 1))
 
 (define (native-wiring-put! key wiring)
@@ -379,14 +380,19 @@
   ;; process. The callback dispatches per requesting webview, so the
   ;; per-window wiring can be registered afterwards.
   (when native-transport
-    (define scheme-cptr (function-ptr native-scheme-callback (_fun _pointer _pointer -> _void)))
-    (set! callback-ptrs (cons scheme-cptr callback-ptrs))
-    (webkit_web_context_register_uri_scheme (webkit_web_context_get_default)
-                                            "glaze"
-                                            scheme-cptr
-                                            #f
-                                            #f)
-    (fprintf (current-error-port) "[glaze-linux-webview] glaze scheme registered\n"))
+    ;; The glaze scheme lives on the process-wide default web context:
+    ;; register it once. A second registration is a GTK CRITICAL and the
+    ;; first callback already dispatches per requesting webview anyway.
+    (unless scheme-registered?
+      (define scheme-cptr (function-ptr native-scheme-callback (_fun _pointer _pointer -> _void)))
+      (set! callback-ptrs (cons scheme-cptr callback-ptrs))
+      (webkit_web_context_register_uri_scheme (webkit_web_context_get_default)
+                                              "glaze"
+                                              scheme-cptr
+                                              #f
+                                              #f)
+      (set! scheme-registered? #t)
+      (fprintf (current-error-port) "[glaze-linux-webview] glaze scheme registered\n")))
   (define window (gtk_window_new 0)) ; GTK_WINDOW_TOPLEVEL = 0
   (gtk_window_set_title window title)
   (gtk_window_set_default_size window width height)
@@ -415,7 +421,10 @@
           (webkit_web_view_new_with_user_content_manager ucm))
         (webkit_web_view_new)))
   (gtk_container_add window webview)
-  (webkit_web_view_load_uri webview (if native-transport "glaze://app/" url))
+  (webkit_web_view_load_uri webview
+                            (if native-transport
+                                (native-origin-url url)
+                                url))
   (gtk_widget_show_all window)
   (when devtools?
     (show-devtools-later!))
@@ -425,10 +434,14 @@
                      (lambda ()
                        (set-box! closed? #t)
                        (when native-transport
-                         (with-handlers ([exn:fail? (lambda (_) (void))])
-                           (native-transport-shutdown! native-transport))
                          (native-wiring-remove! (cast webview _pointer _uintptr))
-                         (native-wiring-remove! (cast ucm _pointer _uintptr)))
+                         (native-wiring-remove! (cast ucm _pointer _uintptr))
+                         ;; Shutdown joins the transport's threads; blocking
+                         ;; the GTK main-loop thread here deadlocks/crashes
+                         ;; the process, so it runs on its own thread.
+                         (thread (lambda ()
+                                   (with-handlers ([exn:fail? (lambda (_) (void))])
+                                     (native-transport-shutdown! native-transport)))))
                        (on-close)))
 
   (define wv (lin:webview window webview url closed? (box #f) #f (make-async-channel #f)))

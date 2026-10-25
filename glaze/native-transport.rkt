@@ -71,6 +71,7 @@
          native-transport-shutdown!
          native-scheme-segments
          native-app-origin
+         native-origin-url
          generate-api-declarations
          route-named-types
          native-api-client-js

@@ -561,7 +561,10 @@
   ;; (the reason Tauri uses http://tauri.localhost on Windows), so the page
   ;; loads from http://glaze.localhost/ and the resource filter intercepts
   ;; it before any network access.
-  (define url-ptr (wstr (if native-transport "http://glaze.localhost/" url)))
+  (define url-ptr
+    (wstr (if native-transport
+              (native-origin-url url)
+              url)))
   (define ctrl-handler
     (make-com-handler
      IID-CtrlHandler

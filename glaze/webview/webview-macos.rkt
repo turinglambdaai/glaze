@@ -793,10 +793,15 @@
                    (set-box! closed? #t)
                    (release-pump!)
                    (when native-transport
-                     (with-handlers ([exn:fail? (lambda (_) (void))])
-                       (native-transport-shutdown! native-transport))
                      (native-wiring-remove! (cast scheme-handler _id _uintptr))
-                     (native-wiring-remove! (cast script-handler _id _uintptr)))
+                     (native-wiring-remove! (cast script-handler _id _uintptr))
+                     ;; Shutdown joins the transport's threads; blocking the
+                     ;; pump thread here deadlocks/crashes the process (the
+                     ;; run-loop callback context cannot deschedule), so it
+                     ;; runs on its own thread.
+                     (thread (lambda ()
+                               (with-handlers ([exn:fail? (lambda (_) (void))])
+                                 (native-transport-shutdown! native-transport)))))
                    (on-close)))
 
   (define wv (mac:webview window webview delegate closed? (box #f) #f))
