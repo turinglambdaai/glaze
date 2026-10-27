@@ -1,0 +1,77 @@
+# Branch hygiene for Glaze only. Uses GitHub's per-repository token;
+# cannot delete branches in a different repository. Deliberately conservative.
+name: Prune safely merged topic branches
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prune-merged-branches.yml
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  merged-only:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only unchanged local heads of already merged PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const fullName = `${owner}/${repo}`;
+            const defaultBranch = context.payload.repository.default_branch;
+            const branches = await github.paginate(github.rest.repos.listBranches, {owner, repo, per_page: 100});
+            const pulls = await github.paginate(github.rest.pulls.list, {owner, repo, state: "all", per_page: 100});
+            let deleted = 0, retained = 0;
+            for (const branch of branches) {
+              if (branch.name === defaultBranch || branch.protected) { retained++; continue; }
+              // Release, deployment and upstream/history refs can remain useful
+              // even after their original PR merged. Never auto-delete them.
+              const keepNames = new Set(["gh-pages", "develop", "development", "dev", "stable", "staging", "production"]);
+              const keepPrefixes = ["release/", "hotfix/", "support/", "maintenance/", "deploy/", "pages/", "upstream/", "vendor/", "archive/"];
+              if (keepNames.has(branch.name) || keepPrefixes.some(prefix => branch.name.startsWith(prefix))) {
+                retained++;
+                core.info(`Keep release/deployment/history branch: ${branch.name}`);
+                continue;
+              }
+              const refs = pulls.filter(pr =>
+                pr.head.repo?.full_name === fullName && pr.head.ref === branch.name);
+              if (refs.some(pr => pr.state === "open")) { retained++; continue; }
+              // Squash merges are not ancestors of the default branch. Require
+              // the last head SHA of an actual merged PR to match exactly.
+              if (!refs.some(pr => pr.merged_at && pr.head.sha === branch.commit.sha)) {
+                retained++;
+                core.info(`Keep unverified/developing branch: ${branch.name}`);
+                continue;
+              }
+              try {
+                // Re-read immediately before deletion: a moved head, newly
+                // protected branch or newly opened PR invalidates the snapshot.
+                const fresh = (await github.rest.repos.getBranch({owner, repo, branch: branch.name})).data;
+                const active = await github.paginate(github.rest.pulls.list,
+                  {owner, repo, state: "open", head: `${owner}:${branch.name}`, per_page: 100});
+                if (fresh.protected || fresh.commit.sha !== branch.commit.sha || active.length) {
+                  retained++;
+                  core.info(`Keep changed/protected/open-PR branch: ${branch.name}`);
+                  continue;
+                }
+                // GitHub has no compare-and-delete ref endpoint; the race
+                // between this check and deleteRef cannot be fully eliminated.
+                await github.rest.git.deleteRef({owner, repo, ref: `heads/${branch.name}`});
+                deleted++;
+                core.info(`Deleted confirmed-merged branch: ${branch.name}`);
+              } catch (error) {
+                retained++;
+                core.warning(`Could not delete ${branch.name}: ${error.message}`);
+              }
+            }
+            await core.summary.addHeading("Merged branch cleanup")
+              .addRaw(`Deleted ${deleted} confirmed-merged branch(es); retained ${retained} default, protected, active or unverified branch(es).\n`)
+              .write();
