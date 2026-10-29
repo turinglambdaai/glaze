@@ -1,7 +1,7 @@
 #lang scribble/manual
 
 @title{Glaze}
-@author{turinglambdaai}
+@author{TurLamAI}
 
 Glaze builds desktop applications with a Racket backend and a Web frontend
 rendered inside a native OS window. Windows uses WebView2, macOS uses
