@@ -4,7 +4,7 @@ Build desktop apps with a [Racket](https://racket-lang.org/) backend and a web f
 
 **Human-first. Agent-native. Local by design.**
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.17.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turlamai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turlamai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.17.0-C15F3C)](CHANGELOG.md)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -123,7 +123,7 @@ A native desktop window opens using the default HTTP adapter, or native GLZ1 whe
 
 > Prefer installing straight from a GitHub checkout instead of the catalog?
 > ```bash
-> git clone https://github.com/turinglambdaai/glaze.git
+> git clone https://github.com/turlamai/glaze.git
 > cd glaze
 > raco pkg install --auto --link "$PWD"
 > ```
@@ -210,7 +210,7 @@ Details: `--sign` takes a codesign identity (macOS) or a SHA-1 thumbprint / subj
 
 ### Product entitlements
 
-Product licensing is intentionally outside Glaze's framework boundary. Applications that need offline-verifiable commercial entitlements can compose Glaze with [Permit](https://github.com/turinglambdaai/permit) or another independent entitlement library; Glaze does not depend on it. Applications that need online checkout, payment-event handling, or credential delivery may additionally use [Commerce](https://github.com/turinglambdaai/commerce) as a product/service dependency. Manual-sale and fully offline products do not need Commerce. Provider secrets, Commerce secrets, Permit signing, Glaze update signing, and platform code signing remain separate concerns and keys.
+Product licensing is intentionally outside Glaze's framework boundary. Applications that need offline-verifiable commercial entitlements can compose Glaze with [Permit](https://github.com/turlamai/permit) or another independent entitlement library; Glaze does not depend on it. Applications that need online checkout, payment-event handling, or credential delivery may additionally use [Commerce](https://github.com/turlamai/commerce) as a product/service dependency. Manual-sale and fully offline products do not need Commerce. Provider secrets, Commerce secrets, Permit signing, Glaze update signing, and platform code signing remain separate concerns and keys.
 
 ### Update integrity
 

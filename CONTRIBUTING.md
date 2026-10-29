@@ -3,7 +3,7 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/turinglambdaai/glaze.git
+git clone https://github.com/turlamai/glaze.git
 cd glaze
 raco pkg install --auto --link "$PWD"
 ```
@@ -49,4 +49,4 @@ Racket collection:
 
 ## Documentation languages
 
-Use English for default public docs and preserve complete Chinese README and onboarding paths. Keep examples, supported-platform limits, troubleshooting and privacy/security promises consistent in the same change. Preserve identifiers and copyable commands; technical protocols have one normative English source, not separate language implementations. See the [family documentation language policy](https://github.com/turinglambdaai/turinglambdaai.github.io/blob/master/docs/DOCUMENTATION-LANGUAGES.md) for scope and review checks.
+Use English for default public docs and preserve complete Chinese README and onboarding paths. Keep examples, supported-platform limits, troubleshooting and privacy/security promises consistent in the same change. Preserve identifiers and copyable commands; technical protocols have one normative English source, not separate language implementations. See the [family documentation language policy](https://github.com/turlamai/turinglambdaai.github.io/blob/master/docs/DOCUMENTATION-LANGUAGES.md) for scope and review checks.

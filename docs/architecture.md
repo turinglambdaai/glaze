@@ -22,18 +22,18 @@ Keel supplies the transport-neutral lifecycle, schema, type, and structured-erro
 
 Commercial product rights are a sibling concern rather than a Glaze layer. A
 product may compose Glaze with
-[Permit](https://github.com/turinglambdaai/permit/blob/main/docs/framework-integration.md),
+[Permit](https://github.com/turlamai/permit/blob/main/docs/framework-integration.md),
 but Glaze does not depend on Permit and does not own entitlement, trial,
 activation, seat, subscription, payment, or account policy. Glaze may provide
 general secure storage that a product chooses for Permit state. Update-artifact
 verification remains Glaze distribution infrastructure. An online product may
-separately use [Commerce](https://github.com/turinglambdaai/commerce) for
+separately use [Commerce](https://github.com/turlamai/commerce) for
 checkout, authenticated payment events, commercial projections, and credential
 delivery. Glaze does not define a Commerce client protocol or import Commerce.
 Provider secrets, Commerce secrets, Permit credential signing, update signing,
 and OS publisher credentials remain separate trust domains. The complete
 cross-repository rules live in the
-[family architecture](https://github.com/turinglambdaai/keel/blob/main/docs/family-architecture.md).
+[family architecture](https://github.com/turlamai/keel/blob/main/docs/family-architecture.md).
 
 ## Module boundaries
 
