@@ -148,7 +148,7 @@
      (exn:fail:network
       (format "start-server: listener on port ~a did not start accepting within ~as"
               port listen-wait-secs)
-      (current-continuation-marks))))
+      (current-continuation-marks)))))
 
 ;; ---- dispatcher ----
 
