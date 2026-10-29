@@ -364,7 +364,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **GLZ1 bridge protocol** (`glaze/bridge`), the first slice of the 1.0
   runtime kernel (docs/architecture-1.0.md, and the working proposal for
-  the shared core in turinglambdaai/rivet#196):
+  the shared core in turlamai/rivet#196):
   - `GET /glaze/hello` — protocol version + route manifest, so a frontend
     that disagrees with the backend fails at connect time;
   - `POST /glaze/invoke` — a versioned request envelope
