@@ -138,11 +138,17 @@
          (loop)])))
   (unless accepting?
     (shutdown-server)
-    (raise-arguments-error
-     'start-server
-     (format "listener on port ~a did not start accepting within ~as" port listen-wait-secs)
-     "port"
-     port)))
+    ;; The web-server starts its accept loop asynchronously. A bind denial
+    ;; (including Windows ephemeral/excluded port ranges) arrives from that
+    ;; loop, and our startup probe observes only "not accepting". Report
+    ;; a *network* failure rather than a contract error: run-app's private
+    ;; free-port allocator retries exn:fail:network? with another candidate.
+    ;; A contract error would abort startup on the first unlucky port.
+    (raise
+     (exn:fail:network
+      (format "start-server: listener on port ~a did not start accepting within ~as"
+              port listen-wait-secs)
+      (current-continuation-marks))))
 
 ;; ---- dispatcher ----
 
