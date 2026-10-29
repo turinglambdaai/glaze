@@ -29,7 +29,7 @@ A Glaze application is @bold{native-GUI only}. If its native WebView cannot
 start, application startup fails with platform-specific installation or repair
 guidance. Glaze never substitutes a system-browser tab for the desktop window.
 
-The @hyperlink["https://github.com/turinglambdaai/glaze/blob/main/docs/getting-started.md"]{canonical first-app guide}
+The @hyperlink["https://github.com/turlamai/glaze/blob/main/docs/getting-started.md"]{canonical first-app guide}
 covers the generated @filepath{glaze.rktd}, typed Racket route, generated
 JavaScript caller, schema baseline, native-window verification and build.
 Generated startup belongs inside @racket[module+ main], not at the top level.
@@ -812,7 +812,7 @@ exposes @tt{glaze.hello()} / @tt{glaze.invoke(path, args, opts)} /
 message-handler transport (@secref["native-transport"]) dispatches the same
 envelopes through the WebView's message handler, with no TCP port.
 
-The protocol is aligned with @hyperlink["https://github.com/turinglambdaai/keel"]{keel},
+The protocol is aligned with @hyperlink["https://github.com/turlamai/keel"]{keel},
 the transport-neutral application contract shared with Rivet: every invoke
 response names its terminal @racket['outcome]
 (@racket["succeeded"] / @racket["failed"] / @racket["cancelled"] /

@@ -447,11 +447,11 @@ raco test glaze-test/
 
 ## Portfolio placement
 
-This is open-source infrastructure under the repository's existing LICENSE, not a product paywall or pricing authority. Portfolio decisions live in [PORTFOLIO](https://github.com/turlamai/turinglambdaai.github.io/blob/master/PORTFOLIO.md); product-specific commercial rules stay in the product repository.
+This is open-source infrastructure under the repository's existing LICENSE, not a product paywall or pricing authority. Portfolio decisions live in [PORTFOLIO](https://github.com/turlamai/turlamai.github.io/blob/master/PORTFOLIO.md); product-specific commercial rules stay in the product repository.
 
 ## Product delivery coordination
 
-The [family delivery standard](https://github.com/turlamai/turinglambdaai.github.io/blob/master/docs/PRODUCT-STANDARD.md) governs evidence and product handoff.
+The [family delivery standard](https://github.com/turlamai/turlamai.github.io/blob/master/docs/PRODUCT-STANDARD.md) governs evidence and product handoff.
 Keep the implementation queue in `docs/1.0-plan.md` and preserve this library's domain
 boundary. Products own interaction meaning, commercial policy and user data;
 do not add those policies to a framework facade.
@@ -459,4 +459,4 @@ do not add those policies to a framework facade.
 
 ## Documentation languages
 
-Default public entry points and technical references are English. Maintain complete Chinese README/getting-started user paths with reciprocal links; preserve commands, API names and protocol semantics. Update both languages when a public user path changes. Technical references remain one normative source; Chinese guides explain and link to them. Follow the [family language policy](https://github.com/turlamai/turinglambdaai.github.io/blob/master/docs/DOCUMENTATION-LANGUAGES.md). Historical internal notes need not all be translated.
+Default public entry points and technical references are English. Maintain complete Chinese README/getting-started user paths with reciprocal links; preserve commands, API names and protocol semantics. Update both languages when a public user path changes. Technical references remain one normative source; Chinese guides explain and link to them. Follow the [family language policy](https://github.com/turlamai/turlamai.github.io/blob/master/docs/DOCUMENTATION-LANGUAGES.md). Historical internal notes need not all be translated.

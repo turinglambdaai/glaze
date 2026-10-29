@@ -31,7 +31,7 @@
          install-command
          doctor-command)
 
-(define glaze-repo-url "https://github.com/turinglambdaai/glaze")
+(define glaze-repo-url "https://github.com/turlamai/glaze")
 (define legacy-pkg-names '("glaze-lib" "glaze-cli" "glaze-doc" "glaze-test"))
 (define glaze-pkg-names (cons "glaze" legacy-pkg-names))
 
