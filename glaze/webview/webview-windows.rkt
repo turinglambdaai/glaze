@@ -512,7 +512,10 @@
     (define text (wstr->string p))
     (when (string? text)
       (log "message: envelope received")
-      (native-transport-message! transport text))))
+      ;; WebView2 invokes this on a COM/FFI callback stack. Enqueuing via
+      ;; async-channel-put may yield inside Racket atomic mode and abort the
+      ;; process; stash here and forward from the full Racket pump thread.
+      (native-transport-message-deferred! transport text))))
 
 (struct native-wiring (transport env) #:transparent)
 
@@ -745,6 +748,11 @@
       (when (PeekMessageW msg #f 0 0 PM_REMOVE)
         (TranslateMessage msg)
         (DispatchMessageW msg))
+      ;; The same discipline as WKWebView: never invoke the blocking
+      ;; transport inbox from a COM callback stack.
+      (when native-transport
+        (for ([raw (in-list (native-transport-take-deferred! native-transport))])
+          (native-transport-message! native-transport raw)))
       (drain-deliveries! wv)
       (sleep 0.01)
       (pump-loop)))

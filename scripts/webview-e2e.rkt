@@ -210,7 +210,10 @@
    "glaze.on('conf-evt', function (data) { got.push(data && data.n); });"
    "var chain = Promise.resolve();"
    "chain = chain.then(function () {"
-   "  return glaze.hello().then(function (h) { rec('hello', h && h.commands >= 1); });"
+   "  return glaze.hello().then(function (h) {"
+   "    rec('hello', h && h.glz === 1 && Array.isArray(h.routes)"
+   "      && h.routes.some(function (r) { return r.path === '/api/ping'; }));"
+   "  });"
    "});"
    "chain = chain.then(function () {"
    "  return glaze.invoke('api/ping').then(function (v) { rec('ping', v && v.pong === true); });"
@@ -223,6 +226,17 @@
    "  return glaze.invoke('api/typed-echo', { word: 123 })"
    "    .then(function () { rec('typed-bad', false, 'resolved'); },"
    "          function (e) { rec('typed-bad', e && e.code === 'invalid-args', e && e.code); });"
+   "});"
+   "chain = chain.then(function () {"
+   "  var batch = [];"
+   "  for (var i = 0; i < 24; i++) {"
+   "    batch.push(glaze.invoke('api/typed-echo', { word: 'burst-' + i }));"
+   "  }"
+   "  return Promise.all(batch).then(function (values) {"
+   "    rec('burst', values.length === 24 && values.every(function (v, i) {"
+   "      return v && v.word === 'burst-' + i;"
+   "    }));"
+   "  });"
    "});"
    "chain = chain.then(function () {"
    "  var deltas = [];"
@@ -334,7 +348,7 @@
                (and (webview? ntw) (webview-last-error)))))
 (check! "hello: GLZ1 hello reports the command surface" (and conf-done? #t))
 (define results (unbox conf-results))
-(for ([step (in-list '(ping typed-ok typed-bad stream cancel events))])
+(for ([step (in-list '(hello ping typed-ok typed-bad burst stream cancel events))])
   (define r (and (hash? results) (hash-ref results step #f)))
   (check! (format "~a: page reports pass" step) (and (hash? r) (equal? (hash-ref r 'ok #f) #t)))
   (define detail (and (hash? r) (hash-ref r 'detail #f)))

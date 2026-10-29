@@ -290,20 +290,17 @@
     (serve!)))
 
 ;; "script-message-received::glz1" callback: (ucm, js_result, user_data).
-(define (native-message-callback ucm js-result _user-data)
-  ;; The wiring lookup keys on the UCM pointer — the stable per-window
-  ;; identity this callback is connected to. (An earlier revision keyed on
-  ;; js-result, which is a fresh object per message and never matched.)
-  (define wiring
-    (call-with-semaphore native-wirings-sema
-                         (lambda () (hash-ref native-wirings (cast ucm _pointer _uintptr) #f))))
-  (when wiring
-    (with-handlers ([exn:fail? (lambda (e) ((current-glaze-error-reporter) e "glz1:linux"))])
-      (define value (webkit_javascript_result_get_js_value js-result))
-      (when (and value (jsc_value_is_string value))
-        (define text (jsc_value_to_string value))
-        (when (string? text)
-          (native-transport-message! (native-wiring-transport wiring) text))))))
+(define (native-message-callback transport js-result)
+  ;; The per-window signal closure owns the transport. No semaphore or
+  ;; scheduler operation may run on the WebKitGTK FFI callback stack.
+  ;; Do not look up the UCM under native-wirings-sema here: a contended
+  ;; semaphore can deschedule Racket while the callback is atomic.
+  (with-handlers ([exn:fail? (lambda (e) ((current-glaze-error-reporter) e "glz1:linux"))])
+    (define value (webkit_javascript_result_get_js_value js-result))
+    (when (and value (jsc_value_is_string value))
+      (define text (jsc_value_to_string value))
+      (when (string? text)
+        (native-transport-message-deferred! transport text)))))
 
 ;; JavaScript snippets awaiting webkit_web_view_evaluate_javascript on the
 ;; window's pump thread: (cons view js-string).
@@ -316,12 +313,17 @@
         (webkit_web_view_evaluate_javascript (car v) (native-delivery-js (cdr v)) -1 #f #f #f #f #f))
       (loop))))
 
-(define (pump-loop wv)
+(define (pump-loop wv transport)
   (let loop ()
     (unless (unbox (lin:webview-closed?-box wv))
       ;; Non-blocking iteration of the shared default main context (the one
       ;; gtk_init installed); FALSE = don't block waiting for events.
       (g_main_context_iteration #f #f)
+      ;; Signal callbacks only stash GLZ1 payloads; moving them into the
+      ;; dispatcher must happen after the foreign stack has unwound.
+      (when transport
+        (for ([raw (in-list (native-transport-take-deferred! transport))])
+          (native-transport-message! transport raw)))
       (drain-deliveries! wv)
       (unless (and gtk_window_is_maximized (gtk_window_is_maximized (lin:webview-window wv)))
         (define current (raw-geometry wv))
@@ -452,7 +454,7 @@
     (native-wiring-put! (cast ucm _pointer _uintptr) wiring)
     (define msg-cptr
       (function-ptr (lambda (_ucm js-result _user-data)
-                      (native-message-callback _ucm js-result _user-data))
+                      (native-message-callback native-transport js-result))
                     (_fun _pointer _pointer _pointer -> _void)))
     (set! callback-ptrs (cons msg-cptr callback-ptrs))
     (define handler-id (g_signal_connect_data ucm "script-message-received::glz1" msg-cptr #f #f 0))
@@ -463,7 +465,7 @@
     (native-transport-set-deliver!
      native-transport
      (lambda (js) (async-channel-put (lin:webview-deliver-queue wv) (cons webview js)))))
-  (set-lin:webview-thread! wv (thread (lambda () (pump-loop wv))))
+  (set-lin:webview-thread! wv (thread (lambda () (pump-loop wv native-transport))))
   wv)
 
 (define (close wv)
