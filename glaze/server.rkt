@@ -144,11 +144,11 @@
     ;; a *network* failure rather than a contract error: run-app's private
     ;; free-port allocator retries exn:fail:network? with another candidate.
     ;; A contract error would abort startup on the first unlucky port.
-    (raise
-     (exn:fail:network
-      (format "start-server: listener on port ~a did not start accepting within ~as"
-              port listen-wait-secs)
-      (current-continuation-marks)))))
+    (raise (exn:fail:network
+            (format "start-server: listener on port ~a did not start accepting within ~as"
+                    port
+                    listen-wait-secs)
+            (current-continuation-marks)))))
 
 ;; ---- dispatcher ----
 
