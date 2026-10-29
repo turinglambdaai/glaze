@@ -52,6 +52,6 @@
     "glaze/webview/webview-windows.rkt"))
 
 (define pkg-desc "Build desktop apps with Racket backend and web frontend — a Tauri-like framework for Racket")
-(define pkg-authors '(turinglambdaai))
+(define pkg-authors '(turlamai))
 (define license 'MIT)
-(define repository "https://github.com/turinglambdaai/glaze")
+(define repository "https://github.com/turlamai/glaze")

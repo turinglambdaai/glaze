@@ -4,7 +4,7 @@
 
 **Human-first. Agent-native. Local by design. —— 为人而生，为 Agent 原生设计，本地优先。**
 
-[![CI](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turinglambdaai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.17.0-C15F3C)](CHANGELOG.md)
+[![CI](https://github.com/turlamai/glaze/actions/workflows/ci.yml/badge.svg)](https://github.com/turlamai/glaze/actions/workflows/ci.yml) ![Racket](https://img.shields.io/badge/Racket-9F1D20?logo=racket&logoColor=white) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Release](https://img.shields.io/badge/release-0.17.0-C15F3C)](CHANGELOG.md)
 
 [English](README.md) · **中文**
 
@@ -142,7 +142,7 @@ raco glaze dev
 
 > 想直接从 GitHub 检出安装而不走包索引？
 > ```bash
-> git clone https://github.com/turinglambdaai/glaze.git
+> git clone https://github.com/turlamai/glaze.git
 > cd glaze
 > raco pkg install --auto --link "$PWD"
 > ```
@@ -200,7 +200,7 @@ raco glaze build --name myapp --sign 40HEXCHARS --installer
 
 ### 产品权益授权
 
-产品许可证有意放在 Glaze 框架边界之外。需要离线可验证商业权益的应用可以将 Glaze 与 [Permit](https://github.com/turinglambdaai/permit) 或其他独立权益库组合使用；Glaze 本身不依赖它。需要在线结账、支付事件处理或凭证交付时，产品还可以把 [Commerce](https://github.com/turinglambdaai/commerce) 作为独立的产品/服务层依赖；手工销售与完全离线产品不需要 Commerce。支付渠道密钥、Commerce 密钥、Permit 权益签名、Glaze 更新签名和平台代码签名始终分属不同职责与信任域。
+产品许可证有意放在 Glaze 框架边界之外。需要离线可验证商业权益的应用可以将 Glaze 与 [Permit](https://github.com/turlamai/permit) 或其他独立权益库组合使用；Glaze 本身不依赖它。需要在线结账、支付事件处理或凭证交付时，产品还可以把 [Commerce](https://github.com/turlamai/commerce) 作为独立的产品/服务层依赖；手工销售与完全离线产品不需要 Commerce。支付渠道密钥、Commerce 密钥、Permit 权益签名、Glaze 更新签名和平台代码签名始终分属不同职责与信任域。
 
 ## 项目结构
 

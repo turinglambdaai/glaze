@@ -28,6 +28,6 @@ Technical references retain one normative meaning. Chinese onboarding explains a
 
 Record the package versions and platforms your application actually tests. Read CHANGELOG and compatibility contracts before upgrading, test user-data migration on copies and retain a recoverable version. A library does not supply your product’s database backup, publisher identity, refunds, account recovery or privacy policy. Example customer/offer identifiers and amounts are fixtures, not live offers.
 
-Use [Issues](https://github.com/turinglambdaai/glaze/issues) in English or Chinese. Include package/commit, Racket version, OS/architecture, a minimal reproduction and the first redacted error. Never attach real keys, customer credentials, raw payment data or private documents. Community support has no guaranteed response time.
+Use [Issues](https://github.com/turlamai/glaze/issues) in English or Chinese. Include package/commit, Racket version, OS/architecture, a minimal reproduction and the first redacted error. Never attach real keys, customer credentials, raw payment data or private documents. Community support has no guaranteed response time.
 
 [Current licence](../LICENSE) · [CHANGELOG](../CHANGELOG.md)

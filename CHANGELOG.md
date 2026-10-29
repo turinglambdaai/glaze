@@ -152,7 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed the built-in RSA product-licensing module and the `raco glaze keygen` /
   `raco glaze license` commands. Product entitlement is deliberately outside
   Glaze's framework boundary; applications may compose with
-  [Permit](https://github.com/turinglambdaai/permit) or another independent
+  [Permit](https://github.com/turlamai/permit) or another independent
   entitlement library instead of framework-owned business policy. Glaze does
   not depend on Permit.
 
@@ -337,7 +337,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **keel integration** — glaze is the first consumer of
-  [keel](https://github.com/turinglambdaai/keel), the transport-neutral
+  [keel](https://github.com/turlamai/keel), the transport-neutral
   application contract shared with Rivet:
   - the app lifecycle state machine validates every transition against
     keel's lifecycle contract; every exit (startup and on-ready failures
