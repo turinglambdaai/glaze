@@ -225,6 +225,17 @@
    "          function (e) { rec('typed-bad', e && e.code === 'invalid-args', e && e.code); });"
    "});"
    "chain = chain.then(function () {"
+   "  var batch = [];"
+   "  for (var i = 0; i < 24; i++) {"
+   "    batch.push(glaze.invoke('api/typed-echo', { word: 'burst-' + i }));"
+   "  }"
+   "  return Promise.all(batch).then(function (values) {"
+   "    rec('burst', values.length === 24 && values.every(function (v, i) {"
+   "      return v && v.word === 'burst-' + i;"
+   "    }));"
+   "  });"
+   "});"
+   "chain = chain.then(function () {"
    "  var deltas = [];"
    "  return glaze.invokeStream('api/stream', {},"
    "    { onDelta: function (t) { deltas.push(t); } })"
@@ -334,7 +345,7 @@
                (and (webview? ntw) (webview-last-error)))))
 (check! "hello: GLZ1 hello reports the command surface" (and conf-done? #t))
 (define results (unbox conf-results))
-(for ([step (in-list '(ping typed-ok typed-bad stream cancel events))])
+(for ([step (in-list '(ping typed-ok typed-bad burst stream cancel events))])
   (define r (and (hash? results) (hash-ref results step #f)))
   (check! (format "~a: page reports pass" step) (and (hash? r) (equal? (hash-ref r 'ok #f) #t)))
   (define detail (and (hash? r) (hash-ref r 'detail #f)))
