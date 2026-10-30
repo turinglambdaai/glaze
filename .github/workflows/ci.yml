@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -40,6 +44,7 @@ jobs:
             glaze-doc/scribblings/glaze.scrbl
 
       - name: Check formatting
+        if: matrix.os == 'ubuntu-24.04' && matrix.racket-version == '9.3'
         shell: bash
         run: |
           raco pkg install --auto --no-docs fmt
