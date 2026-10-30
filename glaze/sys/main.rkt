@@ -81,18 +81,20 @@
 
 ;; ---- single instance ----
 
-;; Adjudicate "am I the first instance of app-id?" without leaving files
-;; behind: derive a deterministic TCP port from the id and hold a listener
-;; on it for the process lifetime. The second instance's bind fails.
-;; Returns #t for the first instance, #f if another process already holds
-;; the lock. (A firewall prompt is possible on first run on some systems.)
+;; Adjudicate "am I the first instance of app-id?" without leaving
+;; stale files. Windows uses a kernel mutex in the interactive session:
+;; selecting an arbitrary port in the Windows excluded dynamic range can
+;; fail even when no other instance exists. The other OSes retain their
+;; existing, compatibility-tested per-process TCP lock for this slice.
 (define (single-instance? app-id)
-  (define h (equal-hash-code app-id))
-  (define port (+ 49152 (modulo h 16384)))
-  (with-handlers ([exn:fail:network? (lambda (e) #f)])
-    (define cust (make-custodian))
-    (parameterize ([current-custodian cust])
-      (tcp-listen port 1 #f "127.0.0.1"))
-    #t))
+  (if (eq? (system-type 'os) 'windows)
+      ((dynamic-require 'glaze/sys/sys-windows 'windows-single-instance?) app-id)
+      (let ([h (equal-hash-code app-id)])
+        (define port (+ 49152 (modulo h 16384)))
+        (with-handlers ([exn:fail:network? (lambda (e) #f)])
+          (define cust (make-custodian))
+          (parameterize ([current-custodian cust])
+            (tcp-listen port 1 #f "127.0.0.1"))
+          #t))))
 
 (require racket/tcp)

@@ -9,6 +9,7 @@
 ;; its own attribution can register an AUMID and swap it in.
 
 (require ffi/unsafe
+         file/sha1
          racket/file
          racket/string
          racket/system)
@@ -18,7 +19,8 @@
          clipboard-get
          notify!
          open-path
-         reveal-path)
+         reveal-path
+         windows-single-instance?)
 
 (define user32 (ffi-lib "user32"))
 (define kernel32 (ffi-lib "kernel32"))
@@ -166,3 +168,50 @@
 (define (reveal-path p)
   (define e (find-executable-path "explorer.exe"))
   (and e (system* e "/select," p)))
+
+;; A native GUI in production does not require opening a TCP listener just
+;; to enforce one instance. Windows reserves blocks of the dynamic TCP port
+;; range for Hyper-V, WSL and system components; the old port-derived lock
+;; misreported "another instance" on a clean machine. Use a session-scoped
+;; named kernel mutex instead. Its handle lives until process exit, releasing
+;; the claim even after a hard crash (unlike a stale lock file).
+;;
+;; The name is a deterministic SHA1 of app-id, not user data. The Local\
+;; namespace deliberately allows one app per interactive logon session.
+;; Security note: the existence of a mutex is an instance signal, not an
+;; authentication or entitlement trust boundary.
+(define CreateMutexW
+  (get-ffi-obj "CreateMutexW"
+               kernel32
+               (_fun #:save-errno 'windows _pointer _bool _pointer -> _pointer)))
+(define CloseHandle (get-ffi-obj "CloseHandle" kernel32 (_fun _pointer -> _bool)))
+(define ERROR_ALREADY_EXISTS 183)
+(define instance-mutex-lock (make-semaphore 1))
+(define instance-mutex-handles (make-hash))
+
+(define (windows-single-instance? app-id)
+  (unless (string? app-id)
+    (raise-argument-error 'windows-single-instance? "string?" app-id))
+  (call-with-semaphore instance-mutex-lock
+                       (lambda ()
+                         (cond
+                           [(hash-has-key? instance-mutex-handles app-id) #f]
+                           [else
+                            (define digest (sha1 (open-input-bytes (string->bytes/utf-8 app-id))))
+                            (define name (string-append "Local\\Glaze-" digest))
+                            (define handle (CreateMutexW #f #f (wstr name)))
+                            ;; GetLastError must be captured immediately after the foreign call.
+                            ;; Racket's FFI stores it via #:save-errno 'windows.
+                            (define err (saved-errno))
+                            (cond
+                              [(not handle)
+                               (error 'windows-single-instance?
+                                      "CreateMutexW failed for app-id ~s (Windows error ~a)"
+                                      app-id
+                                      err)]
+                              [(= err ERROR_ALREADY_EXISTS)
+                               (CloseHandle handle)
+                               #f]
+                              [else
+                               (hash-set! instance-mutex-handles app-id handle)
+                               #t])]))))
