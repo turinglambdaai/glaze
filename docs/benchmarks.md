@@ -74,8 +74,10 @@ results independently of Glaze code. To compare meaningfully:
 - run several samples and compare medians, not single runs;
 - establish release thresholds only on dedicated hardware with history.
 
-The CI records one baseline JSON per runner and revision as informational
-evidence; the measured values have no pass/fail thresholds, so runner
-variance cannot reject a pull request. Once enough history exists on
+The dedicated `Performance Baseline` workflow records JSON reports once a
+week and via manual dispatch (`.github/workflows/performance-baseline.yml`).
+The standard PR CI avoids these informational measurements on every commit.
+The measured values have no pass/fail thresholds, so shared runner variance
+cannot reject a pull request. Once enough history exists on
 stable hardware, selected metrics can be promoted to guarded thresholds
 without redesigning the harness.
